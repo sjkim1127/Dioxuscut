@@ -110,11 +110,24 @@ jobs:
 
           version="${GITHUB_REF_NAME#v}"
 
+          crate_is_published() {
+            local package="$1"
+            curl \
+              --fail \
+              --silent \
+              --show-error \
+              --location \
+              --max-time 15 \
+              --user-agent "Dioxuscut-release/${version} (+https://github.com/sjkim1127/Dioxuscut)" \
+              "https://crates.io/api/v1/crates/${package}/${version}" \
+              >/dev/null 2>&1
+          }
+
           publish_package() {
             local package="$1"
 
             for attempt in $(seq 1 18); do
-              if cargo info "${package}@${version}" >/dev/null 2>&1; then
+              if crate_is_published "$package"; then
                 echo "${package}@${version} is already published; skipping"
                 return 0
               fi
