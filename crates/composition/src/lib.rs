@@ -1,5 +1,12 @@
 //! Shared native composition contract and built-in composition registry.
 
+mod scene_emitter;
+
+pub use scene_emitter::{
+    SceneEmitter, SceneEmitterComposition, SceneFrameContext, SceneFreeze, SceneGroup,
+    SceneSequence, SceneStack,
+};
+
 use dioxuscut_rasterizer::{Color, GradientStop, Scene, SceneNode};
 use serde_json::Value;
 use std::collections::BTreeMap;
