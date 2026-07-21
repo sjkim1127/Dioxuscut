@@ -38,6 +38,12 @@ async fn rhai_example_renders_a_real_mp4() {
         fps: 30.0,
         duration: 3,
         backend: RenderBackend::Native,
+        codec: dioxuscut_cli::RenderCodec::H264,
+        frame_start: 0,
+        frame_end: None,
+        timeout_seconds: None,
+        crf: 18,
+        preset: "fast".into(),
     };
 
     execute_render_command(&request).await.unwrap();

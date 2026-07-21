@@ -199,6 +199,12 @@ async fn rhai_media_nodes_flow_through_the_cli_renderer() {
         fps: 5.0,
         duration: 5,
         backend: RenderBackend::Native,
+        codec: dioxuscut_cli::RenderCodec::H264,
+        frame_start: 0,
+        frame_end: None,
+        timeout_seconds: None,
+        crf: 18,
+        preset: "fast".into(),
     })
     .await
     .unwrap();

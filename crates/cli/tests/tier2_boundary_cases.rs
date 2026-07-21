@@ -140,6 +140,12 @@ async fn test_boundary_malformed_props_fail_before_rendering() {
         fps: 30.0,
         duration: 1,
         backend: RenderBackend::Native,
+        codec: dioxuscut_cli::RenderCodec::H264,
+        frame_start: 0,
+        frame_end: None,
+        timeout_seconds: None,
+        crf: 18,
+        preset: "fast".into(),
     };
 
     let error = execute_render_command(&request).await.unwrap_err();
@@ -162,6 +168,12 @@ async fn test_boundary_missing_audio_fails_before_rendering() {
         fps: 30.0,
         duration: 1,
         backend: RenderBackend::Native,
+        codec: dioxuscut_cli::RenderCodec::H264,
+        frame_start: 0,
+        frame_end: None,
+        timeout_seconds: None,
+        crf: 18,
+        preset: "fast".into(),
     };
 
     let error = execute_render_command(&request).await.unwrap_err();

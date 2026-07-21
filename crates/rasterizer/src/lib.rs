@@ -43,8 +43,9 @@ pub use font::{
 };
 pub use render::{
     build_pipe_ffmpeg_args, render_all_frames, render_frame_timed, render_parallel,
-    render_to_ffmpeg_pipe, render_to_ffmpeg_pipe_fallible, save_frame, NativeRenderConfig,
-    PipeConfig,
+    render_still_fallible, render_to_ffmpeg_pipe, render_to_ffmpeg_pipe_fallible, save_frame,
+    NativeRenderConfig, PipeConfig, RenderCancellationToken, RenderControl, RenderProgress,
+    StillImageFormat, VideoCodec,
 };
 pub use scene::{
     AudioTrack, BlendMode, ClipRegion, Color, GradientStop, ImageFit, MaskMode, Scene, SceneFilter,

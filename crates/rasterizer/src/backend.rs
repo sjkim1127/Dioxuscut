@@ -21,6 +21,10 @@ pub enum RasterError {
     FontAsset { path: String, reason: String },
     #[error("Scene compositing error: {0}")]
     Scene(String),
+    #[error("Render cancelled")]
+    Cancelled,
+    #[error("Render timed out")]
+    Timeout,
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }

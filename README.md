@@ -28,7 +28,9 @@ The repository also contains Dioxus timeline, media, shape, transition, player, 
 - Shared native composition contract for CLI export and Dioxus Player/Studio preview.
 - Composable `SceneEmitter` adapters for media, procedural shapes, kinetic captions, fitted multiline text, fades, slides, sequences, freezes, and composited layers.
 - Player media synchronization for seek, pause/play, buffering, volume, rate, looping, timeline offsets, and drift correction.
-- FFmpeg audio trim, timeline delay, volume, playback-rate, looping, multi-track mixing, and AAC muxing.
+- H.264, H.265, VP9, AV1, ProRes, and GIF video output plus direct PNG, JPEG, and WebP still rendering.
+- FFmpeg audio trim, timeline delay, volume, playback-rate, looping, and multi-track mixing with container-appropriate AAC, Opus, or PCM muxing.
+- Inclusive frame-range rendering, per-frame progress events, timeout control, and cancellation through the library API or CLI `Ctrl-C`.
 - Animation, shape, path, caption, noise, timeline, player, server, encoder, and CLI test coverage.
 - Dioxus web example and desktop Studio preview shell.
 
@@ -44,7 +46,7 @@ Native export
       -> TinySkiaBackend / WgpuBackend with CPU fallback
       -> bounded ordered RGBA batches
       -> FFmpeg + collected audio tracks
-      -> MP4
+      -> MP4 / WebM / MOV / GIF
 
 Dioxus native-scene preview
   CompositionHandle
@@ -84,7 +86,7 @@ Native compositions now share one `Scene` contract between preview and export. G
 ## Prerequisites
 
 - A current stable Rust toolchain.
-- FFmpeg available on `PATH` for MP4 output.
+- FFmpeg available on `PATH` for video and GIF output. Direct still rendering does not require FFmpeg.
 - A supported native GPU only when using `--backend gpu`.
 
 Install FFmpeg on common platforms:
@@ -137,7 +139,6 @@ cargo run -p dioxuscut-cli --features rhai -- render \
 ```
 
 Each script defines `fn render(ctx, props)`. The context contains `frame`,
-`width`, `height`, `fps`, `duration`, and normalized `progress`. The initial API
 exposes `scene()`, `rect`, `round_rect`, `circle`, `text`, `text_bold`, `text_font`, `text_box`, `image`,
 `video`, `audio`, `group`, and `interpolate`. Image and video nodes accept local
 paths or `file://` URIs and the fit values `cover`, `contain`, `fill`, `none`, and
@@ -222,7 +223,19 @@ dioxuscut render [OPTIONS] (--composition <ID> | --script <PATH>)
       --fps <FPS>              Finite positive FPS [default: 30]
       --duration <FRAMES>      Positive frame count [default: 150]
       --backend <BACKEND>      native or gpu [default: native]
+      --codec <CODEC>          h264, h265, vp9, av1, prores, gif, png, jpeg, or webp [default: h264]
+      --frame-start <FRAME>    First composition frame [default: 0]
+      --frame-end <FRAME>      Last composition frame, inclusive
+      --timeout-seconds <SEC>  Cancel after a positive timeout
+      --crf <VALUE>            H.264/H.265: 0-51; VP9/AV1: 0-63 [default: 18]
+      --preset <PRESET>        H.264/H.265 encoder preset [default: fast]
 ```
+
+The output extension must match the codec: `.mp4` for H.264/H.265, `.webm` for
+VP9/AV1, `.mov` for ProRes, and the matching extension for GIF or still images.
+Still codecs render `--frame-start` only; omit `--frame-end` or set it to the
+same frame. GIF and still outputs do not accept audio tracks. AV1 selects
+`libsvtav1` when available and otherwise uses `libaom-av1`.
 
 Build GPU support explicitly:
 
@@ -243,7 +256,9 @@ cargo check --locked --workspace --all-targets --all-features
 cargo test --locked --workspace --all-features
 ```
 
-The acceptance test requires FFmpeg and produces a real MP4 before checking its container signature.
+The render integration tests produce real H.264, H.265, VP9, AV1, ProRes, and
+GIF containers when their FFmpeg encoders are installed, and decode direct PNG,
+JPEG, and WebP still outputs.
 
 ## Releasing
 

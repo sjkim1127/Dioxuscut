@@ -4,7 +4,7 @@
 //! `--width`, `--height`, `--fps`, `--duration`, and `--backend`.
 
 use clap::Parser;
-use dioxuscut_cli::{Cli, Commands, RenderBackend};
+use dioxuscut_cli::{Cli, Commands, RenderBackend, RenderCodec};
 use std::path::PathBuf;
 
 #[test]
@@ -24,6 +24,12 @@ fn test_cli_flag_defaults() {
             fps,
             duration,
             backend,
+            codec,
+            frame_start,
+            frame_end,
+            timeout_seconds,
+            crf,
+            preset,
         } => {
             assert_eq!(composition, Some("HelloWorld".into()));
             assert_eq!(script, None);
@@ -35,6 +41,12 @@ fn test_cli_flag_defaults() {
             assert!((fps - 30.0).abs() < f64::EPSILON);
             assert_eq!(duration, 150);
             assert_eq!(backend, RenderBackend::Native);
+            assert_eq!(codec, RenderCodec::H264);
+            assert_eq!(frame_start, 0);
+            assert_eq!(frame_end, None);
+            assert_eq!(timeout_seconds, None);
+            assert_eq!(crf, 18);
+            assert_eq!(preset, "fast");
         }
     }
 }
@@ -76,6 +88,12 @@ fn test_cli_flag_custom_values() {
             fps,
             duration,
             backend,
+            codec,
+            frame_start,
+            frame_end,
+            timeout_seconds,
+            crf,
+            preset,
         } => {
             assert_eq!(composition, Some("CustomComposition".into()));
             assert_eq!(script, None);
@@ -87,6 +105,56 @@ fn test_cli_flag_custom_values() {
             assert!((fps - 60.0).abs() < f64::EPSILON);
             assert_eq!(duration, 300);
             assert_eq!(backend, RenderBackend::Native);
+            assert_eq!(codec, RenderCodec::H264);
+            assert_eq!(frame_start, 0);
+            assert_eq!(frame_end, None);
+            assert_eq!(timeout_seconds, None);
+            assert_eq!(crf, 18);
+            assert_eq!(preset, "fast");
+        }
+    }
+}
+
+#[test]
+fn test_cli_parses_codec_range_quality_and_timeout() {
+    let cli = Cli::try_parse_from([
+        "dioxuscut",
+        "render",
+        "-c",
+        "HelloWorld",
+        "-o",
+        "clip.webm",
+        "--codec",
+        "av1",
+        "--frame-start",
+        "12",
+        "--frame-end",
+        "23",
+        "--timeout-seconds",
+        "90",
+        "--crf",
+        "28",
+        "--preset",
+        "medium",
+    ])
+    .expect("Failed to parse render controls");
+
+    match cli.command {
+        Commands::Render {
+            codec,
+            frame_start,
+            frame_end,
+            timeout_seconds,
+            crf,
+            preset,
+            ..
+        } => {
+            assert_eq!(codec, RenderCodec::Av1);
+            assert_eq!(frame_start, 12);
+            assert_eq!(frame_end, Some(23));
+            assert_eq!(timeout_seconds, Some(90));
+            assert_eq!(crf, 28);
+            assert_eq!(preset, "medium");
         }
     }
 }

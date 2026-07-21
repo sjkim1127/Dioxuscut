@@ -34,12 +34,34 @@ pub enum ValidationError {
     AudioFileNotFound(PathBuf),
     #[error("Invalid resolution: width ({0}) and height ({1}) must be greater than 0")]
     InvalidZeroResolution(u32, u32),
-    #[error("Invalid resolution: width ({0}) and height ({1}) must be even numbers for H.264 video encoding")]
+    #[error(
+        "Invalid resolution: width ({0}) and height ({1}) must be even numbers for video encoding"
+    )]
     InvalidOddResolution(u32, u32),
     #[error("Invalid FPS: {0} must be a finite number greater than 0")]
     InvalidFps(String),
     #[error("Invalid duration: {0} must be greater than 0 frames")]
     InvalidDuration(u32),
+    #[error("Invalid frame range: start {start}, end {end}, composition duration {duration}")]
+    InvalidFrameRange { start: u32, end: u32, duration: u32 },
+    #[error("Output extension '.{actual}' is invalid for {codec}; expected {expected}")]
+    InvalidOutputExtension {
+        codec: String,
+        actual: String,
+        expected: String,
+    },
+    #[error("Audio tracks are not supported for {0} output")]
+    AudioNotSupported(String),
+    #[error("Timeout must be greater than zero seconds")]
+    InvalidTimeout,
+    #[error("Invalid CRF {value} for {codec}; expected {range}")]
+    InvalidCrf {
+        codec: String,
+        value: u32,
+        range: String,
+    },
+    #[error("Invalid encoder preset '{0}'; expected ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow, or placebo")]
+    InvalidPreset(String),
 }
 
 /// Native render backend selection.
@@ -52,6 +74,57 @@ pub enum RenderBackend {
     Gpu,
 }
 
+/// Output codec or still-image format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
+pub enum RenderCodec {
+    #[default]
+    H264,
+    H265,
+    Vp9,
+    Av1,
+    #[value(name = "prores", alias = "pro-res")]
+    ProRes,
+    Gif,
+    Png,
+    Jpeg,
+    Webp,
+}
+
+impl RenderCodec {
+    fn still_format(self) -> Option<dioxuscut_rasterizer::StillImageFormat> {
+        match self {
+            Self::Png => Some(dioxuscut_rasterizer::StillImageFormat::Png),
+            Self::Jpeg => Some(dioxuscut_rasterizer::StillImageFormat::Jpeg),
+            Self::Webp => Some(dioxuscut_rasterizer::StillImageFormat::WebP),
+            _ => None,
+        }
+    }
+
+    fn video_codec(self) -> Option<dioxuscut_rasterizer::VideoCodec> {
+        match self {
+            Self::H264 => Some(dioxuscut_rasterizer::VideoCodec::H264),
+            Self::H265 => Some(dioxuscut_rasterizer::VideoCodec::H265),
+            Self::Vp9 => Some(dioxuscut_rasterizer::VideoCodec::Vp9),
+            Self::Av1 => Some(dioxuscut_rasterizer::VideoCodec::Av1),
+            Self::ProRes => Some(dioxuscut_rasterizer::VideoCodec::ProRes),
+            Self::Gif => Some(dioxuscut_rasterizer::VideoCodec::Gif),
+            Self::Png | Self::Jpeg | Self::Webp => None,
+        }
+    }
+
+    fn extensions(self) -> &'static [&'static str] {
+        match self {
+            Self::H264 | Self::H265 => &["mp4"],
+            Self::Vp9 | Self::Av1 => &["webm"],
+            Self::ProRes => &["mov"],
+            Self::Gif => &["gif"],
+            Self::Png => &["png"],
+            Self::Jpeg => &["jpg", "jpeg"],
+            Self::Webp => &["webp"],
+        }
+    }
+}
+
 /// Dioxuscut CLI — render registered Rust or Rhai compositions to video.
 #[derive(Parser, Debug, Clone, PartialEq)]
 #[command(author, version, about, long_about = None)]
@@ -62,7 +135,7 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug, Clone, PartialEq)]
 pub enum Commands {
-    /// Render a registered Rust composition or Rhai script to a video file.
+    /// Render a registered Rust composition or Rhai script to a media file.
     Render {
         /// ID of the composition to render.
         #[arg(
@@ -85,7 +158,7 @@ pub enum Commands {
         #[arg(long, short)]
         props: Option<PathBuf>,
 
-        /// Output video file path.
+        /// Output media file path.
         #[arg(long, short, default_value = "out.mp4")]
         output: PathBuf,
 
@@ -112,6 +185,30 @@ pub enum Commands {
         /// Rendering backend.
         #[arg(long, value_enum, default_value_t = RenderBackend::Native)]
         backend: RenderBackend,
+
+        /// Video codec or still-image output format.
+        #[arg(long, value_enum, default_value_t = RenderCodec::H264)]
+        codec: RenderCodec,
+
+        /// First composition frame to render.
+        #[arg(long, default_value_t = 0)]
+        frame_start: u32,
+
+        /// Last composition frame to render, inclusive.
+        #[arg(long)]
+        frame_end: Option<u32>,
+
+        /// Abort the render after this many seconds.
+        #[arg(long)]
+        timeout_seconds: Option<u64>,
+
+        /// Codec quality value. Lower is generally higher quality.
+        #[arg(long, default_value_t = 18)]
+        crf: u32,
+
+        /// FFmpeg encoder preset for H.264 and H.265.
+        #[arg(long, default_value = "fast")]
+        preset: String,
     },
 }
 
@@ -128,6 +225,12 @@ pub struct RenderRequest {
     pub fps: f64,
     pub duration: u32,
     pub backend: RenderBackend,
+    pub codec: RenderCodec,
+    pub frame_start: u32,
+    pub frame_end: Option<u32>,
+    pub timeout_seconds: Option<u64>,
+    pub crf: u32,
+    pub preset: String,
 }
 
 /// Validates that a render request selects exactly one available composition source.
@@ -158,6 +261,27 @@ pub fn validate_render_params(
     fps: f64,
     duration: u32,
 ) -> Result<(), ValidationError> {
+    validate_render_params_for_codec(
+        composition,
+        props,
+        width,
+        height,
+        fps,
+        duration,
+        RenderCodec::H264,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_render_params_for_codec(
+    composition: &str,
+    props: Option<&PathBuf>,
+    width: u32,
+    height: u32,
+    fps: f64,
+    duration: u32,
+    codec: RenderCodec,
+) -> Result<(), ValidationError> {
     if composition.trim().is_empty() {
         return Err(ValidationError::EmptyComposition);
     }
@@ -169,7 +293,15 @@ pub fn validate_render_params(
     if width == 0 || height == 0 {
         return Err(ValidationError::InvalidZeroResolution(width, height));
     }
-    if !width.is_multiple_of(2) || !height.is_multiple_of(2) {
+    let requires_even_dimensions = matches!(
+        codec,
+        RenderCodec::H264
+            | RenderCodec::H265
+            | RenderCodec::Vp9
+            | RenderCodec::Av1
+            | RenderCodec::ProRes
+    );
+    if requires_even_dimensions && (!width.is_multiple_of(2) || !height.is_multiple_of(2)) {
         return Err(ValidationError::InvalidOddResolution(width, height));
     }
     if !fps.is_finite() || fps <= 0.0 {
@@ -181,10 +313,98 @@ pub fn validate_render_params(
     Ok(())
 }
 
+fn validate_render_options(request: &RenderRequest) -> Result<(u32, u32), ValidationError> {
+    let end = request.frame_end.unwrap_or_else(|| {
+        if request.codec.still_format().is_some() {
+            request.frame_start
+        } else {
+            request.duration.saturating_sub(1)
+        }
+    });
+    if request.frame_start > end || end >= request.duration {
+        return Err(ValidationError::InvalidFrameRange {
+            start: request.frame_start,
+            end,
+            duration: request.duration,
+        });
+    }
+    if request.timeout_seconds == Some(0) {
+        return Err(ValidationError::InvalidTimeout);
+    }
+    if request.codec.still_format().is_some() && end != request.frame_start {
+        return Err(ValidationError::InvalidFrameRange {
+            start: request.frame_start,
+            end,
+            duration: request.duration,
+        });
+    }
+    let max_crf = match request.codec {
+        RenderCodec::H264 | RenderCodec::H265 => Some(51),
+        RenderCodec::Vp9 | RenderCodec::Av1 => Some(63),
+        RenderCodec::ProRes
+        | RenderCodec::Gif
+        | RenderCodec::Png
+        | RenderCodec::Jpeg
+        | RenderCodec::Webp => None,
+    };
+    if max_crf.is_some_and(|max| request.crf > max) {
+        return Err(ValidationError::InvalidCrf {
+            codec: format!("{:?}", request.codec),
+            value: request.crf,
+            range: format!("0..={}", max_crf.expect("checked above")),
+        });
+    }
+    if matches!(request.codec, RenderCodec::H264 | RenderCodec::H265)
+        && !matches!(
+            request.preset.as_str(),
+            "ultrafast"
+                | "superfast"
+                | "veryfast"
+                | "faster"
+                | "fast"
+                | "medium"
+                | "slow"
+                | "slower"
+                | "veryslow"
+                | "placebo"
+        )
+    {
+        return Err(ValidationError::InvalidPreset(request.preset.clone()));
+    }
+    let actual = request
+        .output
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let expected = request.codec.extensions();
+    if !expected.contains(&actual.as_str()) {
+        return Err(ValidationError::InvalidOutputExtension {
+            codec: format!("{:?}", request.codec),
+            actual,
+            expected: expected.join(" or ."),
+        });
+    }
+    if !request.audio.is_empty()
+        && (request.codec.still_format().is_some() || request.codec == RenderCodec::Gif)
+    {
+        return Err(ValidationError::AudioNotSupported(format!(
+            "{:?}",
+            request.codec
+        )));
+    }
+    Ok((request.frame_start, end))
+}
+
 /// Execute a render using the compositions shipped with the standalone CLI.
 pub async fn execute_render_command(request: &RenderRequest) -> anyhow::Result<()> {
     let registry = built_in_registry();
-    execute_render_command_with_registry(request, &registry).await
+    execute_render_command_with_registry_and_control(
+        request,
+        &registry,
+        default_render_control(request),
+    )
+    .await
 }
 
 /// Execute a render using an application-provided composition registry.
@@ -192,15 +412,64 @@ pub async fn execute_render_command_with_registry(
     request: &RenderRequest,
     registry: &CompositionRegistry,
 ) -> anyhow::Result<()> {
+    execute_render_command_with_registry_and_control(
+        request,
+        registry,
+        default_render_control(request),
+    )
+    .await
+}
+
+/// Build the standard CLI progress and timeout controls for a render request.
+pub fn default_render_control(request: &RenderRequest) -> dioxuscut_rasterizer::RenderControl {
+    let mut control = dioxuscut_rasterizer::RenderControl::new().with_progress(|progress| {
+        let total = u64::from(progress.total_frames.max(1));
+        let completed = u64::from(progress.completed_frames);
+        let percent = completed.saturating_mul(100) / total;
+        let previous_percent = completed.saturating_sub(1).saturating_mul(100) / total;
+        if completed == 1 || completed == total || percent != previous_percent {
+            tracing::info!(
+                completed = progress.completed_frames,
+                total = progress.total_frames,
+                frame = progress.frame,
+                percent,
+                "Render progress"
+            );
+        }
+    });
+    if let Some(seconds) = request.timeout_seconds {
+        control = control.with_timeout(std::time::Duration::from_secs(seconds));
+    }
+    control
+}
+
+/// Execute a render with caller-owned progress, cancellation, and timeout controls.
+pub async fn execute_render_command_with_control(
+    request: &RenderRequest,
+    control: dioxuscut_rasterizer::RenderControl,
+) -> anyhow::Result<()> {
+    let registry = built_in_registry();
+    execute_render_command_with_registry_and_control(request, &registry, control).await
+}
+
+/// Execute an application-provided composition registry with caller-owned controls.
+pub async fn execute_render_command_with_registry_and_control(
+    request: &RenderRequest,
+    registry: &CompositionRegistry,
+    control: dioxuscut_rasterizer::RenderControl,
+) -> anyhow::Result<()> {
     validate_composition_source(request.composition.as_deref(), request.script.as_ref())?;
-    validate_render_params(
+    validate_render_params_for_codec(
         request.composition.as_deref().unwrap_or("RhaiScript"),
         request.props.as_ref(),
         request.width,
         request.height,
         request.fps,
         request.duration,
+        request.codec,
     )?;
+    let (frame_start, frame_end) = validate_render_options(request)?;
+    let frame_count = frame_end - frame_start + 1;
     for path in &request.audio {
         if !path.is_file() {
             return Err(ValidationError::AudioFileNotFound(path.clone()).into());
@@ -273,27 +542,48 @@ pub async fn execute_render_command_with_registry(
     tracing::info!(
         composition = composition.id(),
         backend = ?request.backend,
+        codec = ?request.codec,
+        frame_start,
+        frame_end,
         "Starting browser-free native render"
     );
 
     match request.backend {
         RenderBackend::Native => {
             use dioxuscut_rasterizer::{
-                render_to_ffmpeg_pipe_fallible, PipeConfig, TinySkiaBackend,
+                render_still_fallible, render_to_ffmpeg_pipe_fallible, PipeConfig, TinySkiaBackend,
             };
 
             let rasterizer = TinySkiaBackend::new();
-            let pipe_config = PipeConfig::new(
-                request.width,
-                request.height,
-                request.fps,
-                request.duration,
-                &request.output,
-            )
-            .with_audio_tracks(audio_tracks.clone());
-            render_to_ffmpeg_pipe_fallible(&rasterizer, &pipe_config, |frame| {
-                prepared.render(frame)
-            })?;
+            if let Some(format) = request.codec.still_format() {
+                render_still_fallible(
+                    &rasterizer,
+                    request.width,
+                    request.height,
+                    request.fps,
+                    frame_start,
+                    &request.output,
+                    format,
+                    &control,
+                    |frame| prepared.render(frame),
+                )?;
+            } else {
+                let pipe_config = PipeConfig::new(
+                    request.width,
+                    request.height,
+                    request.fps,
+                    frame_count,
+                    &request.output,
+                )
+                .with_frame_start(frame_start)
+                .with_codec(request.codec.video_codec().expect("video codec validated"))
+                .with_quality(request.crf, &request.preset)
+                .with_audio_tracks(audio_tracks.clone())
+                .with_control(control.clone());
+                render_to_ffmpeg_pipe_fallible(&rasterizer, &pipe_config, |frame| {
+                    prepared.render(frame)
+                })?;
+            }
         }
         RenderBackend::Gpu => {
             #[cfg(not(feature = "gpu"))]
@@ -305,22 +595,40 @@ pub async fn execute_render_command_with_registry(
             #[cfg(feature = "gpu")]
             {
                 use dioxuscut_rasterizer::{
-                    render_to_ffmpeg_pipe_fallible, PipeConfig, WgpuBackend,
+                    render_still_fallible, render_to_ffmpeg_pipe_fallible, PipeConfig, WgpuBackend,
                 };
 
                 let rasterizer = WgpuBackend::new()
                     .map_err(|error| anyhow::anyhow!("GPU backend init failed: {error}"))?;
-                let pipe_config = PipeConfig::new(
-                    request.width,
-                    request.height,
-                    request.fps,
-                    request.duration,
-                    &request.output,
-                )
-                .with_audio_tracks(audio_tracks.clone());
-                render_to_ffmpeg_pipe_fallible(&rasterizer, &pipe_config, |frame| {
-                    prepared.render(frame)
-                })?;
+                if let Some(format) = request.codec.still_format() {
+                    render_still_fallible(
+                        &rasterizer,
+                        request.width,
+                        request.height,
+                        request.fps,
+                        frame_start,
+                        &request.output,
+                        format,
+                        &control,
+                        |frame| prepared.render(frame),
+                    )?;
+                } else {
+                    let pipe_config = PipeConfig::new(
+                        request.width,
+                        request.height,
+                        request.fps,
+                        frame_count,
+                        &request.output,
+                    )
+                    .with_frame_start(frame_start)
+                    .with_codec(request.codec.video_codec().expect("video codec validated"))
+                    .with_quality(request.crf, &request.preset)
+                    .with_audio_tracks(audio_tracks.clone())
+                    .with_control(control.clone());
+                    render_to_ffmpeg_pipe_fallible(&rasterizer, &pipe_config, |frame| {
+                        prepared.render(frame)
+                    })?;
+                }
             }
         }
     }

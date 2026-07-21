@@ -42,6 +42,12 @@ async fn test_tier4_real_world_acceptance_scenario() {
         fps: 30.0,
         duration: 60,
         backend: RenderBackend::Native,
+        codec: dioxuscut_cli::RenderCodec::H264,
+        frame_start: 0,
+        frame_end: None,
+        timeout_seconds: None,
+        crf: 18,
+        preset: "fast".into(),
     };
     let result = execute_render_command(&request).await;
 
