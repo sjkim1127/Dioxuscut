@@ -26,6 +26,7 @@ The repository also contains Dioxus timeline, media, shape, transition, player, 
 - Cached FFprobe metadata and persistent, bounded FFmpeg rawvideo decoder sessions.
 - Registry-based Rust compositions and optional sandboxed Rhai compositions, both with JSON props.
 - Shared native composition contract for CLI export and Dioxus Player/Studio preview.
+- Player media synchronization for seek, pause/play, buffering, volume, rate, looping, timeline offsets, and drift correction.
 - FFmpeg audio trim, timeline delay, volume, playback-rate, looping, multi-track mixing, and AAC muxing.
 - Animation, shape, path, caption, noise, timeline, player, server, encoder, and CLI test coverage.
 - Dioxus web example and desktop Studio preview shell.
@@ -267,7 +268,7 @@ written into workflow files.
 
 1. Migrate reusable Dioxus media, shape, caption, and transition components onto the shared Scene contract.
 2. Explicit font assets and fallback chains for reproducible text.
-3. Frame-accurate Player video/audio synchronization with buffering and drift correction.
+3. Scene clipping, masks, blend modes, shadows, and filter compositing.
 4. Full GPU parity for paths, text, media, groups, strokes, and multi-stop gradients.
 5. Studio project loading, media editing, and render queue integration.
 

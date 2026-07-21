@@ -22,6 +22,7 @@
 
 use dioxus::prelude::*;
 use dioxuscut_core::Composition;
+use std::time::{Duration, Instant};
 
 use crate::controls::Controls;
 
@@ -55,6 +56,16 @@ struct PlayerState {
     frame: u32,
     playing: bool,
     duration: u32,
+    playback_started_at: Option<Instant>,
+    playback_started_frame: u32,
+    playback_cycle: u64,
+    seek_revision: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PlayerPlaybackState {
+    pub playing: bool,
+    pub seek_revision: u64,
 }
 
 /// Interactive video player component.
@@ -68,10 +79,15 @@ pub fn Player(props: PlayerProps) -> Element {
     let loop_playback = props.loop_playback;
     let tick_duration = frame_duration(fps);
 
+    let initial_frame = props.initial_frame.min(duration.saturating_sub(1));
     let mut state = use_signal(|| PlayerState {
-        frame: props.initial_frame,
+        frame: initial_frame,
         playing: false,
         duration,
+        playback_started_at: None,
+        playback_started_frame: initial_frame,
+        playback_cycle: 0,
+        seek_revision: 0,
     });
 
     // Advance frame on each animation tick when playing
@@ -79,26 +95,72 @@ pub fn Player(props: PlayerProps) -> Element {
         loop {
             tokio::time::sleep(tick_duration).await;
             let s = state.read();
-            if s.playing {
-                let (next_frame, keep_playing) = advance_frame(s.frame, s.duration, loop_playback);
-                drop(s);
+            let Some(started_at) = s.playback_started_at.filter(|_| s.playing) else {
+                continue;
+            };
+            let (next_frame, keep_playing, cycle) = frame_at_elapsed(
+                s.playback_started_frame,
+                started_at.elapsed(),
+                fps,
+                s.duration,
+                loop_playback,
+            );
+            let cycle_changed = cycle != s.playback_cycle;
+            let changed = next_frame != s.frame || keep_playing != s.playing || cycle_changed;
+            drop(s);
+            if changed {
                 let mut next_state = state.write();
                 next_state.frame = next_frame;
                 next_state.playing = keep_playing;
+                if cycle_changed {
+                    next_state.playback_cycle = cycle;
+                    next_state.seek_revision = next_state.seek_revision.wrapping_add(1);
+                }
+                if !keep_playing {
+                    next_state.playback_started_at = None;
+                }
             }
         }
     });
 
     let current_frame = state.read().frame;
     let is_playing = state.read().playing;
+    let seek_revision = state.read().seek_revision;
+
+    let mut playback_context = use_context_provider(|| {
+        Signal::new(PlayerPlaybackState {
+            playing: is_playing,
+            seek_revision,
+        })
+    });
+    let playback_snapshot = PlayerPlaybackState {
+        playing: is_playing,
+        seek_revision,
+    };
+    if *playback_context.peek() != playback_snapshot {
+        playback_context.set(playback_snapshot);
+    }
 
     let on_play_pause = move |_| {
-        let was_playing = state.read().playing;
-        state.write().playing = !was_playing;
+        let mut next_state = state.write();
+        next_state.playing = !next_state.playing;
+        next_state.seek_revision = next_state.seek_revision.wrapping_add(1);
+        next_state.playback_cycle = 0;
+        if next_state.playing {
+            next_state.playback_started_frame = next_state.frame;
+            next_state.playback_started_at = Some(Instant::now());
+        } else {
+            next_state.playback_started_at = None;
+        }
     };
 
     let on_seek = move |f: u32| {
-        state.write().frame = f.min(duration.saturating_sub(1));
+        let mut next_state = state.write();
+        next_state.frame = f.min(duration.saturating_sub(1));
+        next_state.playback_started_frame = next_state.frame;
+        next_state.playback_started_at = next_state.playing.then(Instant::now);
+        next_state.playback_cycle = 0;
+        next_state.seek_revision = next_state.seek_revision.wrapping_add(1);
     };
 
     rsx! {
@@ -147,21 +209,39 @@ fn frame_duration(fps: f64) -> tokio::time::Duration {
     } else {
         30.0
     };
-    tokio::time::Duration::from_secs_f64(1.0 / safe_fps)
+    tokio::time::Duration::from_secs_f64(1.0 / safe_fps).max(tokio::time::Duration::from_millis(1))
 }
 
-fn advance_frame(frame: u32, duration: u32, loop_playback: bool) -> (u32, bool) {
+fn frame_at_elapsed(
+    start_frame: u32,
+    elapsed: Duration,
+    fps: f64,
+    duration: u32,
+    loop_playback: bool,
+) -> (u32, bool, u64) {
     if duration == 0 {
-        return (0, false);
+        return (0, false, 0);
     }
-
-    let next = frame.saturating_add(1);
-    if next < duration {
-        (next, true)
-    } else if loop_playback {
-        (0, true)
+    let safe_fps = if fps.is_finite() && fps > 0.0 {
+        fps
     } else {
-        (duration - 1, false)
+        30.0
+    };
+    let elapsed_frames = (elapsed.as_secs_f64() * safe_fps)
+        .floor()
+        .clamp(0.0, u64::MAX as f64) as u64;
+    let absolute_frame = u64::from(start_frame).saturating_add(elapsed_frames);
+    if absolute_frame < u64::from(duration) {
+        return (absolute_frame as u32, true, 0);
+    }
+    if loop_playback {
+        (
+            (absolute_frame % u64::from(duration)) as u32,
+            true,
+            absolute_frame / u64::from(duration),
+        )
+    } else {
+        (duration - 1, false, 0)
     }
 }
 
@@ -176,16 +256,42 @@ mod tests {
             frame_duration(0.0),
             tokio::time::Duration::from_secs_f64(1.0 / 30.0)
         );
+        assert_eq!(frame_duration(1.0e12), Duration::from_millis(1));
     }
 
     #[test]
     fn playback_stops_on_the_last_frame_when_looping_is_disabled() {
-        assert_eq!(advance_frame(8, 10, false), (9, true));
-        assert_eq!(advance_frame(9, 10, false), (9, false));
+        assert_eq!(
+            frame_at_elapsed(8, Duration::from_millis(100), 10.0, 10, false),
+            (9, true, 0)
+        );
+        assert_eq!(
+            frame_at_elapsed(8, Duration::from_millis(200), 10.0, 10, false),
+            (9, false, 0)
+        );
     }
 
     #[test]
     fn playback_wraps_when_looping_is_enabled() {
-        assert_eq!(advance_frame(9, 10, true), (0, true));
+        assert_eq!(
+            frame_at_elapsed(9, Duration::from_millis(100), 10.0, 10, true),
+            (0, true, 1)
+        );
+    }
+
+    #[test]
+    fn wall_clock_frame_selection_skips_late_ticks() {
+        assert_eq!(
+            frame_at_elapsed(5, Duration::from_millis(220), 30.0, 100, false),
+            (11, true, 0)
+        );
+    }
+
+    #[test]
+    fn wall_clock_frame_selection_reports_loop_cycles() {
+        assert_eq!(
+            frame_at_elapsed(8, Duration::from_millis(300), 10.0, 10, true),
+            (1, true, 1)
+        );
     }
 }

@@ -1,10 +1,15 @@
 //! Dioxus preview adapter for the same native scenes used during export.
 
+use crate::player::PlayerPlaybackState;
 use dioxus::prelude::*;
 use dioxuscut_composition::{Composition, CompositionError, NativeCompositionContext};
 use dioxuscut_core::use_current_frame;
-use dioxuscut_rasterizer::{Color, GradientStop, ImageFit, Scene, SceneNode, Transform2D};
+use dioxuscut_rasterizer::{
+    AudioTrack, Color, GradientStop, ImageFit, Scene, SceneNode, Transform2D,
+};
 use serde_json::Value;
+use std::collections::{HashMap, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -58,6 +63,12 @@ pub struct NativeCompositionPreviewProps {
 #[component]
 pub fn NativeCompositionPreview(props: NativeCompositionPreviewProps) -> Element {
     let frame = use_current_frame();
+    let playback = try_consume_context::<Signal<PlayerPlaybackState>>()
+        .map(|state| *state.read())
+        .unwrap_or(PlayerPlaybackState {
+            playing: false,
+            seek_revision: 0,
+        });
     let context = NativeCompositionContext {
         width: props.width,
         height: props.height,
@@ -74,6 +85,10 @@ pub fn NativeCompositionPreview(props: NativeCompositionPreviewProps) -> Element
                 scene,
                 width: props.width,
                 height: props.height,
+                frame,
+                fps: props.fps,
+                playing: playback.playing,
+                seek_revision: playback.seek_revision,
             }
         },
         Err(error) => rsx! {
@@ -91,27 +106,81 @@ pub struct SceneViewProps {
     pub scene: Scene,
     pub width: u32,
     pub height: u32,
+    #[props(default = 0)]
+    pub frame: u32,
+    #[props(default = 30.0)]
+    pub fps: f64,
+    #[props(default = false)]
+    pub playing: bool,
+    #[props(default = 0)]
+    pub seek_revision: u64,
 }
 
 /// Converts the shared native scene graph to SVG for Dioxus web/desktop preview.
 #[component]
 pub fn SceneView(props: SceneViewProps) -> Element {
     let instance_id = use_hook(|| NEXT_SCENE_VIEW_ID.fetch_add(1, Ordering::Relaxed));
+    let media_status = use_context_provider(|| Signal::new(MediaPreviewStatus::default()));
     let view_box = format!("0 0 {} {}", props.width, props.height);
+    let root_id = format!("dioxuscut-scene-{instance_id}");
+    let safe_fps = safe_fps(props.fps);
+    let timeline_time = f64::from(props.frame) / safe_fps;
+    let scene_signature = media_signature(&props.scene);
+    let status = media_status.read();
+    let errors = status.errors.values().cloned().collect::<Vec<_>>();
+    let buffering_count = status.buffering.len();
+    let media_event_revision = status.revision;
+    drop(status);
+    let sync_script = build_media_sync_script(
+        &root_id,
+        props.playing,
+        props.seek_revision,
+        scene_signature,
+        safe_fps,
+        media_event_revision,
+    );
+    use_effect(use_reactive!(|(sync_script,)| {
+        let _ = dioxus::document::eval(&sync_script);
+    }));
 
     rsx! {
-        svg {
-            class: "dioxuscut-scene-view",
-            view_box,
+        div {
+            class: "dioxuscut-scene-view-container",
             width: "100%",
             height: "100%",
-            style: "display: block; overflow: hidden;",
-            xmlns: "http://www.w3.org/2000/svg",
-            for (index, node) in props.scene.nodes.into_iter().enumerate() {
-                SceneNodeView {
-                    key: "root-{index}",
-                    node,
-                    node_path: format!("scene-{instance_id}-root-{index}"),
+            style: "position: relative; display: block; overflow: hidden;",
+            svg {
+                id: root_id,
+                class: "dioxuscut-scene-view",
+                view_box,
+                width: "100%",
+                height: "100%",
+                style: "display: block; overflow: hidden;",
+                xmlns: "http://www.w3.org/2000/svg",
+                for (index, node) in props.scene.nodes.into_iter().enumerate() {
+                    SceneNodeView {
+                        key: "root-{index}",
+                        node,
+                        node_path: format!("scene-{instance_id}-root-{index}"),
+                        timeline_time,
+                        inherited_volume: 1.0,
+                    }
+                }
+            }
+            if buffering_count > 0 && props.playing {
+                div {
+                    class: "dioxuscut-media-buffering",
+                    style: "position: absolute; left: 12px; bottom: 12px; padding: 5px 8px; border-radius: 5px; background: rgba(0,0,0,0.72); color: white; font: 12px sans-serif; pointer-events: none;",
+                    "Buffering {buffering_count} media source(s)…"
+                }
+            }
+            if !errors.is_empty() {
+                div {
+                    class: "dioxuscut-media-error",
+                    style: "position: absolute; inset: auto 12px 12px 12px; padding: 8px 10px; border-radius: 5px; background: rgba(69,10,10,0.92); color: #fecaca; font: 12px monospace; white-space: pre-wrap; pointer-events: none;",
+                    for error in errors {
+                        div { "{error}" }
+                    }
                 }
             }
         }
@@ -122,10 +191,13 @@ pub fn SceneView(props: SceneViewProps) -> Element {
 struct SceneNodeViewProps {
     node: SceneNode,
     node_path: String,
+    timeline_time: f64,
+    inherited_volume: f64,
 }
 
 #[component]
 fn SceneNodeView(props: SceneNodeViewProps) -> Element {
+    let media_status = use_context::<Signal<MediaPreviewStatus>>();
     match props.node {
         SceneNode::Rect {
             x,
@@ -234,25 +306,78 @@ fn SceneNodeView(props: SceneNodeViewProps) -> Element {
             fit,
             opacity,
         } => {
-            let src = format!("{src}#t={time:.6}");
+            let media_id = format!("dioxuscut-media-{}", props.node_path);
             let style = format!(
                 "display:block;width:100%;height:100%;object-fit:{};opacity:{};",
                 media_object_fit(fit),
                 opacity.clamp(0.0, 1.0)
             );
+            let loading_id = media_id.clone();
+            let waiting_id = media_id.clone();
+            let ready_id = media_id.clone();
+            let error_id = media_id.clone();
+            let error_src = src.clone();
+            let loading_status = media_status;
+            let waiting_status = media_status;
+            let ready_status = media_status;
+            let error_status = media_status;
             rsx! {
                 foreignObject { x, y, width: w, height: h,
                     video {
+                        id: media_id,
                         src,
                         style,
                         muted: true,
                         r#loop: looped,
                         preload: "auto",
+                        "data-dioxuscut-media": "video",
+                        "data-dioxuscut-time": time,
+                        "data-dioxuscut-active": "true",
+                        "data-dioxuscut-volume": "0",
+                        "data-dioxuscut-rate": "1",
+                        "data-dioxuscut-loop": looped,
+                        onloadstart: move |_| mark_media_loading(loading_status, &loading_id),
+                        onwaiting: move |_| mark_media_loading(waiting_status, &waiting_id),
+                        oncanplay: move |_| mark_media_ready(ready_status, &ready_id),
+                        onerror: move |_| mark_media_error(error_status, &error_id, &error_src),
                     }
                 }
             }
         }
-        SceneNode::Audio { .. } => rsx! {},
+        SceneNode::Audio { track } => {
+            let media_id = format!("dioxuscut-media-{}", props.node_path);
+            let (time, active) = audio_preview_timing(&track, props.timeline_time);
+            let volume = (track.volume * props.inherited_volume).clamp(0.0, 1.0);
+            let loading_id = media_id.clone();
+            let waiting_id = media_id.clone();
+            let ready_id = media_id.clone();
+            let error_id = media_id.clone();
+            let error_src = track.src.clone();
+            let loading_status = media_status;
+            let waiting_status = media_status;
+            let ready_status = media_status;
+            let error_status = media_status;
+            rsx! {
+                foreignObject { x: 0, y: 0, width: 1, height: 1,
+                    audio {
+                        id: media_id,
+                        src: track.src,
+                        preload: "auto",
+                        style: "display:none;",
+                        "data-dioxuscut-media": "audio",
+                        "data-dioxuscut-time": time,
+                        "data-dioxuscut-active": active,
+                        "data-dioxuscut-volume": volume,
+                        "data-dioxuscut-rate": track.playback_rate,
+                        "data-dioxuscut-loop": track.looped,
+                        onloadstart: move |_| mark_media_loading(loading_status, &loading_id),
+                        onwaiting: move |_| mark_media_loading(waiting_status, &waiting_id),
+                        oncanplay: move |_| mark_media_ready(ready_status, &ready_id),
+                        onerror: move |_| mark_media_error(error_status, &error_id, &error_src),
+                    }
+                }
+            }
+        }
         SceneNode::LinearGradient {
             x,
             y,
@@ -309,6 +434,7 @@ fn SceneNodeView(props: SceneNodeViewProps) -> Element {
             children,
         } => {
             let transform = transform_css(transform);
+            let inherited_volume = props.inherited_volume * f64::from(opacity);
             rsx! {
                 g {
                     transform,
@@ -318,6 +444,8 @@ fn SceneNodeView(props: SceneNodeViewProps) -> Element {
                             key: "child-{index}",
                             node,
                             node_path: format!("{}-{index}", props.node_path),
+                            timeline_time: props.timeline_time,
+                            inherited_volume,
                         }
                     }
                 }
@@ -378,6 +506,151 @@ fn media_object_fit(fit: ImageFit) -> &'static str {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+struct MediaPreviewStatus {
+    buffering: HashSet<String>,
+    errors: HashMap<String, String>,
+    revision: u64,
+}
+
+fn mark_media_loading(mut status: Signal<MediaPreviewStatus>, id: &str) {
+    let mut status = status.write();
+    status.buffering.insert(id.to_string());
+    status.errors.remove(id);
+    status.revision = status.revision.wrapping_add(1);
+}
+
+fn mark_media_ready(mut status: Signal<MediaPreviewStatus>, id: &str) {
+    let mut status = status.write();
+    status.buffering.remove(id);
+    status.errors.remove(id);
+    status.revision = status.revision.wrapping_add(1);
+}
+
+fn mark_media_error(mut status: Signal<MediaPreviewStatus>, id: &str, src: &str) {
+    let mut status = status.write();
+    status.buffering.remove(id);
+    status
+        .errors
+        .insert(id.to_string(), format!("Failed to load media: {src}"));
+    status.revision = status.revision.wrapping_add(1);
+}
+
+fn safe_fps(fps: f64) -> f64 {
+    if fps.is_finite() && fps > 0.0 {
+        fps
+    } else {
+        30.0
+    }
+}
+
+fn audio_preview_timing(track: &AudioTrack, timeline_time: f64) -> (f64, bool) {
+    let elapsed = timeline_time - track.timeline_start;
+    let active = elapsed >= 0.0
+        && track
+            .duration
+            .is_none_or(|duration| elapsed < duration.max(0.0));
+    let playback_rate = if track.playback_rate.is_finite() && track.playback_rate > 0.0 {
+        track.playback_rate
+    } else {
+        1.0
+    };
+    let source_time = track.start_from.max(0.0) + elapsed.max(0.0) * playback_rate;
+    (source_time, active)
+}
+
+fn media_signature(scene: &Scene) -> u64 {
+    fn hash_nodes(nodes: &[SceneNode], inherited_volume: f64, hasher: &mut DefaultHasher) {
+        for node in nodes {
+            match node {
+                SceneNode::Video { src, looped, .. } => {
+                    "video".hash(hasher);
+                    src.hash(hasher);
+                    looped.hash(hasher);
+                }
+                SceneNode::Audio { track } => {
+                    "audio".hash(hasher);
+                    track.src.hash(hasher);
+                    track.start_from.to_bits().hash(hasher);
+                    track.timeline_start.to_bits().hash(hasher);
+                    track.duration.map(f64::to_bits).hash(hasher);
+                    (track.volume * inherited_volume).to_bits().hash(hasher);
+                    track.playback_rate.to_bits().hash(hasher);
+                    track.looped.hash(hasher);
+                }
+                SceneNode::Group {
+                    opacity, children, ..
+                } => {
+                    "group".hash(hasher);
+                    opacity.to_bits().hash(hasher);
+                    hash_nodes(children, inherited_volume * f64::from(*opacity), hasher);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut hasher = DefaultHasher::new();
+    hash_nodes(&scene.nodes, 1.0, &mut hasher);
+    hasher.finish()
+}
+
+fn build_media_sync_script(
+    root_id: &str,
+    playing: bool,
+    seek_revision: u64,
+    scene_signature: u64,
+    fps: f64,
+    media_event_revision: u64,
+) -> String {
+    let root_id = serde_json::to_string(root_id).expect("element ID is JSON serializable");
+    let revision = serde_json::to_string(&format!("{seek_revision}-{scene_signature}"))
+        .expect("revision is JSON serializable");
+    let drift_threshold = (1.5 / safe_fps(fps)).max(0.04);
+    format!(
+        r#"(() => {{
+  const root = document.getElementById({root_id});
+  if (!root) return;
+  const playing = {playing};
+  const revision = {revision};
+  const mediaEventRevision = {media_event_revision};
+  void mediaEventRevision;
+  const driftThreshold = {drift_threshold:.9};
+  for (const media of root.querySelectorAll('[data-dioxuscut-media]')) {{
+    let expected = Number(media.dataset.dioxuscutTime);
+    if (!Number.isFinite(expected)) continue;
+    const active = media.dataset.dioxuscutActive === 'true';
+    const looped = media.dataset.dioxuscutLoop === 'true';
+    const rate = Number(media.dataset.dioxuscutRate);
+    const volume = Number(media.dataset.dioxuscutVolume);
+    media.loop = looped;
+    media.playbackRate = Number.isFinite(rate) && rate > 0 ? rate : 1;
+    media.volume = Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 1;
+    if (Number.isFinite(media.duration) && media.duration > 0) {{
+      expected = looped
+        ? ((expected % media.duration) + media.duration) % media.duration
+        : Math.min(expected, Math.max(0, media.duration - 0.001));
+    }}
+    const hardSeek = !playing || media.dataset.dioxuscutRevision !== revision;
+    const drifted = !Number.isFinite(media.currentTime)
+      || Math.abs(media.currentTime - expected) > driftThreshold;
+    if ((hardSeek || drifted) && Number.isFinite(expected)) {{
+      try {{ media.currentTime = Math.max(0, expected); }} catch (_) {{}}
+    }}
+    media.dataset.dioxuscutRevision = revision;
+    if (playing && active && media.readyState >= 2) {{
+      const promise = media.play();
+      if (promise) promise.catch((error) => {{
+        media.dataset.dioxuscutPlayError = String(error);
+      }});
+    }} else {{
+      media.pause();
+    }}
+  }}
+}})();"#
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,5 +697,58 @@ mod tests {
         );
         assert_eq!(image_preserve_aspect_ratio(ImageFit::Fill), "none");
         assert_eq!(media_object_fit(ImageFit::ScaleDown), "scale-down");
+    }
+
+    #[test]
+    fn audio_preview_respects_timeline_trim_and_rate() {
+        let track = AudioTrack {
+            src: "voice.wav".into(),
+            start_from: 1.5,
+            timeline_start: 2.0,
+            duration: Some(3.0),
+            volume: 0.75,
+            playback_rate: 1.25,
+            looped: false,
+        };
+
+        assert_eq!(audio_preview_timing(&track, 1.0), (1.5, false));
+        assert_eq!(audio_preview_timing(&track, 3.0), (2.75, true));
+        assert_eq!(audio_preview_timing(&track, 5.0), (5.25, false));
+    }
+
+    #[test]
+    fn media_signature_ignores_video_time_but_tracks_source_changes() {
+        let make_scene = |src: &str, time: f64| Scene {
+            nodes: vec![SceneNode::Video {
+                src: src.into(),
+                time,
+                looped: false,
+                x: 0.0,
+                y: 0.0,
+                w: 100.0,
+                h: 100.0,
+                fit: ImageFit::Cover,
+                opacity: 1.0,
+            }],
+        };
+
+        assert_eq!(
+            media_signature(&make_scene("clip.mp4", 0.0)),
+            media_signature(&make_scene("clip.mp4", 1.0))
+        );
+        assert_ne!(
+            media_signature(&make_scene("clip.mp4", 0.0)),
+            media_signature(&make_scene("other.mp4", 0.0))
+        );
+    }
+
+    #[test]
+    fn sync_script_contains_drift_and_transport_controls() {
+        let script = build_media_sync_script("scene-1", true, 7, 11, 30.0, 2);
+        assert!(script.contains("document.getElementById(\"scene-1\")"));
+        assert!(script.contains("Math.abs(media.currentTime - expected)"));
+        assert!(script.contains("media.playbackRate"));
+        assert!(script.contains("media.volume"));
+        assert!(script.contains("media.play()"));
     }
 }
