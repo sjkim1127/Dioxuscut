@@ -198,6 +198,8 @@ mod tests {
         let config = EncodeConfig::h264(&frames_dir, &output, 30.0);
 
         let args = build_ffmpeg_args(&config);
+        let input_pattern = frames_dir.join("frame_%06d.png");
+        let input_pattern = input_pattern.to_string_lossy();
         assert_eq!(
             args,
             vec![
@@ -205,7 +207,7 @@ mod tests {
                 "-framerate",
                 "30",
                 "-i",
-                "/tmp/frames/frame_%06d.png",
+                input_pattern.as_ref(),
                 "-c:v",
                 "libx264",
                 "-crf",
@@ -232,6 +234,8 @@ mod tests {
             .with_preset("medium");
 
         let args = build_ffmpeg_args(&config);
+        let input_pattern = frames_dir.join("frame_%06d.png");
+        let input_pattern = input_pattern.to_string_lossy();
         assert_eq!(
             args,
             vec![
@@ -239,7 +243,7 @@ mod tests {
                 "-framerate",
                 "60",
                 "-i",
-                "/tmp/frames/frame_%06d.png",
+                input_pattern.as_ref(),
                 "-c:v",
                 "libx264",
                 "-crf",
