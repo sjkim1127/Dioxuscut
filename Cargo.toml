@@ -55,6 +55,9 @@ ab_glyph          = "0.2"
 anyhow            = "1"
 thiserror         = "1"
 
+# Parallelism
+rayon             = "1"
+
 # Web server & HTTP
 axum              = "0.7"
 tower-http        = { version = "0.5", features = ["fs", "trace", "cors"] }

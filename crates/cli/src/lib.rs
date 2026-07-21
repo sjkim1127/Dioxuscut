@@ -167,17 +167,17 @@ pub async fn execute_render_command(
     }
 
     match backend {
-        // ── Native rasterizer (Phase 4) ──────────────────────────────────────
+        // ── Native rasterizer (Phase 4: Rayon parallel + FFmpeg pipe) ──────────
         RenderBackend::Native => {
             use dioxuscut_rasterizer::{
-                TinySkiaBackend, NativeRenderConfig, Scene, SceneNode, Color,
-                GradientStop, render_all_frames,
+                TinySkiaBackend, PipeConfig, Scene, SceneNode, Color,
+                GradientStop, render_to_ffmpeg_pipe,
             };
 
-            tracing::info!("Using native tiny-skia CPU rasterizer");
+            tracing::info!("Using native tiny-skia CPU rasterizer with parallel pipeline (zero PNG disk I/O)");
 
             let rasterizer = TinySkiaBackend::new();
-            let native_config = NativeRenderConfig::new(width, height, fps, duration, &out_dir);
+            let pipe_config = PipeConfig::new(width, height, fps, duration, output);
 
             // Parse props JSON for background colours (fallback to defaults)
             let prop_value: serde_json::Value =
@@ -207,7 +207,7 @@ pub async fn execute_render_command(
                 .and_then(Color::from_hex)
                 .unwrap_or(Color::rgb(108, 99, 255));   // #6c63ff
 
-            render_all_frames(&rasterizer, &native_config, |frame| {
+            render_to_ffmpeg_pipe(&rasterizer, &pipe_config, |frame| {
                 let mut scene = Scene::new();
 
                 // Background gradient
@@ -234,7 +234,7 @@ pub async fn execute_render_command(
                     stroke_width: 3.0,
                 });
 
-                // Title text placeholder
+                // Title text
                 let font_size = (width as f32 * 0.04).max(24.0);
                 let text_x = width as f32 * 0.1;
                 let text_y = height as f32 * 0.5 + font_size / 2.0;
@@ -250,7 +250,7 @@ pub async fn execute_render_command(
                 scene
             })?;
 
-            tracing::info!("Native rasterizer: {} frames written to {:?}", duration, out_dir);
+            tracing::info!("Native rasterizer: {} frames rendered directly to {}", duration, output.display());
         }
 
         // ── wgpu GPU renderer (Phase 4, feature = "gpu") ─────────────────────
@@ -263,15 +263,15 @@ pub async fn execute_render_command(
             #[cfg(feature = "gpu")]
             {
                 use dioxuscut_rasterizer::{
-                    WgpuBackend, NativeRenderConfig, Scene, SceneNode, Color,
-                    GradientStop, render_all_frames,
+                    WgpuBackend, PipeConfig, Scene, SceneNode, Color,
+                    GradientStop, render_to_ffmpeg_pipe,
                 };
 
-                tracing::info!("Using wgpu GPU-accelerated rasterizer");
+                tracing::info!("Using wgpu GPU-accelerated rasterizer with zero-copy FFmpeg pipe");
 
                 let rasterizer = WgpuBackend::new()
                     .map_err(|e| anyhow::anyhow!("GPU backend init failed: {e}"))?;
-                let native_config = NativeRenderConfig::new(width, height, fps, duration, &out_dir);
+                let pipe_config = PipeConfig::new(width, height, fps, duration, output);
 
                 let prop_value: serde_json::Value =
                     serde_json::from_str(&props_json).unwrap_or(serde_json::Value::Null);
@@ -286,7 +286,7 @@ pub async fn execute_render_command(
                     .and_then(|v| v.as_str()).and_then(Color::from_hex)
                     .unwrap_or(Color::rgb(108, 99, 255));
 
-                render_all_frames(&rasterizer, &native_config, |frame| {
+                render_to_ffmpeg_pipe(&rasterizer, &pipe_config, |frame| {
                     let mut scene = Scene::new();
                     let t = frame as f32 / duration as f32;
                     scene.push(SceneNode::LinearGradient {
@@ -306,7 +306,7 @@ pub async fn execute_render_command(
                     scene
                 })?;
 
-                tracing::info!("GPU rasterizer: {} frames written to {:?}", duration, out_dir);
+                tracing::info!("GPU rasterizer: {} frames rendered directly to {}", duration, output.display());
             }
         }
 
@@ -316,6 +316,18 @@ pub async fn execute_render_command(
 
             // Set environment variable for Dioxus web app consumption
             std::env::set_var("DIOXUSCUT_PROPS", &props_json);
+
+            let out_dir = std::env::temp_dir().join(format!(
+                "dioxuscut_render_frames_{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            ));
+
+            if out_dir.exists() {
+                fs::remove_dir_all(&out_dir)?;
+            }
 
             let server_handle = if let Some(ref custom_url) = server_url {
                 tracing::info!("Using external server URL: {}", custom_url);
@@ -342,18 +354,18 @@ pub async fn execute_render_command(
             if let Some(handle) = server_handle {
                 handle.stop().await?;
             }
+
+            let encode_cfg = EncodeConfig::h264(&out_dir, output, fps).with_resolution(width, height);
+            encode_frames(&encode_cfg).await?;
+
+            if out_dir.exists() {
+                let _ = fs::remove_dir_all(&out_dir);
+            }
         }
     }
 
-    // 3. Encode frame sequence into MP4 via FFmpeg (both backends)
-    let encode_cfg = EncodeConfig::h264(&out_dir, output, fps).with_resolution(width, height);
-    encode_frames(&encode_cfg).await?;
-
     tracing::info!("Successfully rendered video to {}", output.display());
-
-    if out_dir.exists() {
-        let _ = fs::remove_dir_all(&out_dir);
-    }
 
     Ok(())
 }
+

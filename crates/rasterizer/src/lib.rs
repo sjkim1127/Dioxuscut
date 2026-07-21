@@ -37,6 +37,10 @@ pub use backend::{FrameConfig, RasterError, RasterizerBackend};
 pub use font::FontCache;
 pub use scene::{Color, GradientStop, Scene, SceneNode, Transform2D};
 pub use tiny_skia_backend::TinySkiaBackend;
-pub use render::{NativeRenderConfig, render_all_frames, save_frame};
+pub use render::{
+    NativeRenderConfig, PipeConfig,
+    render_all_frames, render_parallel, render_to_ffmpeg_pipe,
+    build_pipe_ffmpeg_args, save_frame, render_frame_timed,
+};
 #[cfg(feature = "gpu")]
 pub use wgpu_backend::WgpuBackend;
