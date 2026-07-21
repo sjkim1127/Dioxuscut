@@ -1668,8 +1668,11 @@ name = "dioxuscut-media"
 version = "0.1.2"
 dependencies = [
  "dioxus",
+ "dioxuscut-composition",
  "dioxuscut-core",
+ "dioxuscut-rasterizer",
  "serde",
+ "serde_json",
  "tracing",
 ]
 
