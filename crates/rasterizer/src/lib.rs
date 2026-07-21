@@ -37,6 +37,10 @@ pub mod wgpu_backend;
 
 pub use backend::{FrameConfig, RasterError, RasterizerBackend};
 pub use font::FontCache;
+pub use font::{
+    layout_text_box, measure_text_width, PositionedTextLine, TextBox, TextBoxLayout,
+    TextHorizontalAlign, TextOverflow, TextVerticalAlign,
+};
 pub use render::{
     build_pipe_ffmpeg_args, render_all_frames, render_frame_timed, render_parallel,
     render_to_ffmpeg_pipe, render_to_ffmpeg_pipe_fallible, save_frame, NativeRenderConfig,

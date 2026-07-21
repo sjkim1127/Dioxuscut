@@ -13,6 +13,9 @@ thiserror  = { workspace = true }
 image      = { workspace = true }
 tiny-skia  = { workspace = true }
 ab_glyph   = { workspace = true }
+rustybuzz  = { workspace = true }
+unicode-linebreak = { workspace = true }
+unicode-segmentation = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
 rayon      = { workspace = true }

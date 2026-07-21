@@ -19,14 +19,14 @@ The repository also contains Dioxus timeline, media, shape, transition, player, 
 
 ## What works today
 
-- Native scene graph with rectangles, circles, paths, text, local raster images, decoded video frames, audio tracks, gradients, and transformed groups.
+- Native scene graph with rectangles, circles, paths, shaped text, local raster images, decoded video frames, audio tracks, gradients, and transformed groups.
 - CPU rendering through `tiny-skia`.
 - Experimental GPU rendering through `wgpu`; unsupported scene features fall back to the CPU renderer for correctness.
 - Bounded-memory parallel frame rendering into an FFmpeg stdin pipe.
 - Cached FFprobe metadata and persistent, bounded FFmpeg rawvideo decoder sessions.
 - Registry-based Rust compositions and optional sandboxed Rhai compositions, both with JSON props.
 - Shared native composition contract for CLI export and Dioxus Player/Studio preview.
-- Composable `SceneEmitter` adapters for media, procedural shapes, kinetic captions, fades, slides, sequences, and freezes.
+- Composable `SceneEmitter` adapters for media, procedural shapes, kinetic captions, fitted multiline text, fades, slides, sequences, freezes, and composited layers.
 - Player media synchronization for seek, pause/play, buffering, volume, rate, looping, timeline offsets, and drift correction.
 - FFmpeg audio trim, timeline delay, volume, playback-rate, looping, multi-track mixing, and AAC muxing.
 - Animation, shape, path, caption, noise, timeline, player, server, encoder, and CLI test coverage.
@@ -138,7 +138,7 @@ cargo run -p dioxuscut-cli --features rhai -- render \
 
 Each script defines `fn render(ctx, props)`. The context contains `frame`,
 `width`, `height`, `fps`, `duration`, and normalized `progress`. The initial API
-exposes `scene()`, `rect`, `round_rect`, `circle`, `text`, `text_bold`, `text_font`, `image`,
+exposes `scene()`, `rect`, `round_rect`, `circle`, `text`, `text_bold`, `text_font`, `text_box`, `image`,
 `video`, `audio`, `group`, and `interpolate`. Image and video nodes accept local
 paths or `file://` URIs and the fit values `cover`, `contain`, `fill`, `none`, and
 `scale-down`:
@@ -146,6 +146,7 @@ paths or `file://` URIs and the fit values `cover`, `contain`, `fill`, `none`, a
 ```rhai
 output.image(x, y, width, height, "card.png", "contain", 1.0);
 output.text_font(x, y, "Pinned font", 48.0, "#ffffff", "assets/Inter-Regular.ttf");
+output.text_box(x, y, width, height, "Wrapped text", 48.0, 20.0, 3, "#ffffff", "assets/Inter-Regular.ttf", "center");
 output.video(x, y, width, height, "clip.mp4", source_time, "cover", 1.0);
 output.video(x, y, width, height, "clip.mp4", source_time, "cover", 1.0, true); // loop
 output.audio("clip.mp4", source_offset, timeline_offset, duration, volume, playback_rate, looped);
@@ -264,13 +265,13 @@ written into workflow files.
 - Audio declarations are taken from frame zero and must be static for the render.
 - `SceneLayer` supports rectangular or SVG-path clips, alpha or luminance masks, twelve blend modes, ordered blur/brightness/grayscale/opacity filters, and drop shadows. These effects use CPU offscreen surfaces for export and SVG/CSS equivalents for Player preview.
 - GPU acceleration covers a subset of scene primitives and uses whole-frame CPU fallback for composited layers and other unsupported nodes.
-- Text nodes accept ordered local TTF/OTF `font_sources`; native rendering caches those files and falls through per glyph. Text without explicit sources still uses platform font discovery and is not pixel-identical across platforms.
+- Text nodes accept ordered local TTF/OTF `font_sources`; native rendering caches those files, shapes glyph runs with Rustybuzz, and falls through per grapheme. `SceneTextBlock` and Rhai `text_box` add Unicode line breaking, fitting, alignment, line limits, and ellipsis. Text without explicit sources still uses platform font discovery and is not pixel-identical across platforms; full mixed-direction paragraph layout remains incomplete.
 - Studio is a preview shell, not yet a full editor.
 
 ## Roadmap
 
 1. Expand `SceneEmitter` layout and style parity beyond the current explicit adapters.
-2. Metric-based multiline text wrapping, fitting, and layout constraints.
+2. Full bidirectional paragraph layout, variable-font axes, and advanced typography controls.
 3. Full GPU parity for paths, text, media, groups, composited layers, strokes, and multi-stop gradients.
 4. Additional color, distortion, and convolution filter primitives.
 5. Studio project loading, media editing, and render queue integration.

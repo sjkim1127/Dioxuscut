@@ -2,7 +2,7 @@
 
 use crate::{create_tiktok_style_captions, CaptionToken};
 use dioxuscut_composition::{CompositionError, SceneEmitter, SceneFrameContext};
-use dioxuscut_rasterizer::{Color, Scene, SceneNode};
+use dioxuscut_rasterizer::{measure_text_width, Color, Scene, SceneNode};
 use serde_json::Value;
 
 /// Native counterpart of [`crate::TikTokCaptions`].
@@ -68,10 +68,16 @@ impl SceneEmitter for SceneCaptions {
                 } else {
                     self.font_size
                 };
-                let width = estimated_text_width(&token.text, size);
-                (token, active, size, width)
+                let width =
+                    measure_text_width(&token.text, size, &self.font_sources).map_err(|error| {
+                        CompositionError::render(
+                            context.global_frame,
+                            format!("failed to measure native caption text: {error}"),
+                        )
+                    })?;
+                Ok((token, active, size, width))
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, CompositionError>>()?;
         let row_width = metrics.iter().map(|(_, _, _, width)| *width).sum::<f32>()
             + self.word_gap.max(0.0) * metrics.len().saturating_sub(1) as f32;
         let mut x = self.center_x - row_width * 0.5;
@@ -89,13 +95,6 @@ impl SceneEmitter for SceneCaptions {
         }
         Ok(())
     }
-}
-
-fn estimated_text_width(text: &str, font_size: f32) -> f32 {
-    text.chars()
-        .map(|character| if character.is_ascii() { 0.6 } else { 1.0 })
-        .sum::<f32>()
-        * font_size
 }
 
 fn parse_color(value: &str, context: SceneFrameContext) -> Result<Color, CompositionError> {

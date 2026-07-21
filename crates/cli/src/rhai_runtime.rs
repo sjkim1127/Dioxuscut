@@ -6,7 +6,10 @@
 use crate::composition::{
     Composition, CompositionError, NativeCompositionContext, PreparedComposition,
 };
-use dioxuscut_rasterizer::{AudioTrack, Color, ImageFit, Scene, SceneNode, Transform2D};
+use dioxuscut_rasterizer::{
+    layout_text_box, AudioTrack, Color, ImageFit, Scene, SceneNode, TextBox, TextHorizontalAlign,
+    TextOverflow, Transform2D,
+};
 use rhai::module_resolvers::DummyModuleResolver;
 use rhai::{
     Dynamic, Engine, EvalAltResult, ImmutableString, Map, Position, Scope, AST, FLOAT, INT,
@@ -130,6 +133,71 @@ impl SceneBuilder {
             font_weight: 400,
             font_sources: vec![font_source.to_string()],
         });
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn text_box(
+        &mut self,
+        x: FLOAT,
+        y: FLOAT,
+        width: FLOAT,
+        height: FLOAT,
+        content: ImmutableString,
+        font_size: FLOAT,
+        min_font_size: FLOAT,
+        max_lines: INT,
+        color: &str,
+        font_source: ImmutableString,
+        align: &str,
+    ) -> RhaiResult<()> {
+        if max_lines <= 0 {
+            return Err(runtime_error("text box max lines must be positive".into()));
+        }
+        let font_sources = if font_source.trim().is_empty() {
+            Vec::new()
+        } else {
+            vec![font_source.trim().to_string()]
+        };
+        let mut request = TextBox::new(
+            content.into_owned(),
+            finite_f32("x", x)?,
+            finite_f32("y", y)?,
+            finite_f32("width", width)?,
+            finite_f32("height", height)?,
+            finite_f32("font size", font_size)?,
+        );
+        request.min_font_size = finite_f32("minimum font size", min_font_size)?;
+        request.max_lines = Some(max_lines as usize);
+        request.horizontal_align = match align.trim().to_ascii_lowercase().as_str() {
+            "left" | "start" => TextHorizontalAlign::Start,
+            "center" => TextHorizontalAlign::Center,
+            "right" | "end" => TextHorizontalAlign::End,
+            _ => {
+                return Err(runtime_error(format!(
+                    "text box alignment must be start, center, or end, got '{align}'"
+                )))
+            }
+        };
+        request.overflow = TextOverflow::Ellipsis;
+        request.font_sources = font_sources.clone();
+        let layout = layout_text_box(&request)
+            .map_err(|error| runtime_error(format!("failed to layout text box: {error}")))?;
+        let color = parse_color(color)?;
+        for line in layout.lines {
+            if line.text.is_empty() {
+                continue;
+            }
+            self.scene.push(SceneNode::Text {
+                x: line.x,
+                y: line.y,
+                content: line.text,
+                font_size: layout.font_size,
+                color,
+                font_weight: 400,
+                font_sources: font_sources.clone(),
+            });
+        }
         Ok(())
     }
 
@@ -420,6 +488,7 @@ fn register_scene_api(engine: &mut Engine) {
     engine.register_fn("text", SceneBuilder::text);
     engine.register_fn("text_bold", SceneBuilder::text_bold);
     engine.register_fn("text_font", SceneBuilder::text_font);
+    engine.register_fn("text_box", SceneBuilder::text_box);
     engine.register_fn("image", SceneBuilder::image);
     engine.register_fn("video", SceneBuilder::video);
     engine.register_fn("video", SceneBuilder::video_looped);
@@ -591,6 +660,38 @@ mod tests {
             &scene.nodes[0],
             SceneNode::Text { font_sources, .. } if font_sources == &["assets/Inter.ttf"]
         ));
+    }
+
+    #[test]
+    fn script_resolves_a_fitted_multiline_text_box() {
+        let script = r##"
+            fn render(ctx, props) {
+                let output = scene();
+                output.text_box(
+                    10.0, 20.0, 120.0, 52.0,
+                    "one two three four five six", 32.0, 14.0, 2,
+                    "#ffffff", props.font, "center"
+                );
+                output
+            }
+        "##;
+        let font = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../vendor/remotion-4.0.495/packages/example/public/Roboto-Medium.ttf");
+        let composition = RhaiComposition::from_source("text-box", script).unwrap();
+        let prepared = composition
+            .prepare(
+                &serde_json::json!({"font": font.display().to_string()}),
+                context(),
+            )
+            .unwrap();
+        let scene = prepared.render(0).unwrap();
+
+        assert!(!scene.nodes.is_empty());
+        assert!(scene.nodes.len() <= 2);
+        assert!(scene.nodes.iter().all(|node| matches!(
+            node,
+            SceneNode::Text { x, font_size, .. } if *x >= 10.0 && *font_size <= 32.0
+        )));
     }
 
     #[test]

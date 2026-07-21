@@ -2,7 +2,8 @@
 
 use crate::{CompositionError, NativeComposition, NativeCompositionContext};
 use dioxuscut_rasterizer::{
-    BlendMode, ClipRegion, MaskMode, Scene, SceneFilter, SceneNode, SceneShadow, Transform2D,
+    layout_text_box, BlendMode, ClipRegion, Color, MaskMode, Scene, SceneFilter, SceneNode,
+    SceneShadow, TextBox, TextHorizontalAlign, TextOverflow, TextVerticalAlign, Transform2D,
 };
 use serde_json::Value;
 
@@ -325,6 +326,107 @@ impl<E: SceneEmitter> SceneEmitter for SceneLayer<E> {
     }
 }
 
+/// Font-aware multiline text that resolves into ordinary baseline Text nodes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SceneTextBlock {
+    pub layout: TextBox,
+    pub color: Color,
+    pub font_weight: u16,
+}
+
+impl SceneTextBlock {
+    pub fn new(
+        text: impl Into<String>,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        font_size: f32,
+    ) -> Self {
+        Self {
+            layout: TextBox::new(text, x, y, width, height, font_size),
+            color: Color::WHITE,
+            font_weight: 400,
+        }
+    }
+
+    pub fn with_min_font_size(mut self, min_font_size: f32) -> Self {
+        self.layout.min_font_size = min_font_size;
+        self
+    }
+
+    pub fn with_line_height(mut self, line_height: f32) -> Self {
+        self.layout.line_height = line_height;
+        self
+    }
+
+    pub fn with_max_lines(mut self, max_lines: usize) -> Self {
+        self.layout.max_lines = Some(max_lines);
+        self
+    }
+
+    pub fn with_alignment(
+        mut self,
+        horizontal: TextHorizontalAlign,
+        vertical: TextVerticalAlign,
+    ) -> Self {
+        self.layout.horizontal_align = horizontal;
+        self.layout.vertical_align = vertical;
+        self
+    }
+
+    pub fn with_overflow(mut self, overflow: TextOverflow) -> Self {
+        self.layout.overflow = overflow;
+        self
+    }
+
+    pub fn with_font_sources(mut self, sources: impl IntoIterator<Item = String>) -> Self {
+        self.layout.font_sources = sources.into_iter().collect();
+        self
+    }
+
+    pub fn with_color(mut self, color: Color) -> Self {
+        self.color = color;
+        self
+    }
+
+    pub fn with_font_weight(mut self, font_weight: u16) -> Self {
+        self.font_weight = font_weight;
+        self
+    }
+}
+
+impl SceneEmitter for SceneTextBlock {
+    fn emit(
+        &self,
+        context: SceneFrameContext,
+        _props: &Value,
+        scene: &mut Scene,
+    ) -> Result<(), CompositionError> {
+        let layout = layout_text_box(&self.layout).map_err(|error| {
+            CompositionError::render(
+                context.global_frame,
+                format!("failed to layout text block: {error}"),
+            )
+        })?;
+        for line in layout.lines {
+            if line.text.is_empty() {
+                continue;
+            }
+            scene.push(SceneNode::Text {
+                x: line.x,
+                y: line.y,
+                content: line.text,
+                font_size: layout.font_size,
+                color: self.color,
+                font_weight: self.font_weight,
+                font_sources: self.layout.font_sources.clone(),
+            });
+        }
+        Ok(())
+    }
+}
+
 /// Adapts an emitter tree to the existing composition registry contract.
 pub struct SceneEmitterComposition<E> {
     id: String,
@@ -476,5 +578,27 @@ mod tests {
                 && filters.len() == 1
                 && children.len() == 1
         ));
+    }
+
+    #[test]
+    fn text_block_resolves_wrapping_fitting_and_alignment() {
+        let font = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../vendor/remotion-4.0.495/packages/example/public/Roboto-Medium.ttf");
+        let block =
+            SceneTextBlock::new("one two three four five six", 10.0, 20.0, 120.0, 52.0, 32.0)
+                .with_min_font_size(14.0)
+                .with_max_lines(2)
+                .with_alignment(TextHorizontalAlign::Center, TextVerticalAlign::Center)
+                .with_overflow(TextOverflow::Ellipsis)
+                .with_font_sources([font.display().to_string()]);
+        let composition = SceneEmitterComposition::new("text-block", block);
+        let scene = composition.render(0, &Value::Null, context()).unwrap();
+
+        assert!(!scene.nodes.is_empty());
+        assert!(scene.nodes.len() <= 2);
+        assert!(scene.nodes.iter().all(|node| matches!(
+            node,
+            SceneNode::Text { x, font_size, .. } if *x >= 10.0 && *font_size <= 32.0
+        )));
     }
 }

@@ -4,7 +4,7 @@ mod scene_emitter;
 
 pub use scene_emitter::{
     SceneEmitter, SceneEmitterComposition, SceneFrameContext, SceneFreeze, SceneGroup, SceneLayer,
-    SceneSequence, SceneStack,
+    SceneSequence, SceneStack, SceneTextBlock,
 };
 
 use dioxuscut_rasterizer::{Color, GradientStop, Scene, SceneNode};
