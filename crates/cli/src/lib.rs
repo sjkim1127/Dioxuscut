@@ -1,7 +1,6 @@
 //! Dioxuscut CLI library core options, argument parsing, validation, and command execution handlers.
 
 use clap::{Parser, Subcommand, ValueEnum};
-use dioxuscut_renderer::{encode_frames, render_frames, spawn_server, EncodeConfig, RenderConfig};
 use std::fs;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -23,16 +22,14 @@ pub enum ValidationError {
     InvalidDuration(u32),
 }
 
-/// Render backend selection.
+/// Native render backend selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
 pub enum RenderBackend {
-    /// Pure-Rust CPU rasterizer — no browser or GPU required. Default.
+    /// Pure-Rust CPU rasterizer via tiny-skia — no browser or GPU required. Default.
     #[default]
     Native,
     /// GPU-accelerated rasterizer via wgpu (Vulkan/Metal/DX12). Requires `--features gpu`.
     Gpu,
-    /// Headless Chrome CDP renderer (Phase 2/3 behaviour). Requires Chrome installed.
-    Chrome,
 }
 
 /// Dioxuscut CLI — render videos from code
@@ -79,21 +76,21 @@ pub enum Commands {
         #[arg(long, value_enum, default_value_t = RenderBackend::Native)]
         backend: RenderBackend,
 
-        /// Port to bind web server (0 for dynamic port allocation). Only used with --backend chrome.
+        /// Port to bind web server (legacy compatibility)
         #[arg(long, default_value_t = 0)]
         port: u16,
 
-        /// Path to web asset directory. Only used with --backend chrome.
+        /// Path to web asset directory (legacy compatibility)
         #[arg(long)]
         web_dir: Option<PathBuf>,
 
-        /// Optional external server URL. Only used with --backend chrome.
+        /// Optional external server URL (legacy compatibility)
         #[arg(long)]
         server_url: Option<String>,
     },
 }
 
-/// Validates command-line parameters prior to launching web server and browser renderer.
+/// Validates command-line parameters prior to launching renderer.
 pub fn validate_render_params(
     composition: &str,
     props: Option<&PathBuf>,
@@ -135,51 +132,37 @@ pub async fn execute_render_command(
     fps: f64,
     duration: u32,
     backend: RenderBackend,
-    port: u16,
-    web_dir: Option<&PathBuf>,
-    server_url: Option<String>,
+    _port: u16,
+    _web_dir: Option<&PathBuf>,
+    _server_url: Option<String>,
 ) -> anyhow::Result<()> {
     validate_render_params(composition, props, width, height, fps, duration)?;
 
     tracing::info!(
-        "Starting render for composition '{}' (backend: {:?})",
+        "Starting native browser-free render for composition '{}' (backend: {:?})",
         composition, backend
     );
 
-    // 1. Read props JSON if specified
+    // Read props JSON if specified
     let props_json = if let Some(p) = props {
         fs::read_to_string(p)?
     } else {
         "{}".to_string()
     };
 
-    // 2. Shared temp output dir
-    let out_dir = std::env::temp_dir().join(format!(
-        "dioxuscut_render_frames_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
-
-    if out_dir.exists() {
-        fs::remove_dir_all(&out_dir)?;
-    }
-
     match backend {
-        // ── Native rasterizer (Phase 4: Rayon parallel + FFmpeg pipe) ──────────
+        // ── Native CPU rasterizer (tiny-skia + Rayon parallel + FFmpeg pipe) ──
         RenderBackend::Native => {
             use dioxuscut_rasterizer::{
                 TinySkiaBackend, PipeConfig, Scene, SceneNode, Color,
                 GradientStop, render_to_ffmpeg_pipe,
             };
 
-            tracing::info!("Using native tiny-skia CPU rasterizer with parallel pipeline (zero PNG disk I/O)");
+            tracing::info!("Using native tiny-skia CPU rasterizer with Rayon parallel pipeline");
 
             let rasterizer = TinySkiaBackend::new();
             let pipe_config = PipeConfig::new(width, height, fps, duration, output);
 
-            // Parse props JSON for background colours (fallback to defaults)
             let prop_value: serde_json::Value =
                 serde_json::from_str(&props_json).unwrap_or(serde_json::Value::Null);
 
@@ -253,11 +236,11 @@ pub async fn execute_render_command(
             tracing::info!("Native rasterizer: {} frames rendered directly to {}", duration, output.display());
         }
 
-        // ── wgpu GPU renderer (Phase 4, feature = "gpu") ─────────────────────
+        // ── wgpu GPU renderer (feature = "gpu") ──────────────────────────────
         RenderBackend::Gpu => {
             #[cfg(not(feature = "gpu"))]
             {
-                anyhow::bail!("GPU backend is not compiled in. Rebuild with `--features gpu`:\n  cargo build -p dioxuscut-cli --features dioxuscut-rasterizer/gpu");
+                anyhow::bail!("GPU backend is not compiled in. Rebuild with `--features gpu`:\n  cargo build -p dioxuscut-cli --features gpu");
             }
 
             #[cfg(feature = "gpu")]
@@ -309,63 +292,9 @@ pub async fn execute_render_command(
                 tracing::info!("GPU rasterizer: {} frames rendered directly to {}", duration, output.display());
             }
         }
-
-        // ── Chrome CDP renderer (Phase 2/3 legacy) ───────────────────────────
-        RenderBackend::Chrome => {
-            tracing::info!("Using Headless Chrome CDP renderer");
-
-            // Set environment variable for Dioxus web app consumption
-            std::env::set_var("DIOXUSCUT_PROPS", &props_json);
-
-            let out_dir = std::env::temp_dir().join(format!(
-                "dioxuscut_render_frames_{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos()
-            ));
-
-            if out_dir.exists() {
-                fs::remove_dir_all(&out_dir)?;
-            }
-
-            let server_handle = if let Some(ref custom_url) = server_url {
-                tracing::info!("Using external server URL: {}", custom_url);
-                None
-            } else {
-                let dir = web_dir.cloned().unwrap_or_else(|| PathBuf::from("dist"));
-                tracing::info!(
-                    "Spawning web server for directory '{}' (port: {})",
-                    dir.display(), port
-                );
-                let handle = spawn_server(port, &dir).await?;
-                tracing::info!("Web server ready at {}", handle.url());
-                Some(handle)
-            };
-
-            let url = match &server_handle {
-                Some(h) => h.url().to_string(),
-                None => server_url.unwrap(),
-            };
-
-            let render_cfg = RenderConfig::new(url, &out_dir, width, height, fps, duration);
-            render_frames(&render_cfg).await?;
-
-            if let Some(handle) = server_handle {
-                handle.stop().await?;
-            }
-
-            let encode_cfg = EncodeConfig::h264(&out_dir, output, fps).with_resolution(width, height);
-            encode_frames(&encode_cfg).await?;
-
-            if out_dir.exists() {
-                let _ = fs::remove_dir_all(&out_dir);
-            }
-        }
     }
 
     tracing::info!("Successfully rendered video to {}", output.display());
 
     Ok(())
 }
-

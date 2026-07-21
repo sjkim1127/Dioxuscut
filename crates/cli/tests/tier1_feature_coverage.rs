@@ -1,10 +1,10 @@
 //! Tier 1: Feature Coverage E2E Tests
 //!
 //! Tests CLI argument parsing for `--composition`, `--props`, `--output`,
-//! `--width`, `--height`, `--fps`, `--duration`, `--port`, `--web-dir`, and `--server-url`.
+//! `--width`, `--height`, `--fps`, `--duration`, `--backend`, `--port`, `--web-dir`, and `--server-url`.
 
 use clap::Parser;
-use dioxuscut_cli::{Cli, Commands};
+use dioxuscut_cli::{Cli, Commands, RenderBackend};
 use std::path::PathBuf;
 
 #[test]
@@ -21,6 +21,7 @@ fn test_cli_flag_defaults() {
             height,
             fps,
             duration,
+            backend,
             port,
             web_dir,
             server_url,
@@ -32,6 +33,7 @@ fn test_cli_flag_defaults() {
             assert_eq!(height, 1080);
             assert!((fps - 30.0).abs() < f64::EPSILON);
             assert_eq!(duration, 150);
+            assert_eq!(backend, RenderBackend::Native);
             assert_eq!(port, 0);
             assert_eq!(web_dir, None);
             assert_eq!(server_url, None);
@@ -77,6 +79,7 @@ fn test_cli_flag_custom_values() {
             height,
             fps,
             duration,
+            backend,
             port,
             web_dir,
             server_url,
@@ -88,6 +91,7 @@ fn test_cli_flag_custom_values() {
             assert_eq!(height, 720);
             assert!((fps - 60.0).abs() < f64::EPSILON);
             assert_eq!(duration, 300);
+            assert_eq!(backend, RenderBackend::Native);
             assert_eq!(port, 9000);
             assert_eq!(web_dir, Some(PathBuf::from("build")));
             assert_eq!(server_url, Some("http://127.0.0.1:9000".to_string()));

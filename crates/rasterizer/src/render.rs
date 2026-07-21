@@ -247,13 +247,9 @@ where
         .args(&ffmpeg_args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::inherit()) // show FFmpeg progress
+        .stderr(Stdio::null())
         .spawn()
         .map_err(|e| RasterError::Init(format!("Failed to spawn FFmpeg: {e}\nIs ffmpeg installed?")))?;
-
-    let stdin = ffmpeg.stdin.take()
-        .ok_or_else(|| RasterError::Init("Failed to open FFmpeg stdin".into()))?;
-    let stdin = Arc::new(Mutex::new(stdin));
 
     // ── 2. Render frames in parallel ─────────────────────────────────────────
     let concurrency = config.concurrency
@@ -283,18 +279,20 @@ where
 
     // ── 3. Stream sorted RGBA bytes to FFmpeg stdin ───────────────────────────
     {
-        let mut writer = stdin.lock()
-            .map_err(|_| RasterError::Init("FFmpeg stdin mutex poisoned".into()))?;
+        let mut stdin = ffmpeg.stdin.take()
+            .ok_or_else(|| RasterError::Init("Failed to open FFmpeg stdin".into()))?;
 
         for (_, rgba) in &pairs {
-            writer.write_all(rgba)
+            stdin.write_all(rgba)
                 .map_err(|e| RasterError::ImageEncode(format!("FFmpeg pipe write error: {e}")))?;
         }
-    } // stdin closed here → FFmpeg knows the stream ended
+        stdin.flush().ok();
+    } // `stdin` drops here -> EOF sent to FFmpeg pipe
 
     // ── 4. Wait for FFmpeg to finish ─────────────────────────────────────────
     let status = ffmpeg.wait()
         .map_err(|e| RasterError::ImageEncode(format!("FFmpeg wait error: {e}")))?;
+
 
     if !status.success() {
         return Err(RasterError::ImageEncode(format!(

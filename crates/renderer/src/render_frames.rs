@@ -1,7 +1,6 @@
-//! Frame rendering — drives a headless composition through all frames.
+//! Frame rendering configuration and error types.
 //!
-//! In a full implementation this would use a headless browser or
-//! a native Skia backend. Currently provides the scaffolding and types.
+//! Frame rasterization is handled natively by `dioxuscut-rasterizer` via CPU (tiny-skia) or GPU (wgpu).
 
 use thiserror::Error;
 
@@ -18,13 +17,12 @@ pub enum RenderError {
     FrameFailed(u32, String),
 }
 
-
 /// Configuration for a render job.
 #[derive(Debug, Clone)]
 pub struct RenderConfig {
-    /// URL of the Dioxus app to capture.
+    /// URL of the Dioxus app or server.
     pub url: String,
-    /// Output directory for individual frame PNGs.
+    /// Output directory for frame PNGs.
     pub output_dir: std::path::PathBuf,
     /// Width of the video.
     pub width: u32,
@@ -68,11 +66,3 @@ fn num_cpus() -> usize {
         .map(|n| n.get())
         .unwrap_or(4)
 }
-
-/// Render all frames of a composition to PNG files via Headless Chrome.
-pub async fn render_frames(config: &RenderConfig) -> Result<Vec<std::path::PathBuf>, RenderError> {
-    crate::browser::capture_frames(&config.url, &config.output_dir, config)
-        .await
-        .map_err(|e| RenderError::FrameFailed(0, e.to_string()))
-}
-

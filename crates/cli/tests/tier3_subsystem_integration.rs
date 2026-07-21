@@ -1,9 +1,12 @@
 //! Tier 3: Subsystem Integration E2E Tests
 //!
-//! Validates contracts between HTTP server manager, Headless Chrome CDP renderer,
+//! Validates contracts between HTTP server manager, Native CPU/GPU rasterizer,
 //! and FFmpeg MP4 encoding compiler.
 
-use dioxuscut_renderer::{encode_frames, render_frames, spawn_server, EncodeConfig, RenderConfig};
+use dioxuscut_rasterizer::{
+    TinySkiaBackend, NativeRenderConfig, Scene, SceneNode, Color, render_all_frames,
+};
+use dioxuscut_renderer::{encode_frames, spawn_server, EncodeConfig};
 use std::fs;
 
 #[tokio::test]
@@ -33,41 +36,27 @@ async fn test_subsystem_http_server_lifecycle() {
 }
 
 #[tokio::test]
-async fn test_subsystem_headless_chrome_frame_capture() {
+async fn test_subsystem_native_rasterizer_frame_capture() {
     let temp_dir = std::env::temp_dir().join(format!(
-        "dioxuscut_tier3_chrome_{}",
+        "dioxuscut_tier3_rasterizer_{}",
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
     ));
     fs::create_dir_all(&temp_dir).unwrap();
-    let index_file = temp_dir.join("index.html");
-    fs::write(
-        &index_file,
-        r#"<!DOCTYPE html>
-<html>
-<head><title>Frame Capture Test</title></head>
-<body>
-<div id="content" style="background-color: #123456; width: 640px; height: 360px;">Frame Test</div>
-<script>
-  window.DIOXUSCUT_FRAME = 0;
-</script>
-</body>
-</html>"#,
-    )
-    .unwrap();
-
-    let server_handle = spawn_server(0, &temp_dir).await.expect("Failed to spawn server");
     let frames_dir = temp_dir.join("frames");
 
-    let config = RenderConfig::new(
-        server_handle.url().to_string(),
-        &frames_dir,
-        640,
-        360,
-        30.0,
-        3, // 3 frames: 0, 1, 2
-    );
+    let backend = TinySkiaBackend::headless();
+    let config = NativeRenderConfig::new(640, 360, 30.0, 3, &frames_dir);
 
-    let frame_paths = render_frames(&config).await.expect("render_frames failed");
+    let frame_paths = render_all_frames(&backend, &config, |frame| {
+        let mut scene = Scene::new();
+        scene.push(SceneNode::Rect {
+            x: 0.0, y: 0.0, w: 640.0, h: 360.0,
+            fill: Color::rgb(frame as u8 * 50, 50, 100),
+            stroke: None, stroke_width: 0.0, corner_radius: 0.0,
+        });
+        scene
+    }).expect("render_all_frames failed");
+
     assert_eq!(frame_paths.len(), 3);
 
     for path in &frame_paths {
@@ -81,7 +70,6 @@ async fn test_subsystem_headless_chrome_frame_capture() {
         assert_eq!(&bytes[0..8], &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]);
     }
 
-    server_handle.stop().await.unwrap();
     let _ = fs::remove_dir_all(&temp_dir);
 }
 
@@ -92,35 +80,21 @@ async fn test_subsystem_ffmpeg_mp4_encoding() {
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
     ));
     fs::create_dir_all(&temp_dir).unwrap();
-    let index_file = temp_dir.join("index.html");
-    fs::write(
-        &index_file,
-        r#"<!DOCTYPE html>
-<html>
-<head><title>Encoding Test</title></head>
-<body style="background-color: red;">
-<h1>FFmpeg Encoding Test</h1>
-</body>
-</html>"#,
-    )
-    .unwrap();
-
-    let server_handle = spawn_server(0, &temp_dir).await.expect("Failed to spawn server");
     let frames_dir = temp_dir.join("frames");
 
-    let render_config = RenderConfig::new(
-        server_handle.url().to_string(),
-        &frames_dir,
-        640,
-        360,
-        30.0,
-        5, // 5 frames
-    );
+    let backend = TinySkiaBackend::headless();
+    let config = NativeRenderConfig::new(640, 360, 30.0, 5, &frames_dir);
 
-    // 1. Capture real PNG screenshots via Headless Chrome
-    let _frame_paths = render_frames(&render_config).await.expect("Frame rendering failed");
+    let _frame_paths = render_all_frames(&backend, &config, |_frame| {
+        let mut scene = Scene::new();
+        scene.push(SceneNode::Rect {
+            x: 0.0, y: 0.0, w: 640.0, h: 360.0,
+            fill: Color::rgb(255, 0, 0),
+            stroke: None, stroke_width: 0.0, corner_radius: 0.0,
+        });
+        scene
+    }).expect("Frame rendering failed");
 
-    // 2. Encode rendered PNG sequence into MP4 video via FFmpeg
     let output_mp4 = temp_dir.join("output_test.mp4");
     let encode_cfg = EncodeConfig::h264(&frames_dir, &output_mp4, 30.0);
 
@@ -136,6 +110,5 @@ async fn test_subsystem_ffmpeg_mp4_encoding() {
     let ftyp_slice = &bytes[4..8];
     assert_eq!(ftyp_slice, b"ftyp", "MP4 file missing 'ftyp' container header");
 
-    server_handle.stop().await.unwrap();
     let _ = fs::remove_dir_all(&temp_dir);
 }
