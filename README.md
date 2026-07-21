@@ -19,7 +19,7 @@ The repository also contains Dioxus timeline, media, shape, transition, player, 
 
 ## What works today
 
-- Native scene graph with rectangles, circles, paths, text, gradients, and transformed groups.
+- Native scene graph with rectangles, circles, paths, text, local raster images, gradients, and transformed groups.
 - CPU rendering through `tiny-skia`.
 - Experimental GPU rendering through `wgpu`; unsupported scene features fall back to the CPU renderer for correctness.
 - Bounded-memory parallel frame rendering into an FFmpeg stdin pipe.
@@ -134,9 +134,11 @@ cargo run -p dioxuscut-cli --features rhai -- render \
 
 Each script defines `fn render(ctx, props)`. The context contains `frame`,
 `width`, `height`, `fps`, `duration`, and normalized `progress`. The initial API
-exposes `scene()`, `rect`, `round_rect`, `circle`, `text`, `text_bold`, `group`,
-and `interpolate`. See [`examples/hello.rhai`](examples/hello.rhai) for a complete
-composition.
+exposes `scene()`, `rect`, `round_rect`, `circle`, `text`, `text_bold`, `image`,
+`group`, and `interpolate`. `image(x, y, width, height, src, fit, opacity)` accepts
+a local path or `file://` URI and the fit values `cover`, `contain`, `fill`,
+`none`, and `scale-down`. See [`examples/hello.rhai`](examples/hello.rhai) for a
+complete composition.
 
 The runtime disables module imports and limits operations, call depth,
 expression depth, variables, functions, strings, arrays, and maps. It does not
@@ -239,6 +241,7 @@ written into workflow files.
 ## Current limitations
 
 - General Dioxus VDOM compositions are not automatically translated into native `Scene` nodes; native compositions use the shared preview adapter.
+- Native raster images are decoded from local files and cached in memory; remote image URLs and data URIs are not supported.
 - Native video/audio decoding and audio muxing are not implemented.
 - GPU acceleration covers a subset of scene primitives and uses whole-frame CPU fallback otherwise.
 - Font discovery uses platform fonts, so pixel-identical cross-platform text output is not guaranteed.
@@ -248,7 +251,7 @@ written into workflow files.
 
 1. Migrate reusable Dioxus media, shape, caption, and transition components onto the shared Scene contract.
 2. Explicit font assets and fallback chains for reproducible text.
-3. Native image/video decoding and FFmpeg audio muxing.
+3. Native video decoding and FFmpeg audio muxing.
 4. Full GPU parity for paths, text, groups, strokes, and multi-stop gradients.
 5. Studio project loading, editing, and render queue integration.
 

@@ -537,7 +537,7 @@ fn node_to_instance(node: &SceneNode, _w: u32, _h: u32) -> Option<GpuInstance> {
             params: [0.0, 0.0, 0.0, 1.0],
         }),
 
-        // Group and Text are not yet GPU-accelerated — skip for now.
+        // Complex scene nodes are not yet GPU-accelerated — skip for now.
         _ => None,
     }
 }
@@ -557,7 +557,10 @@ fn gpu_supports_scene(scene: &Scene) -> bool {
         SceneNode::LinearGradient { stops, .. } | SceneNode::RadialGradient { stops, .. } => {
             stops.len() == 2
         }
-        SceneNode::Path { .. } | SceneNode::Text { .. } | SceneNode::Group { .. } => false,
+        SceneNode::Path { .. }
+        | SceneNode::Text { .. }
+        | SceneNode::Image { .. }
+        | SceneNode::Group { .. } => false,
     })
 }
 
@@ -596,6 +599,19 @@ mod support_tests {
             font_weight: 400,
         });
         assert!(!gpu_supports_scene(&scene));
+
+        let image_scene = Scene {
+            nodes: vec![SceneNode::Image {
+                src: "asset.png".into(),
+                x: 0.0,
+                y: 0.0,
+                w: 10.0,
+                h: 10.0,
+                fit: crate::scene::ImageFit::Cover,
+                opacity: 1.0,
+            }],
+        };
+        assert!(!gpu_supports_scene(&image_scene));
     }
 }
 

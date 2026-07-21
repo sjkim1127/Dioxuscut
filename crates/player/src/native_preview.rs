@@ -3,7 +3,7 @@
 use dioxus::prelude::*;
 use dioxuscut_composition::{Composition, CompositionError, NativeCompositionContext};
 use dioxuscut_core::use_current_frame;
-use dioxuscut_rasterizer::{Color, GradientStop, Scene, SceneNode, Transform2D};
+use dioxuscut_rasterizer::{Color, GradientStop, ImageFit, Scene, SceneNode, Transform2D};
 use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -201,6 +201,28 @@ fn SceneNodeView(props: SceneNodeViewProps) -> Element {
                 }
             }
         }
+        SceneNode::Image {
+            src,
+            x,
+            y,
+            w,
+            h,
+            fit,
+            opacity,
+        } => {
+            let preserve_aspect_ratio = image_preserve_aspect_ratio(fit);
+            rsx! {
+                image {
+                    x,
+                    y,
+                    width: w,
+                    height: h,
+                    href: src,
+                    opacity,
+                    preserve_aspect_ratio,
+                }
+            }
+        }
         SceneNode::LinearGradient {
             x,
             y,
@@ -307,6 +329,15 @@ fn transform_css(transform: Transform2D) -> String {
     )
 }
 
+fn image_preserve_aspect_ratio(fit: ImageFit) -> &'static str {
+    match fit {
+        ImageFit::Cover => "xMidYMid slice",
+        ImageFit::Contain | ImageFit::ScaleDown => "xMidYMid meet",
+        ImageFit::Fill => "none",
+        ImageFit::None => "xMidYMid meet",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -339,5 +370,18 @@ mod tests {
 
         assert!(first == clone);
         assert!(first != second);
+    }
+
+    #[test]
+    fn image_fit_maps_to_svg_aspect_ratio() {
+        assert_eq!(
+            image_preserve_aspect_ratio(ImageFit::Cover),
+            "xMidYMid slice"
+        );
+        assert_eq!(
+            image_preserve_aspect_ratio(ImageFit::Contain),
+            "xMidYMid meet"
+        );
+        assert_eq!(image_preserve_aspect_ratio(ImageFit::Fill), "none");
     }
 }

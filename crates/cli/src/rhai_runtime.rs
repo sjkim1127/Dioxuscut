@@ -6,7 +6,7 @@
 use crate::composition::{
     Composition, CompositionError, NativeCompositionContext, PreparedComposition,
 };
-use dioxuscut_rasterizer::{Color, Scene, SceneNode, Transform2D};
+use dioxuscut_rasterizer::{Color, ImageFit, Scene, SceneNode, Transform2D};
 use rhai::module_resolvers::DummyModuleResolver;
 use rhai::{
     Dynamic, Engine, EvalAltResult, ImmutableString, Map, Position, Scope, AST, FLOAT, INT,
@@ -105,6 +105,39 @@ impl SceneBuilder {
         color: &str,
     ) -> RhaiResult<()> {
         self.push_text(x, y, content, font_size, color, 700)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn image(
+        &mut self,
+        x: FLOAT,
+        y: FLOAT,
+        w: FLOAT,
+        h: FLOAT,
+        src: ImmutableString,
+        fit: &str,
+        opacity: FLOAT,
+    ) -> RhaiResult<()> {
+        if src.trim().is_empty() {
+            return Err(runtime_error("image source path must not be empty".into()));
+        }
+        let opacity = finite_f32("opacity", opacity)?;
+        if !(0.0..=1.0).contains(&opacity) {
+            return Err(runtime_error(
+                "opacity must be between 0.0 and 1.0".to_string(),
+            ));
+        }
+
+        self.scene.push(SceneNode::Image {
+            src: src.into_owned(),
+            x: finite_f32("x", x)?,
+            y: finite_f32("y", y)?,
+            w: non_negative_f32("width", w)?,
+            h: non_negative_f32("height", h)?,
+            fit: parse_image_fit(fit)?,
+            opacity,
+        });
+        Ok(())
     }
 
     fn group(
@@ -265,6 +298,7 @@ fn register_scene_api(engine: &mut Engine) {
     engine.register_fn("circle", SceneBuilder::circle);
     engine.register_fn("text", SceneBuilder::text);
     engine.register_fn("text_bold", SceneBuilder::text_bold);
+    engine.register_fn("image", SceneBuilder::image);
     engine.register_fn("group", SceneBuilder::group);
     engine.register_fn(
         "interpolate",
@@ -322,6 +356,19 @@ fn parse_color(value: &str) -> RhaiResult<Color> {
             "invalid color '{value}'; expected #rrggbb or #rrggbbaa"
         ))
     })
+}
+
+fn parse_image_fit(value: &str) -> RhaiResult<ImageFit> {
+    match value {
+        "cover" => Ok(ImageFit::Cover),
+        "contain" => Ok(ImageFit::Contain),
+        "fill" => Ok(ImageFit::Fill),
+        "none" => Ok(ImageFit::None),
+        "scale-down" => Ok(ImageFit::ScaleDown),
+        _ => Err(runtime_error(format!(
+            "invalid image fit '{value}'; expected cover, contain, fill, none, or scale-down"
+        ))),
+    }
 }
 
 fn runtime_error(message: String) -> Box<EvalAltResult> {
@@ -382,6 +429,46 @@ mod tests {
 
         let error = prepared.render(0).unwrap_err();
         assert!(error.to_string().contains("Too many operations"));
+    }
+
+    #[test]
+    fn script_builds_a_local_image_node() {
+        let script = r#"
+            fn render(ctx, props) {
+                let output = scene();
+                output.image(10.0, 20.0, 100.0, 60.0, props.src, "contain", 0.75);
+                output
+            }
+        "#;
+        let composition = RhaiComposition::from_source("image", script).unwrap();
+        let prepared = composition
+            .prepare(&serde_json::json!({"src": "assets/card.png"}), context())
+            .unwrap();
+        let scene = prepared.render(0).unwrap();
+
+        assert!(matches!(
+            &scene.nodes[0],
+            SceneNode::Image { src, fit: ImageFit::Contain, opacity, .. }
+                if src == "assets/card.png" && (*opacity - 0.75).abs() < f32::EPSILON
+        ));
+    }
+
+    #[test]
+    fn script_rejects_invalid_image_fit() {
+        let script = r#"
+            fn render(ctx, props) {
+                let output = scene();
+                output.image(0.0, 0.0, 10.0, 10.0, "asset.png", "stretchy", 1.0);
+                output
+            }
+        "#;
+        let composition = RhaiComposition::from_source("bad-image", script).unwrap();
+        let prepared = composition
+            .prepare(&serde_json::json!({}), context())
+            .unwrap();
+        let error = prepared.render(0).unwrap_err();
+
+        assert!(error.to_string().contains("invalid image fit"));
     }
 
     #[test]

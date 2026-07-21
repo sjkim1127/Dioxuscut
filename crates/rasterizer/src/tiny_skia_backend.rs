@@ -4,9 +4,14 @@
 
 use crate::backend::{FrameConfig, RasterError, RasterizerBackend};
 use crate::font::FontCache;
-use crate::scene::{Color, Scene, SceneNode};
-use image::RgbaImage;
-use tiny_skia::{FillRule, Paint, Path, PathBuilder, Pixmap, Rect, Stroke, Transform};
+use crate::image_cache::ImageCache;
+use crate::scene::{Color, ImageFit, Scene, SceneNode};
+use image::{imageops, RgbaImage};
+use tiny_skia::{
+    FillRule, IntSize, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke, Transform,
+};
+
+const MAX_IMAGE_NODE_PIXELS: u64 = 16 * 1024 * 1024;
 
 /// The `tiny-skia` CPU rasterizer.
 ///
@@ -15,6 +20,7 @@ use tiny_skia::{FillRule, Paint, Path, PathBuilder, Pixmap, Rect, Stroke, Transf
 /// Text is rendered using real TTF glyph data via `ab_glyph`.
 pub struct TinySkiaBackend {
     font: FontCache,
+    images: ImageCache,
 }
 
 impl TinySkiaBackend {
@@ -22,6 +28,7 @@ impl TinySkiaBackend {
     pub fn new() -> Self {
         Self {
             font: FontCache::load(),
+            images: ImageCache::default(),
         }
     }
 
@@ -29,6 +36,7 @@ impl TinySkiaBackend {
     pub fn headless() -> Self {
         Self {
             font: FontCache::headless(),
+            images: ImageCache::default(),
         }
     }
 }
@@ -54,7 +62,8 @@ impl RasterizerBackend for TinySkiaBackend {
             Transform::identity(),
             1.0,
             &self.font,
-        );
+            &self.images,
+        )?;
 
         // Convert tiny-skia Pixmap (RGBA premultiplied) to image::RgbaImage
         let raw_data = pixmap.data().to_vec();
@@ -70,10 +79,12 @@ fn render_nodes(
     parent_transform: Transform,
     parent_opacity: f32,
     font: &FontCache,
-) {
+    images: &ImageCache,
+) -> Result<(), RasterError> {
     for node in nodes {
-        render_node(pixmap, node, parent_transform, parent_opacity, font);
+        render_node(pixmap, node, parent_transform, parent_opacity, font, images)?;
     }
+    Ok(())
 }
 
 fn render_node(
@@ -82,7 +93,8 @@ fn render_node(
     transform: Transform,
     opacity: f32,
     font: &FontCache,
-) {
+    images: &ImageCache,
+) -> Result<(), RasterError> {
     match node {
         SceneNode::Rect {
             x,
@@ -96,7 +108,7 @@ fn render_node(
         } => {
             let rect = match Rect::from_xywh(*x, *y, *w, *h) {
                 Some(r) => r,
-                None => return,
+                None => return Ok(()),
             };
 
             let path = if *corner_radius > 0.0 {
@@ -187,6 +199,50 @@ fn render_node(
             }
         }
 
+        SceneNode::Image {
+            src,
+            x,
+            y,
+            w,
+            h,
+            fit,
+            opacity: node_opacity,
+        } => {
+            let width = rounded_dimension(*w);
+            let height = rounded_dimension(*h);
+            if width == 0 || height == 0 {
+                return Ok(());
+            }
+            if u64::from(width) * u64::from(height) > MAX_IMAGE_NODE_PIXELS {
+                return Err(RasterError::ImageAsset {
+                    path: src.clone(),
+                    reason: format!(
+                        "destination {width}x{height} exceeds the {} pixel safety limit",
+                        MAX_IMAGE_NODE_PIXELS
+                    ),
+                });
+            }
+
+            let source = images.load(src)?;
+            let fitted = fit_image(&source, width, height, *fit);
+            let image_pixmap = rgba_to_pixmap(fitted).ok_or_else(|| RasterError::ImageAsset {
+                path: src.clone(),
+                reason: "image dimensions are too large for the rasterizer".into(),
+            })?;
+            let paint = PixmapPaint {
+                opacity: (opacity * node_opacity).clamp(0.0, 1.0),
+                ..Default::default()
+            };
+            pixmap.draw_pixmap(
+                x.round() as i32,
+                y.round() as i32,
+                image_pixmap.as_ref(),
+                &paint,
+                transform,
+                None,
+            );
+        }
+
         SceneNode::LinearGradient {
             x,
             y,
@@ -196,12 +252,12 @@ fn render_node(
             stops,
         } => {
             if stops.is_empty() {
-                return;
+                return Ok(());
             }
 
             let rect = match Rect::from_xywh(*x, *y, *w, *h) {
                 Some(r) => r,
-                None => return,
+                None => return Ok(()),
             };
             let path = PathBuilder::from_rect(rect);
 
@@ -239,7 +295,7 @@ fn render_node(
 
         SceneNode::RadialGradient { cx, cy, r, stops } => {
             if stops.is_empty() {
-                return;
+                return Ok(());
             }
 
             let path = build_circle(*cx, *cy, *r);
@@ -273,7 +329,7 @@ fn render_node(
         } => {
             let new_transform = transform.post_concat(group_transform.to_tiny_skia());
             let new_opacity = opacity * group_opacity;
-            render_nodes(pixmap, children, new_transform, new_opacity, font);
+            render_nodes(pixmap, children, new_transform, new_opacity, font, images)?;
         }
 
         SceneNode::Text {
@@ -358,6 +414,7 @@ fn render_node(
             }
         }
     }
+    Ok(())
 }
 
 // --- Helpers ---
@@ -365,6 +422,89 @@ fn render_node(
 fn apply_opacity(color: Color, opacity: f32) -> tiny_skia::Color {
     let a = (color.a as f32 * opacity.clamp(0.0, 1.0)) as u8;
     tiny_skia::Color::from_rgba8(color.r, color.g, color.b, a)
+}
+
+fn rounded_dimension(value: f32) -> u32 {
+    if !value.is_finite() || value <= 0.0 {
+        0
+    } else {
+        value.round().clamp(1.0, u32::MAX as f32) as u32
+    }
+}
+
+fn fit_image(source: &RgbaImage, width: u32, height: u32, fit: ImageFit) -> RgbaImage {
+    let mut output = RgbaImage::new(width, height);
+    if source.width() == 0 || source.height() == 0 || width == 0 || height == 0 {
+        return output;
+    }
+
+    let effective_fit = match fit {
+        ImageFit::ScaleDown if source.width() <= width && source.height() <= height => {
+            ImageFit::None
+        }
+        ImageFit::ScaleDown => ImageFit::Contain,
+        other => other,
+    };
+
+    match effective_fit {
+        ImageFit::Fill => imageops::resize(source, width, height, imageops::FilterType::Lanczos3),
+        ImageFit::Cover => {
+            let scale =
+                (width as f64 / source.width() as f64).max(height as f64 / source.height() as f64);
+            let scaled_width = ((source.width() as f64 * scale).ceil() as u32).max(width);
+            let scaled_height = ((source.height() as f64 * scale).ceil() as u32).max(height);
+            let resized = imageops::resize(
+                source,
+                scaled_width,
+                scaled_height,
+                imageops::FilterType::Lanczos3,
+            );
+            let crop_x = (scaled_width - width) / 2;
+            let crop_y = (scaled_height - height) / 2;
+            imageops::crop_imm(&resized, crop_x, crop_y, width, height).to_image()
+        }
+        ImageFit::Contain => {
+            let scale =
+                (width as f64 / source.width() as f64).min(height as f64 / source.height() as f64);
+            let scaled_width = ((source.width() as f64 * scale).round() as u32).clamp(1, width);
+            let scaled_height = ((source.height() as f64 * scale).round() as u32).clamp(1, height);
+            let resized = imageops::resize(
+                source,
+                scaled_width,
+                scaled_height,
+                imageops::FilterType::Lanczos3,
+            );
+            imageops::overlay(
+                &mut output,
+                &resized,
+                ((width - scaled_width) / 2) as i64,
+                ((height - scaled_height) / 2) as i64,
+            );
+            output
+        }
+        ImageFit::None => {
+            imageops::overlay(
+                &mut output,
+                source,
+                (width as i64 - source.width() as i64) / 2,
+                (height as i64 - source.height() as i64) / 2,
+            );
+            output
+        }
+        ImageFit::ScaleDown => unreachable!("scale-down is normalized above"),
+    }
+}
+
+fn rgba_to_pixmap(image: RgbaImage) -> Option<Pixmap> {
+    let size = IntSize::from_wh(image.width(), image.height())?;
+    let mut data = image.into_raw();
+    for pixel in data.chunks_exact_mut(4) {
+        let alpha = pixel[3] as u16;
+        pixel[0] = ((pixel[0] as u16 * alpha + 127) / 255) as u8;
+        pixel[1] = ((pixel[1] as u16 * alpha + 127) / 255) as u8;
+        pixel[2] = ((pixel[2] as u16 * alpha + 127) / 255) as u8;
+    }
+    Pixmap::from_vec(data, size)
 }
 
 fn build_circle(cx: f32, cy: f32, r: f32) -> Path {
@@ -514,7 +654,8 @@ fn parse_f32(tokens: &[String], pos: &mut usize) -> Option<f32> {
 mod tests {
     use super::*;
     use crate::backend::FrameConfig;
-    use crate::scene::{Color, Scene, SceneNode};
+    use crate::scene::{Color, ImageFit, Scene, SceneNode};
+    use image::Rgba;
 
     fn render(scene: &Scene, w: u32, h: u32) -> RgbaImage {
         let backend = TinySkiaBackend::new();
@@ -626,5 +767,63 @@ mod tests {
             px[3] > 50 && px[3] < 200,
             "Group opacity should reduce alpha"
         );
+    }
+
+    #[test]
+    fn local_image_is_fitted_and_decoded_once() {
+        let path = std::env::temp_dir().join(format!(
+            "dioxuscut-rasterizer-image-{}.png",
+            std::process::id()
+        ));
+        RgbaImage::from_pixel(4, 2, Rgba([255, 0, 0, 255]))
+            .save(&path)
+            .unwrap();
+
+        let scene = Scene {
+            nodes: vec![SceneNode::Image {
+                src: path.display().to_string(),
+                x: 0.0,
+                y: 0.0,
+                w: 4.0,
+                h: 4.0,
+                fit: ImageFit::Contain,
+                opacity: 1.0,
+            }],
+        };
+        let backend = TinySkiaBackend::headless();
+        let config = FrameConfig::new(4, 4, 0, 30.0);
+        let first = backend.render_frame(&scene, &config).unwrap();
+        let second = backend.render_frame(&scene, &config).unwrap();
+
+        assert_eq!(first.get_pixel(2, 0)[3], 0, "letterbox should be clear");
+        assert_eq!(first.get_pixel(2, 2), &Rgba([255, 0, 0, 255]));
+        assert_eq!(first, second);
+        assert_eq!(backend.images.len(), 1);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn missing_image_returns_an_asset_error() {
+        let path = std::env::temp_dir().join(format!(
+            "dioxuscut-missing-image-{}.png",
+            std::process::id()
+        ));
+        let scene = Scene {
+            nodes: vec![SceneNode::Image {
+                src: path.display().to_string(),
+                x: 0.0,
+                y: 0.0,
+                w: 4.0,
+                h: 4.0,
+                fit: ImageFit::Cover,
+                opacity: 1.0,
+            }],
+        };
+        let error = TinySkiaBackend::headless()
+            .render_frame(&scene, &FrameConfig::new(4, 4, 0, 30.0))
+            .unwrap_err();
+
+        assert!(error.to_string().contains("Image asset error"));
+        assert!(error.to_string().contains("dioxuscut-missing-image"));
     }
 }

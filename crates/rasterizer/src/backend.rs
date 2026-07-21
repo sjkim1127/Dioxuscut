@@ -13,6 +13,8 @@ pub enum RasterError {
     Frame { frame: u32, reason: String },
     #[error("Image encode error: {0}")]
     ImageEncode(String),
+    #[error("Image asset error for {path}: {reason}")]
+    ImageAsset { path: String, reason: String },
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }

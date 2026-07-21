@@ -66,6 +66,23 @@ pub struct GradientStop {
     pub color: Color,
 }
 
+/// How a raster image is fitted into its destination rectangle.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ImageFit {
+    /// Preserve aspect ratio and fill the destination, cropping overflow.
+    #[default]
+    Cover,
+    /// Preserve aspect ratio and show the complete image with transparent letterboxing.
+    Contain,
+    /// Stretch the image to exactly match the destination.
+    Fill,
+    /// Keep the image at its natural pixel size, centered and clipped.
+    None,
+    /// Use the natural size unless the image must be reduced to fit.
+    ScaleDown,
+}
+
 /// A node in the scene graph.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SceneNode {
@@ -108,6 +125,17 @@ pub enum SceneNode {
         font_size: f32,
         color: Color,
         font_weight: u16, // 400 = normal, 700 = bold
+    },
+
+    /// Local raster image asset. `src` may be a filesystem path or `file://` URI.
+    Image {
+        src: String,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        fit: ImageFit,
+        opacity: f32,
     },
 
     /// Linear gradient background covering a rectangle.
@@ -209,5 +237,24 @@ mod tests {
             corner_radius: 0.0,
         });
         assert_eq!(scene.nodes.len(), 1);
+    }
+
+    #[test]
+    fn image_node_round_trips_through_json() {
+        let scene = Scene {
+            nodes: vec![SceneNode::Image {
+                src: "assets/card.png".into(),
+                x: 10.0,
+                y: 20.0,
+                w: 320.0,
+                h: 180.0,
+                fit: ImageFit::Contain,
+                opacity: 0.75,
+            }],
+        };
+
+        let json = serde_json::to_string(&scene).unwrap();
+        assert!(json.contains("contain"));
+        assert_eq!(serde_json::from_str::<Scene>(&json).unwrap(), scene);
     }
 }

@@ -27,6 +27,7 @@
 
 pub mod backend;
 pub mod font;
+mod image_cache;
 pub mod render;
 pub mod scene;
 pub mod tiny_skia_backend;
@@ -40,7 +41,7 @@ pub use render::{
     render_to_ffmpeg_pipe, render_to_ffmpeg_pipe_fallible, save_frame, NativeRenderConfig,
     PipeConfig,
 };
-pub use scene::{Color, GradientStop, Scene, SceneNode, Transform2D};
+pub use scene::{Color, GradientStop, ImageFit, Scene, SceneNode, Transform2D};
 pub use tiny_skia_backend::TinySkiaBackend;
 #[cfg(feature = "gpu")]
 pub use wgpu_backend::WgpuBackend;
