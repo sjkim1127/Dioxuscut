@@ -43,6 +43,13 @@ impl TinySkiaBackend {
             videos: VideoFrameCache::default(),
         }
     }
+
+    /// Stop all idle persistent FFmpeg decoder processes immediately.
+    ///
+    /// Decoders are also stopped automatically when the backend is dropped.
+    pub fn shutdown_media(&self) {
+        self.videos.shutdown();
+    }
 }
 
 impl Default for TinySkiaBackend {
@@ -60,14 +67,18 @@ impl RasterizerBackend for TinySkiaBackend {
         // Clear to transparent
         pixmap.fill(tiny_skia::Color::TRANSPARENT);
 
+        let resources = RenderResources {
+            font: &self.font,
+            images: &self.images,
+            videos: &self.videos,
+            sampling_fps: config.fps,
+        };
         render_nodes(
             &mut pixmap,
             &scene.nodes,
             Transform::identity(),
             1.0,
-            &self.font,
-            &self.images,
-            &self.videos,
+            &resources,
         )?;
 
         // Convert tiny-skia Pixmap (RGBA premultiplied) to image::RgbaImage
@@ -78,25 +89,22 @@ impl RasterizerBackend for TinySkiaBackend {
     }
 }
 
+struct RenderResources<'a> {
+    font: &'a FontCache,
+    images: &'a ImageCache,
+    videos: &'a VideoFrameCache,
+    sampling_fps: f64,
+}
+
 fn render_nodes(
     pixmap: &mut Pixmap,
     nodes: &[SceneNode],
     parent_transform: Transform,
     parent_opacity: f32,
-    font: &FontCache,
-    images: &ImageCache,
-    videos: &VideoFrameCache,
+    resources: &RenderResources<'_>,
 ) -> Result<(), RasterError> {
     for node in nodes {
-        render_node(
-            pixmap,
-            node,
-            parent_transform,
-            parent_opacity,
-            font,
-            images,
-            videos,
-        )?;
+        render_node(pixmap, node, parent_transform, parent_opacity, resources)?;
     }
     Ok(())
 }
@@ -106,9 +114,7 @@ fn render_node(
     node: &SceneNode,
     transform: Transform,
     opacity: f32,
-    font: &FontCache,
-    images: &ImageCache,
-    videos: &VideoFrameCache,
+    resources: &RenderResources<'_>,
 ) -> Result<(), RasterError> {
     match node {
         SceneNode::Rect {
@@ -223,7 +229,7 @@ fn render_node(
             fit,
             opacity: node_opacity,
         } => {
-            let source = images.load(src)?;
+            let source = resources.images.load(src)?;
             draw_media(
                 pixmap,
                 &source,
@@ -241,6 +247,7 @@ fn render_node(
         SceneNode::Video {
             src,
             time,
+            looped,
             x,
             y,
             w,
@@ -248,7 +255,9 @@ fn render_node(
             fit,
             opacity: node_opacity,
         } => {
-            let source = videos.load(src, *time)?;
+            let source = resources
+                .videos
+                .load(src, *time, resources.sampling_fps, *looped)?;
             draw_media(
                 pixmap,
                 &source,
@@ -351,15 +360,7 @@ fn render_node(
         } => {
             let new_transform = transform.post_concat(group_transform.to_tiny_skia());
             let new_opacity = opacity * group_opacity;
-            render_nodes(
-                pixmap,
-                children,
-                new_transform,
-                new_opacity,
-                font,
-                images,
-                videos,
-            )?;
+            render_nodes(pixmap, children, new_transform, new_opacity, resources)?;
         }
 
         SceneNode::Text {
@@ -372,7 +373,7 @@ fn render_node(
         } => {
             let text_color = apply_opacity(*color, opacity);
 
-            if let Some(rendered) = font.rasterize(content, *font_size) {
+            if let Some(rendered) = resources.font.rasterize(content, *font_size) {
                 // Blit the glyph coverage map onto the pixmap at (x, y - baseline)
                 let origin_x = x.floor() as i32;
                 let origin_y = (*y - rendered.baseline as f32).floor() as i32;
@@ -929,9 +930,16 @@ mod tests {
                 "-f",
                 "lavfi",
                 "-i",
-                "color=c=red:s=16x16:r=2:d=1",
+                "color=c=red:s=16x16:r=2:d=7",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:sample_rate=48000:duration=7",
+                "-shortest",
                 "-c:v",
                 "ffv1",
+                "-c:a",
+                "pcm_s16le",
             ])
             .arg(&source)
             .status()
@@ -942,6 +950,7 @@ mod tests {
             nodes: vec![SceneNode::Video {
                 src: source.display().to_string(),
                 time: 0.0,
+                looped: false,
                 x: 0.0,
                 y: 0.0,
                 w: 16.0,
@@ -953,12 +962,72 @@ mod tests {
         let backend = TinySkiaBackend::headless();
         let config = FrameConfig::new(16, 16, 0, 2.0);
         let first = backend.render_frame(&scene, &config).unwrap();
-        let second = backend.render_frame(&scene, &config).unwrap();
+        let mut next_scene = scene.clone();
+        let SceneNode::Video { time, .. } = &mut next_scene.nodes[0] else {
+            unreachable!();
+        };
+        *time = 0.5;
+        let second = backend.render_frame(&next_scene, &config).unwrap();
 
         let pixel = first.get_pixel(8, 8);
         assert!(pixel[0] > 240 && pixel[1] < 20 && pixel[2] < 20);
         assert_eq!(first, second);
         assert!(backend.videos.bytes() > 0);
+        assert_eq!(
+            backend.videos.spawn_count(),
+            1,
+            "sequential frames should reuse one persistent decoder"
+        );
+
+        let mut jump_scene = scene.clone();
+        let SceneNode::Video { time, .. } = &mut jump_scene.nodes[0] else {
+            unreachable!();
+        };
+        *time = 6.5;
+        backend.render_frame(&jump_scene, &config).unwrap();
+        assert_eq!(
+            backend.videos.spawn_count(),
+            2,
+            "large seeks should restart"
+        );
+
+        let mut reverse_scene = scene.clone();
+        let SceneNode::Video { time, .. } = &mut reverse_scene.nodes[0] else {
+            unreachable!();
+        };
+        *time = 1.0;
+        backend.render_frame(&reverse_scene, &config).unwrap();
+        assert_eq!(
+            backend.videos.spawn_count(),
+            3,
+            "uncached reverse seeks should restart"
+        );
+
+        let mut loop_scene = scene.clone();
+        let SceneNode::Video { time, looped, .. } = &mut loop_scene.nodes[0] else {
+            unreachable!();
+        };
+        *time = 7.25;
+        *looped = true;
+        backend.render_frame(&loop_scene, &config).unwrap();
+
+        let mut eof_scene = scene.clone();
+        let SceneNode::Video { time, .. } = &mut eof_scene.nodes[0] else {
+            unreachable!();
+        };
+        *time = 20.0;
+        backend.render_frame(&eof_scene, &config).unwrap();
+        assert_eq!(backend.videos.decoder_count(), 1);
+
+        let metadata = crate::probe_video_metadata(source.to_str().unwrap()).unwrap();
+        assert_eq!((metadata.width, metadata.height), (16, 16));
+        assert_eq!((metadata.display_width, metadata.display_height), (16, 16));
+        assert_eq!(metadata.fps, Some(2.0));
+        assert_eq!(metadata.audio_stream_indices.len(), 1);
+        assert!(metadata.duration.is_some_and(|duration| duration >= 7.0));
+
+        backend.shutdown_media();
+        assert_eq!(backend.videos.decoder_count(), 0);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

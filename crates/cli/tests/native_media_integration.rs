@@ -69,6 +69,7 @@ fn native_video_frames_and_audio_are_encoded_together() {
         nodes: vec![SceneNode::Video {
             src: source_for_frames.clone(),
             time: frame as f64 / 5.0,
+            looped: false,
             x: 0.0,
             y: 0.0,
             w: 64.0,

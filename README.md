@@ -23,6 +23,7 @@ The repository also contains Dioxus timeline, media, shape, transition, player, 
 - CPU rendering through `tiny-skia`.
 - Experimental GPU rendering through `wgpu`; unsupported scene features fall back to the CPU renderer for correctness.
 - Bounded-memory parallel frame rendering into an FFmpeg stdin pipe.
+- Cached FFprobe metadata and persistent, bounded FFmpeg rawvideo decoder sessions.
 - Registry-based Rust compositions and optional sandboxed Rhai compositions, both with JSON props.
 - Shared native composition contract for CLI export and Dioxus Player/Studio preview.
 - FFmpeg audio trim, timeline delay, volume, playback-rate, looping, multi-track mixing, and AAC muxing.
@@ -143,6 +144,7 @@ paths or `file://` URIs and the fit values `cover`, `contain`, `fill`, `none`, a
 ```rhai
 output.image(x, y, width, height, "card.png", "contain", 1.0);
 output.video(x, y, width, height, "clip.mp4", source_time, "cover", 1.0);
+output.video(x, y, width, height, "clip.mp4", source_time, "cover", 1.0, true); // loop
 output.audio("clip.mp4", source_offset, timeline_offset, duration, volume, playback_rate, looped);
 ```
 
@@ -255,7 +257,7 @@ written into workflow files.
 
 - General Dioxus VDOM compositions are not automatically translated into native `Scene` nodes; native compositions use the shared preview adapter.
 - Native image, video, and audio sources are local files; remote URLs and data URIs are not supported.
-- Video frames use bounded parallel FFmpeg subprocess decoding and a 128 MiB LRU cache; a persistent decoder is not implemented yet.
+- Video frames use cached FFprobe stream metadata, up to four persistent FFmpeg decoder sources, fixed-output-FPS sampling for VFR input, and a 128 MiB frame LRU. Backward or large forward seeks restart only the affected decoder.
 - Audio declarations are taken from frame zero and must be static for the render.
 - GPU acceleration covers a subset of scene primitives and uses whole-frame CPU fallback otherwise.
 - Font discovery uses platform fonts, so pixel-identical cross-platform text output is not guaranteed.
@@ -265,7 +267,7 @@ written into workflow files.
 
 1. Migrate reusable Dioxus media, shape, caption, and transition components onto the shared Scene contract.
 2. Explicit font assets and fallback chains for reproducible text.
-3. Persistent native video decoder sessions and source metadata probing.
+3. Frame-accurate Player video/audio synchronization with buffering and drift correction.
 4. Full GPU parity for paths, text, media, groups, strokes, and multi-stop gradients.
 5. Studio project loading, media editing, and render queue integration.
 

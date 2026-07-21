@@ -175,6 +175,9 @@ pub enum SceneNode {
     Video {
         src: String,
         time: f64,
+        /// Repeat the video timeline after the source duration.
+        #[serde(default)]
+        looped: bool,
         x: f32,
         y: f32,
         w: f32,
@@ -327,6 +330,19 @@ mod tests {
         let json = serde_json::to_string(&scene).unwrap();
         assert!(json.contains("contain"));
         assert_eq!(serde_json::from_str::<Scene>(&json).unwrap(), scene);
+    }
+
+    #[test]
+    fn video_loop_defaults_to_false_for_existing_scene_json() {
+        let json = r#"{
+            "Video": {
+                "src": "clip.mp4", "time": 0.0,
+                "x": 0.0, "y": 0.0, "w": 10.0, "h": 10.0,
+                "fit": "cover", "opacity": 1.0
+            }
+        }"#;
+        let node = serde_json::from_str::<SceneNode>(json).unwrap();
+        assert!(matches!(node, SceneNode::Video { looped: false, .. }));
     }
 
     #[test]

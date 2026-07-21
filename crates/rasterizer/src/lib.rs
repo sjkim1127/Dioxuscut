@@ -44,5 +44,6 @@ pub use render::{
 };
 pub use scene::{AudioTrack, Color, GradientStop, ImageFit, Scene, SceneNode, Transform2D};
 pub use tiny_skia_backend::TinySkiaBackend;
+pub use video_cache::{probe_video_metadata, VideoMetadata};
 #[cfg(feature = "gpu")]
 pub use wgpu_backend::WgpuBackend;

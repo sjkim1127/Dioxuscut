@@ -226,6 +226,7 @@ fn SceneNodeView(props: SceneNodeViewProps) -> Element {
         SceneNode::Video {
             src,
             time,
+            looped,
             x,
             y,
             w,
@@ -245,6 +246,7 @@ fn SceneNodeView(props: SceneNodeViewProps) -> Element {
                         src,
                         style,
                         muted: true,
+                        r#loop: looped,
                         preload: "auto",
                     }
                 }

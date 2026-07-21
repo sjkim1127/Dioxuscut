@@ -152,12 +152,45 @@ impl SceneBuilder {
         fit: &str,
         opacity: FLOAT,
     ) -> RhaiResult<()> {
+        self.video_inner(x, y, w, h, src, time, fit, opacity, false)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn video_looped(
+        &mut self,
+        x: FLOAT,
+        y: FLOAT,
+        w: FLOAT,
+        h: FLOAT,
+        src: ImmutableString,
+        time: FLOAT,
+        fit: &str,
+        opacity: FLOAT,
+        looped: bool,
+    ) -> RhaiResult<()> {
+        self.video_inner(x, y, w, h, src, time, fit, opacity, looped)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn video_inner(
+        &mut self,
+        x: FLOAT,
+        y: FLOAT,
+        w: FLOAT,
+        h: FLOAT,
+        src: ImmutableString,
+        time: FLOAT,
+        fit: &str,
+        opacity: FLOAT,
+        looped: bool,
+    ) -> RhaiResult<()> {
         validate_media_source(&src)?;
         let time = non_negative_f64("video time", time)?;
         let opacity = unit_f32("opacity", opacity)?;
         self.scene.push(SceneNode::Video {
             src: src.into_owned(),
             time,
+            looped,
             x: finite_f32("x", x)?,
             y: finite_f32("y", y)?,
             w: non_negative_f32("width", w)?,
@@ -361,6 +394,7 @@ fn register_scene_api(engine: &mut Engine) {
     engine.register_fn("text_bold", SceneBuilder::text_bold);
     engine.register_fn("image", SceneBuilder::image);
     engine.register_fn("video", SceneBuilder::video);
+    engine.register_fn("video", SceneBuilder::video_looped);
     engine.register_fn("audio", SceneBuilder::audio);
     engine.register_fn("group", SceneBuilder::group);
     engine.register_fn(
@@ -571,6 +605,7 @@ mod tests {
             fn render(ctx, props) {
                 let output = scene();
                 output.video(0.0, 0.0, 320.0, 180.0, props.video, ctx.frame.to_float() / ctx.fps, "cover", 1.0);
+                output.video(0.0, 0.0, 320.0, 180.0, props.video, ctx.frame.to_float() / ctx.fps, "contain", 0.5, true);
                 output.audio(props.video, 0.25, 0.5, 2.0, 0.75, 1.25, true);
                 output
             }
@@ -583,8 +618,13 @@ mod tests {
 
         assert!(matches!(
             &scene.nodes[0],
-            SceneNode::Video { src, time, fit: ImageFit::Cover, .. }
+            SceneNode::Video { src, time, fit: ImageFit::Cover, looped: false, .. }
                 if src == "assets/clip.mp4" && (*time - 0.1).abs() < f64::EPSILON
+        ));
+        assert!(matches!(
+            &scene.nodes[1],
+            SceneNode::Video { fit: ImageFit::Contain, opacity, looped: true, .. }
+                if (*opacity - 0.5).abs() < f32::EPSILON
         ));
         let tracks = scene.audio_tracks();
         assert_eq!(tracks.len(), 1);
