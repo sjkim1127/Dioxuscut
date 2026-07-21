@@ -16,8 +16,9 @@
 </p>
 
 <p align="center">
-  <video src="assets/showcase.mp4" autoplay loop muted playsinline width="100%" poster="assets/showcase.gif" style="border-radius: 8px;"></video>
+  <img src="assets/showcase.gif" alt="Dioxuscut Live Rendered Demo" width="100%" />
 </p>
+
 
 
 ---
