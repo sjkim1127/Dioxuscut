@@ -13,18 +13,19 @@
   <img src="https://img.shields.io/badge/status-early%20development-f59e0b?style=flat-square" alt="Early development" />
 </p>
 
-Dioxuscut is an early-stage programmatic video toolkit written in Rust. Its native export path renders a registered `NativeComposition` into a small scene graph, rasterizes frames with `tiny-skia` or `wgpu`, and sends bounded batches of raw RGBA frames to FFmpeg. The same native scene can now be displayed in the Dioxus Player through `NativeCompositionPreview`.
+Dioxuscut is an early-stage programmatic video toolkit written in Rust. Its native export path renders a registered `NativeComposition` into a small scene graph, rasterizes frames with `tiny-skia` or `wgpu`, and sends bounded batches of raw RGBA frames to FFmpeg. Local video frames are decoded through FFmpeg, and declared audio tracks are mixed into the encoded output. The same native scene can be displayed in the Dioxus Player through `NativeCompositionPreview`.
 
 The repository also contains Dioxus timeline, media, shape, transition, player, and Studio-preview components. These components currently form the interactive preview layer; arbitrary Dioxus VDOM is **not yet automatically translated** into the native scene graph.
 
 ## What works today
 
-- Native scene graph with rectangles, circles, paths, text, local raster images, gradients, and transformed groups.
+- Native scene graph with rectangles, circles, paths, text, local raster images, decoded video frames, audio tracks, gradients, and transformed groups.
 - CPU rendering through `tiny-skia`.
 - Experimental GPU rendering through `wgpu`; unsupported scene features fall back to the CPU renderer for correctness.
 - Bounded-memory parallel frame rendering into an FFmpeg stdin pipe.
 - Registry-based Rust compositions and optional sandboxed Rhai compositions, both with JSON props.
 - Shared native composition contract for CLI export and Dioxus Player/Studio preview.
+- FFmpeg audio trim, timeline delay, volume, playback-rate, looping, multi-track mixing, and AAC muxing.
 - Animation, shape, path, caption, noise, timeline, player, server, encoder, and CLI test coverage.
 - Dioxus web example and desktop Studio preview shell.
 
@@ -39,7 +40,7 @@ Native export
       -> Scene
       -> TinySkiaBackend / WgpuBackend with CPU fallback
       -> bounded ordered RGBA batches
-      -> FFmpeg
+      -> FFmpeg + collected audio tracks
       -> MP4
 
 Dioxus native-scene preview
@@ -135,15 +136,26 @@ cargo run -p dioxuscut-cli --features rhai -- render \
 Each script defines `fn render(ctx, props)`. The context contains `frame`,
 `width`, `height`, `fps`, `duration`, and normalized `progress`. The initial API
 exposes `scene()`, `rect`, `round_rect`, `circle`, `text`, `text_bold`, `image`,
-`group`, and `interpolate`. `image(x, y, width, height, src, fit, opacity)` accepts
-a local path or `file://` URI and the fit values `cover`, `contain`, `fill`,
-`none`, and `scale-down`. See [`examples/hello.rhai`](examples/hello.rhai) for a
-complete composition.
+`video`, `audio`, `group`, and `interpolate`. Image and video nodes accept local
+paths or `file://` URIs and the fit values `cover`, `contain`, `fill`, `none`, and
+`scale-down`:
+
+```rhai
+output.image(x, y, width, height, "card.png", "contain", 1.0);
+output.video(x, y, width, height, "clip.mp4", source_time, "cover", 1.0);
+output.audio("clip.mp4", source_offset, timeline_offset, duration, volume, playback_rate, looped);
+```
+
+An audio `duration` of `0.0` means the remainder of the composition. Audio nodes
+are collected from frame zero, so their configuration must remain static during
+a render. See [`examples/hello.rhai`](examples/hello.rhai) for the basic scene API.
 
 The runtime disables module imports and limits operations, call depth,
 expression depth, variables, functions, strings, arrays, and maps. It does not
-expose filesystem, network, clock, or random APIs. A new Rhai scope is created
-for every frame so parallel rendering does not share mutable script state.
+expose direct filesystem, network, clock, or random APIs. Media nodes can request
+local files from the renderer, so hosts accepting untrusted scripts should also
+validate or restrict media paths. A new Rhai scope is created for every frame so
+parallel rendering does not share mutable script state.
 
 ## Registering a native composition
 
@@ -198,6 +210,7 @@ dioxuscut render [OPTIONS] (--composition <ID> | --script <PATH>)
       --script <PATH>          Rhai composition file; requires feature `rhai`
   -p, --props <PATH>           JSON props file
   -o, --output <PATH>          Output path [default: out.mp4]
+      --audio <PATH>           Local audio file to mix; may be repeated
       --width <PX>             Even output width [default: 1920]
       --height <PX>            Even output height [default: 1080]
       --fps <FPS>              Finite positive FPS [default: 30]
@@ -241,8 +254,9 @@ written into workflow files.
 ## Current limitations
 
 - General Dioxus VDOM compositions are not automatically translated into native `Scene` nodes; native compositions use the shared preview adapter.
-- Native raster images are decoded from local files and cached in memory; remote image URLs and data URIs are not supported.
-- Native video/audio decoding and audio muxing are not implemented.
+- Native image, video, and audio sources are local files; remote URLs and data URIs are not supported.
+- Video frames use bounded parallel FFmpeg subprocess decoding and a 128 MiB LRU cache; a persistent decoder is not implemented yet.
+- Audio declarations are taken from frame zero and must be static for the render.
 - GPU acceleration covers a subset of scene primitives and uses whole-frame CPU fallback otherwise.
 - Font discovery uses platform fonts, so pixel-identical cross-platform text output is not guaranteed.
 - Studio is a preview shell, not yet a full editor.
@@ -251,9 +265,9 @@ written into workflow files.
 
 1. Migrate reusable Dioxus media, shape, caption, and transition components onto the shared Scene contract.
 2. Explicit font assets and fallback chains for reproducible text.
-3. Native video decoding and FFmpeg audio muxing.
-4. Full GPU parity for paths, text, groups, strokes, and multi-stop gradients.
-5. Studio project loading, editing, and render queue integration.
+3. Persistent native video decoder sessions and source metadata probing.
+4. Full GPU parity for paths, text, media, groups, strokes, and multi-stop gradients.
+5. Studio project loading, media editing, and render queue integration.
 
 ## License
 

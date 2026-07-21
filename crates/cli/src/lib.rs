@@ -30,6 +30,8 @@ pub enum ValidationError {
     ScriptFileNotFound(PathBuf),
     #[error("Props file not found: {0}")]
     PropsFileNotFound(PathBuf),
+    #[error("Audio file not found: {0}")]
+    AudioFileNotFound(PathBuf),
     #[error("Invalid resolution: width ({0}) and height ({1}) must be greater than 0")]
     InvalidZeroResolution(u32, u32),
     #[error("Invalid resolution: width ({0}) and height ({1}) must be even numbers for H.264 video encoding")]
@@ -87,6 +89,10 @@ pub enum Commands {
         #[arg(long, short, default_value = "out.mp4")]
         output: PathBuf,
 
+        /// Local audio file to mix into the output. May be repeated.
+        #[arg(long = "audio", value_name = "PATH")]
+        audio: Vec<PathBuf>,
+
         /// Resolution width.
         #[arg(long, default_value_t = 1920)]
         width: u32,
@@ -116,6 +122,7 @@ pub struct RenderRequest {
     pub script: Option<PathBuf>,
     pub props: Option<PathBuf>,
     pub output: PathBuf,
+    pub audio: Vec<PathBuf>,
     pub width: u32,
     pub height: u32,
     pub fps: f64,
@@ -194,6 +201,11 @@ pub async fn execute_render_command_with_registry(
         request.fps,
         request.duration,
     )?;
+    for path in &request.audio {
+        if !path.is_file() {
+            return Err(ValidationError::AudioFileNotFound(path.clone()).into());
+        }
+    }
 
     let props = match &request.props {
         Some(path) => {
@@ -249,7 +261,14 @@ pub async fn execute_render_command_with_registry(
 
     // Validate the first frame before starting FFmpeg. Dynamic compositions
     // therefore report syntax, type, and API errors without creating an output.
-    prepared.render(0)?;
+    let first_scene = prepared.render(0)?;
+    let mut audio_tracks = first_scene.audio_tracks();
+    audio_tracks.extend(
+        request
+            .audio
+            .iter()
+            .map(|path| dioxuscut_rasterizer::AudioTrack::new(path.to_string_lossy().into_owned())),
+    );
 
     tracing::info!(
         composition = composition.id(),
@@ -270,7 +289,8 @@ pub async fn execute_render_command_with_registry(
                 request.fps,
                 request.duration,
                 &request.output,
-            );
+            )
+            .with_audio_tracks(audio_tracks.clone());
             render_to_ffmpeg_pipe_fallible(&rasterizer, &pipe_config, |frame| {
                 prepared.render(frame)
             })?;
@@ -296,7 +316,8 @@ pub async fn execute_render_command_with_registry(
                     request.fps,
                     request.duration,
                     &request.output,
-                );
+                )
+                .with_audio_tracks(audio_tracks.clone());
                 render_to_ffmpeg_pipe_fallible(&rasterizer, &pipe_config, |frame| {
                     prepared.render(frame)
                 })?;

@@ -6,6 +6,7 @@ use crate::backend::{FrameConfig, RasterError, RasterizerBackend};
 use crate::font::FontCache;
 use crate::image_cache::ImageCache;
 use crate::scene::{Color, ImageFit, Scene, SceneNode};
+use crate::video_cache::VideoFrameCache;
 use image::{imageops, RgbaImage};
 use tiny_skia::{
     FillRule, IntSize, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke, Transform,
@@ -21,6 +22,7 @@ const MAX_IMAGE_NODE_PIXELS: u64 = 16 * 1024 * 1024;
 pub struct TinySkiaBackend {
     font: FontCache,
     images: ImageCache,
+    videos: VideoFrameCache,
 }
 
 impl TinySkiaBackend {
@@ -29,6 +31,7 @@ impl TinySkiaBackend {
         Self {
             font: FontCache::load(),
             images: ImageCache::default(),
+            videos: VideoFrameCache::default(),
         }
     }
 
@@ -37,6 +40,7 @@ impl TinySkiaBackend {
         Self {
             font: FontCache::headless(),
             images: ImageCache::default(),
+            videos: VideoFrameCache::default(),
         }
     }
 }
@@ -63,6 +67,7 @@ impl RasterizerBackend for TinySkiaBackend {
             1.0,
             &self.font,
             &self.images,
+            &self.videos,
         )?;
 
         // Convert tiny-skia Pixmap (RGBA premultiplied) to image::RgbaImage
@@ -80,9 +85,18 @@ fn render_nodes(
     parent_opacity: f32,
     font: &FontCache,
     images: &ImageCache,
+    videos: &VideoFrameCache,
 ) -> Result<(), RasterError> {
     for node in nodes {
-        render_node(pixmap, node, parent_transform, parent_opacity, font, images)?;
+        render_node(
+            pixmap,
+            node,
+            parent_transform,
+            parent_opacity,
+            font,
+            images,
+            videos,
+        )?;
     }
     Ok(())
 }
@@ -94,6 +108,7 @@ fn render_node(
     opacity: f32,
     font: &FontCache,
     images: &ImageCache,
+    videos: &VideoFrameCache,
 ) -> Result<(), RasterError> {
     match node {
         SceneNode::Rect {
@@ -208,40 +223,47 @@ fn render_node(
             fit,
             opacity: node_opacity,
         } => {
-            let width = rounded_dimension(*w);
-            let height = rounded_dimension(*h);
-            if width == 0 || height == 0 {
-                return Ok(());
-            }
-            if u64::from(width) * u64::from(height) > MAX_IMAGE_NODE_PIXELS {
-                return Err(RasterError::ImageAsset {
-                    path: src.clone(),
-                    reason: format!(
-                        "destination {width}x{height} exceeds the {} pixel safety limit",
-                        MAX_IMAGE_NODE_PIXELS
-                    ),
-                });
-            }
-
             let source = images.load(src)?;
-            let fitted = fit_image(&source, width, height, *fit);
-            let image_pixmap = rgba_to_pixmap(fitted).ok_or_else(|| RasterError::ImageAsset {
-                path: src.clone(),
-                reason: "image dimensions are too large for the rasterizer".into(),
-            })?;
-            let paint = PixmapPaint {
-                opacity: (opacity * node_opacity).clamp(0.0, 1.0),
-                ..Default::default()
-            };
-            pixmap.draw_pixmap(
-                x.round() as i32,
-                y.round() as i32,
-                image_pixmap.as_ref(),
-                &paint,
+            draw_media(
+                pixmap,
+                &source,
+                src,
+                *x,
+                *y,
+                *w,
+                *h,
+                *fit,
+                opacity * node_opacity,
                 transform,
-                None,
-            );
+            )?;
         }
+
+        SceneNode::Video {
+            src,
+            time,
+            x,
+            y,
+            w,
+            h,
+            fit,
+            opacity: node_opacity,
+        } => {
+            let source = videos.load(src, *time)?;
+            draw_media(
+                pixmap,
+                &source,
+                src,
+                *x,
+                *y,
+                *w,
+                *h,
+                *fit,
+                opacity * node_opacity,
+                transform,
+            )?;
+        }
+
+        SceneNode::Audio { .. } => {}
 
         SceneNode::LinearGradient {
             x,
@@ -329,7 +351,15 @@ fn render_node(
         } => {
             let new_transform = transform.post_concat(group_transform.to_tiny_skia());
             let new_opacity = opacity * group_opacity;
-            render_nodes(pixmap, children, new_transform, new_opacity, font, images)?;
+            render_nodes(
+                pixmap,
+                children,
+                new_transform,
+                new_opacity,
+                font,
+                images,
+                videos,
+            )?;
         }
 
         SceneNode::Text {
@@ -430,6 +460,54 @@ fn rounded_dimension(value: f32) -> u32 {
     } else {
         value.round().clamp(1.0, u32::MAX as f32) as u32
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_media(
+    pixmap: &mut Pixmap,
+    source: &RgbaImage,
+    src: &str,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    fit: ImageFit,
+    opacity: f32,
+    transform: Transform,
+) -> Result<(), RasterError> {
+    let width = rounded_dimension(w);
+    let height = rounded_dimension(h);
+    if width == 0 || height == 0 {
+        return Ok(());
+    }
+    if u64::from(width) * u64::from(height) > MAX_IMAGE_NODE_PIXELS {
+        return Err(RasterError::MediaAsset {
+            path: src.into(),
+            reason: format!(
+                "destination {width}x{height} exceeds the {} pixel safety limit",
+                MAX_IMAGE_NODE_PIXELS
+            ),
+        });
+    }
+
+    let fitted = fit_image(source, width, height, fit);
+    let media_pixmap = rgba_to_pixmap(fitted).ok_or_else(|| RasterError::MediaAsset {
+        path: src.into(),
+        reason: "media dimensions are too large for the rasterizer".into(),
+    })?;
+    let paint = PixmapPaint {
+        opacity: opacity.clamp(0.0, 1.0),
+        ..Default::default()
+    };
+    pixmap.draw_pixmap(
+        x.round() as i32,
+        y.round() as i32,
+        media_pixmap.as_ref(),
+        &paint,
+        transform,
+        None,
+    );
+    Ok(())
 }
 
 fn fit_image(source: &RgbaImage, width: u32, height: u32, fit: ImageFit) -> RgbaImage {
@@ -825,5 +903,62 @@ mod tests {
 
         assert!(error.to_string().contains("Image asset error"));
         assert!(error.to_string().contains("dioxuscut-missing-image"));
+    }
+
+    #[test]
+    fn video_frame_is_decoded_and_cached() {
+        if std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .is_err()
+        {
+            eprintln!("skipping video decode test: FFmpeg is unavailable");
+            return;
+        }
+
+        let dir =
+            std::env::temp_dir().join(format!("dioxuscut-video-frame-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("red.mkv");
+        let generated = std::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:s=16x16:r=2:d=1",
+                "-c:v",
+                "ffv1",
+            ])
+            .arg(&source)
+            .status()
+            .unwrap();
+        assert!(generated.success());
+
+        let scene = Scene {
+            nodes: vec![SceneNode::Video {
+                src: source.display().to_string(),
+                time: 0.0,
+                x: 0.0,
+                y: 0.0,
+                w: 16.0,
+                h: 16.0,
+                fit: ImageFit::Cover,
+                opacity: 1.0,
+            }],
+        };
+        let backend = TinySkiaBackend::headless();
+        let config = FrameConfig::new(16, 16, 0, 2.0);
+        let first = backend.render_frame(&scene, &config).unwrap();
+        let second = backend.render_frame(&scene, &config).unwrap();
+
+        let pixel = first.get_pixel(8, 8);
+        assert!(pixel[0] > 240 && pixel[1] < 20 && pixel[2] < 20);
+        assert_eq!(first, second);
+        assert!(backend.videos.bytes() > 0);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

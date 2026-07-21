@@ -83,6 +83,39 @@ pub enum ImageFit {
     ScaleDown,
 }
 
+/// Audio source mixed into the encoded output.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AudioTrack {
+    /// Local audio or video file containing an audio stream.
+    pub src: String,
+    /// Source offset in seconds.
+    pub start_from: f64,
+    /// Composition timeline offset in seconds.
+    pub timeline_start: f64,
+    /// Optional audible duration on the composition timeline.
+    pub duration: Option<f64>,
+    /// Linear gain in `0.0..=1.0`.
+    pub volume: f64,
+    /// Playback speed supported by FFmpeg `atempo` (`0.5..=2.0`).
+    pub playback_rate: f64,
+    /// Repeat the source when it is shorter than the requested duration.
+    pub looped: bool,
+}
+
+impl AudioTrack {
+    pub fn new(src: impl Into<String>) -> Self {
+        Self {
+            src: src.into(),
+            start_from: 0.0,
+            timeline_start: 0.0,
+            duration: None,
+            volume: 1.0,
+            playback_rate: 1.0,
+            looped: false,
+        }
+    }
+}
+
 /// A node in the scene graph.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SceneNode {
@@ -137,6 +170,21 @@ pub enum SceneNode {
         fit: ImageFit,
         opacity: f32,
     },
+
+    /// A decoded frame from a local video file at `time` seconds.
+    Video {
+        src: String,
+        time: f64,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        fit: ImageFit,
+        opacity: f32,
+    },
+
+    /// Non-visual audio track collected by the output encoder.
+    Audio { track: AudioTrack },
 
     /// Linear gradient background covering a rectangle.
     LinearGradient {
@@ -208,6 +256,29 @@ impl Scene {
     pub fn push(&mut self, node: SceneNode) {
         self.nodes.push(node);
     }
+
+    /// Collect audio declared in this scene, including nested groups.
+    pub fn audio_tracks(&self) -> Vec<AudioTrack> {
+        fn collect(nodes: &[SceneNode], parent_volume: f64, output: &mut Vec<AudioTrack>) {
+            for node in nodes {
+                match node {
+                    SceneNode::Audio { track } => {
+                        let mut track = track.clone();
+                        track.volume *= parent_volume;
+                        output.push(track);
+                    }
+                    SceneNode::Group {
+                        opacity, children, ..
+                    } => collect(children, parent_volume * f64::from(*opacity), output),
+                    _ => {}
+                }
+            }
+        }
+
+        let mut tracks = Vec::new();
+        collect(&self.nodes, 1.0, &mut tracks);
+        tracks
+    }
 }
 
 #[cfg(test)]
@@ -256,5 +327,22 @@ mod tests {
         let json = serde_json::to_string(&scene).unwrap();
         assert!(json.contains("contain"));
         assert_eq!(serde_json::from_str::<Scene>(&json).unwrap(), scene);
+    }
+
+    #[test]
+    fn nested_audio_tracks_inherit_group_opacity() {
+        let scene = Scene {
+            nodes: vec![SceneNode::Group {
+                transform: Transform2D::default(),
+                opacity: 0.5,
+                children: vec![SceneNode::Audio {
+                    track: AudioTrack::new("sound.wav"),
+                }],
+            }],
+        };
+
+        let tracks = scene.audio_tracks();
+        assert_eq!(tracks.len(), 1);
+        assert!((tracks[0].volume - 0.5).abs() < f64::EPSILON);
     }
 }

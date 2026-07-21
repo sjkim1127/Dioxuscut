@@ -134,6 +134,7 @@ async fn test_boundary_malformed_props_fail_before_rendering() {
         script: None,
         props: Some(props_path),
         output: output.clone(),
+        audio: Vec::new(),
         width: 64,
         height: 64,
         fps: 30.0,
@@ -145,4 +146,27 @@ async fn test_boundary_malformed_props_fail_before_rendering() {
     assert!(error.to_string().contains("Invalid props JSON"));
     assert!(!output.exists());
     let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[tokio::test]
+async fn test_boundary_missing_audio_fails_before_rendering() {
+    let missing = PathBuf::from("/non_existent_directory/missing_audio.wav");
+    let request = RenderRequest {
+        composition: Some("HelloWorld".into()),
+        script: None,
+        props: None,
+        output: PathBuf::from("must-not-exist.mp4"),
+        audio: vec![missing.clone()],
+        width: 64,
+        height: 64,
+        fps: 30.0,
+        duration: 1,
+        backend: RenderBackend::Native,
+    };
+
+    let error = execute_render_command(&request).await.unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<ValidationError>(),
+        Some(&ValidationError::AudioFileNotFound(missing))
+    );
 }

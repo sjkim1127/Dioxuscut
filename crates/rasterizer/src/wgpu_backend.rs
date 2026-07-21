@@ -560,7 +560,9 @@ fn gpu_supports_scene(scene: &Scene) -> bool {
         SceneNode::Path { .. }
         | SceneNode::Text { .. }
         | SceneNode::Image { .. }
+        | SceneNode::Video { .. }
         | SceneNode::Group { .. } => false,
+        SceneNode::Audio { .. } => true,
     })
 }
 

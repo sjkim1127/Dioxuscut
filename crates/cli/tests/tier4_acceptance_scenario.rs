@@ -36,6 +36,7 @@ async fn test_tier4_real_world_acceptance_scenario() {
         script: None,
         props: Some(props_path),
         output: output_mp4.clone(),
+        audio: Vec::new(),
         width: 1280,
         height: 720,
         fps: 30.0,

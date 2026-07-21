@@ -31,6 +31,7 @@ mod image_cache;
 pub mod render;
 pub mod scene;
 pub mod tiny_skia_backend;
+mod video_cache;
 #[cfg(feature = "gpu")]
 pub mod wgpu_backend;
 
@@ -41,7 +42,7 @@ pub use render::{
     render_to_ffmpeg_pipe, render_to_ffmpeg_pipe_fallible, save_frame, NativeRenderConfig,
     PipeConfig,
 };
-pub use scene::{Color, GradientStop, ImageFit, Scene, SceneNode, Transform2D};
+pub use scene::{AudioTrack, Color, GradientStop, ImageFit, Scene, SceneNode, Transform2D};
 pub use tiny_skia_backend::TinySkiaBackend;
 #[cfg(feature = "gpu")]
 pub use wgpu_backend::WgpuBackend;

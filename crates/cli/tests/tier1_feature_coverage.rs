@@ -18,6 +18,7 @@ fn test_cli_flag_defaults() {
             script,
             props,
             output,
+            audio,
             width,
             height,
             fps,
@@ -28,6 +29,7 @@ fn test_cli_flag_defaults() {
             assert_eq!(script, None);
             assert_eq!(props, None);
             assert_eq!(output, PathBuf::from("out.mp4"));
+            assert!(audio.is_empty());
             assert_eq!(width, 1920);
             assert_eq!(height, 1080);
             assert!((fps - 30.0).abs() < f64::EPSILON);
@@ -56,6 +58,8 @@ fn test_cli_flag_custom_values() {
         "60.0",
         "--duration",
         "300",
+        "--audio",
+        "music.wav",
     ];
 
     let cli = Cli::try_parse_from(args).expect("Failed to parse custom CLI args");
@@ -66,6 +70,7 @@ fn test_cli_flag_custom_values() {
             script,
             props,
             output,
+            audio,
             width,
             height,
             fps,
@@ -76,6 +81,7 @@ fn test_cli_flag_custom_values() {
             assert_eq!(script, None);
             assert_eq!(props, Some(PathBuf::from("input_data.json")));
             assert_eq!(output, PathBuf::from("result_video.mp4"));
+            assert_eq!(audio, vec![PathBuf::from("music.wav")]);
             assert_eq!(width, 1280);
             assert_eq!(height, 720);
             assert!((fps - 60.0).abs() < f64::EPSILON);

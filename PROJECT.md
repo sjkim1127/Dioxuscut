@@ -9,10 +9,10 @@ Dioxuscut provides code-driven video tooling in Rust. The native contract is `Na
 1. The CLI parses a `RenderRequest` and validates composition ID, props path, dimensions, FPS, and duration.
 2. `CompositionRegistry` resolves the requested ID before rendering begins.
 3. The composition produces one rasterizer `Scene` per frame.
-4. `TinySkiaBackend` renders all scene features on CPU, including cached local raster image assets. `WgpuBackend` accelerates its supported subset and performs a whole-frame CPU fallback when required for correctness.
+4. `TinySkiaBackend` renders all scene features on CPU, including local image assets and FFmpeg-decoded video frames held in a bounded LRU cache. `WgpuBackend` accelerates its supported subset and performs a whole-frame CPU fallback when required for correctness.
 5. Rayon renders a bounded batch whose size is at most the worker count.
 6. Frames are sorted within the batch and written to FFmpeg stdin in timeline order.
-7. FFmpeg produces H.264/yuv420p MP4 output without intermediate PNG files.
+7. FFmpeg mixes static audio tracks collected from frame zero, trims them to the composition, and produces H.264/AAC MP4 output without intermediate PNG files.
 
 ## Preview pipelines
 
@@ -44,7 +44,7 @@ The general Dioxus preview tree is not currently compiled into native `Scene` no
 | P1 | Shared native composition contract and preview adapter | Done |
 | P1 | Native local raster image nodes and decoded asset cache | Done |
 | P1 | Migrate general Dioxus primitives to shared Scene output | Planned |
-| P1 | Native video/audio decoding and audio muxing | Planned |
+| P1 | Native video decoding and audio muxing | Done |
 | P1 | Full GPU scene parity | Planned |
 | P2 | Reproducible bundled font configuration | Planned |
 | P2 | Functional Studio editing and render queue | Planned |

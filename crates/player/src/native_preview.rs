@@ -223,6 +223,34 @@ fn SceneNodeView(props: SceneNodeViewProps) -> Element {
                 }
             }
         }
+        SceneNode::Video {
+            src,
+            time,
+            x,
+            y,
+            w,
+            h,
+            fit,
+            opacity,
+        } => {
+            let src = format!("{src}#t={time:.6}");
+            let style = format!(
+                "display:block;width:100%;height:100%;object-fit:{};opacity:{};",
+                media_object_fit(fit),
+                opacity.clamp(0.0, 1.0)
+            );
+            rsx! {
+                foreignObject { x, y, width: w, height: h,
+                    video {
+                        src,
+                        style,
+                        muted: true,
+                        preload: "auto",
+                    }
+                }
+            }
+        }
+        SceneNode::Audio { .. } => rsx! {},
         SceneNode::LinearGradient {
             x,
             y,
@@ -338,6 +366,16 @@ fn image_preserve_aspect_ratio(fit: ImageFit) -> &'static str {
     }
 }
 
+fn media_object_fit(fit: ImageFit) -> &'static str {
+    match fit {
+        ImageFit::Cover => "cover",
+        ImageFit::Contain => "contain",
+        ImageFit::Fill => "fill",
+        ImageFit::None => "none",
+        ImageFit::ScaleDown => "scale-down",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -383,5 +421,6 @@ mod tests {
             "xMidYMid meet"
         );
         assert_eq!(image_preserve_aspect_ratio(ImageFit::Fill), "none");
+        assert_eq!(media_object_fit(ImageFit::ScaleDown), "scale-down");
     }
 }

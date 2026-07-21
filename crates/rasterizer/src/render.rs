@@ -21,7 +21,8 @@
 //! ```
 
 use crate::backend::{FrameConfig, RasterError, RasterizerBackend};
-use crate::scene::Scene;
+use crate::scene::{AudioTrack, Scene};
+use crate::video_cache::canonical_local_path;
 use image::RgbaImage;
 use rayon::prelude::*;
 use std::io::Write;
@@ -81,6 +82,8 @@ pub struct PipeConfig {
     pub crf: u32,
     /// FFmpeg preset: "ultrafast", "fast", "medium", etc.
     pub preset: String,
+    /// Audio tracks mixed and trimmed to the rendered video duration.
+    pub audio_tracks: Vec<AudioTrack>,
 }
 
 impl PipeConfig {
@@ -100,6 +103,7 @@ impl PipeConfig {
             concurrency: None,
             crf: 18,
             preset: "fast".to_string(),
+            audio_tracks: Vec::new(),
         }
     }
 
@@ -111,6 +115,11 @@ impl PipeConfig {
     pub fn with_quality(mut self, crf: u32, preset: impl Into<String>) -> Self {
         self.crf = crf;
         self.preset = preset.into();
+        self
+    }
+
+    pub fn with_audio_tracks(mut self, tracks: impl IntoIterator<Item = AudioTrack>) -> Self {
+        self.audio_tracks = tracks.into_iter().collect();
         self
     }
 }
@@ -233,7 +242,8 @@ where
 /// # FFmpeg invocation
 /// ```text
 /// ffmpeg -f rawvideo -pix_fmt rgba -s WxH -r FPS -i pipe:0
-///        -c:v libx264 -pix_fmt yuv420p -crf N -preset P
+///        [-i audio ... -filter_complex mix] -c:v libx264 -c:a aac
+///        -pix_fmt yuv420p -crf N -preset P
 ///        -movflags +faststart output.mp4
 /// ```
 pub fn render_to_ffmpeg_pipe<F, B>(
@@ -269,6 +279,8 @@ where
     let height = config.height;
     let fps = config.fps;
     let total = config.duration_in_frames;
+
+    validate_audio_tracks(&config.audio_tracks)?;
 
     // ── 1. Spawn FFmpeg ──────────────────────────────────────────────────────
     let ffmpeg_args = build_pipe_ffmpeg_args(config);
@@ -366,7 +378,7 @@ where
 
 /// Build FFmpeg arguments for rawvideo stdin pipe → MP4.
 pub fn build_pipe_ffmpeg_args(config: &PipeConfig) -> Vec<String> {
-    let args = vec![
+    let mut args = vec![
         "-y".into(), // overwrite output
         "-loglevel".into(),
         "error".into(),
@@ -380,6 +392,32 @@ pub fn build_pipe_ffmpeg_args(config: &PipeConfig) -> Vec<String> {
         format!("{}", config.fps),
         "-i".into(),
         "pipe:0".into(), // read from stdin
+    ];
+
+    for track in &config.audio_tracks {
+        if track.looped {
+            args.extend(["-stream_loop".into(), "-1".into()]);
+        }
+        args.extend(["-i".into(), track.src.clone()]);
+    }
+
+    args.extend(["-map".into(), "0:v:0".into()]);
+    if config.audio_tracks.is_empty() {
+        args.push("-an".into());
+    } else {
+        args.extend([
+            "-filter_complex".into(),
+            build_audio_filter(config),
+            "-map".into(),
+            "[aout]".into(),
+            "-c:a".into(),
+            "aac".into(),
+            "-b:a".into(),
+            "192k".into(),
+        ]);
+    }
+
+    args.extend([
         "-c:v".into(),
         "libx264".into(),
         "-pix_fmt".into(),
@@ -388,11 +426,92 @@ pub fn build_pipe_ffmpeg_args(config: &PipeConfig) -> Vec<String> {
         config.crf.to_string(),
         "-preset".into(),
         config.preset.clone(),
+        "-t".into(),
+        format!("{:.9}", config.duration_in_frames as f64 / config.fps),
         "-movflags".into(),
         "+faststart".into(),
         config.output.to_string_lossy().to_string(),
-    ];
+    ]);
     args
+}
+
+fn validate_audio_tracks(tracks: &[AudioTrack]) -> Result<(), RasterError> {
+    for track in tracks {
+        canonical_local_path(&track.src)?;
+        if !track.start_from.is_finite() || track.start_from < 0.0 {
+            return Err(invalid_audio(
+                track,
+                "start_from must be finite and non-negative",
+            ));
+        }
+        if !track.timeline_start.is_finite() || track.timeline_start < 0.0 {
+            return Err(invalid_audio(
+                track,
+                "timeline_start must be finite and non-negative",
+            ));
+        }
+        if track
+            .duration
+            .is_some_and(|duration| !duration.is_finite() || duration <= 0.0)
+        {
+            return Err(invalid_audio(track, "duration must be finite and positive"));
+        }
+        if !track.volume.is_finite() || !(0.0..=1.0).contains(&track.volume) {
+            return Err(invalid_audio(track, "volume must be between 0.0 and 1.0"));
+        }
+        if !track.playback_rate.is_finite() || !(0.5..=2.0).contains(&track.playback_rate) {
+            return Err(invalid_audio(
+                track,
+                "playback_rate must be between 0.5 and 2.0",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn invalid_audio(track: &AudioTrack, reason: &str) -> RasterError {
+    RasterError::MediaAsset {
+        path: track.src.clone(),
+        reason: reason.into(),
+    }
+}
+
+fn build_audio_filter(config: &PipeConfig) -> String {
+    let mut filters = Vec::with_capacity(config.audio_tracks.len() + 1);
+    for (index, track) in config.audio_tracks.iter().enumerate() {
+        let mut chain = format!(
+            "[{}:a:0]atrim=start={:.9},asetpts=PTS-STARTPTS,atempo={:.9},volume={:.9}",
+            index + 1,
+            track.start_from,
+            track.playback_rate,
+            track.volume
+        );
+        if let Some(duration) = track.duration {
+            chain.push_str(&format!(",atrim=duration={duration:.9}"));
+        }
+        if track.timeline_start > 0.0 {
+            let delay_ms = (track.timeline_start * 1000.0).round() as u64;
+            chain.push_str(&format!(",adelay={delay_ms}:all=1"));
+        }
+        chain.push_str(&format!("[a{index}]"));
+        filters.push(chain);
+    }
+
+    let labels = (0..config.audio_tracks.len())
+        .map(|index| format!("[a{index}]"))
+        .collect::<String>();
+    let output_duration = config.duration_in_frames as f64 / config.fps;
+    if config.audio_tracks.len() == 1 {
+        filters.push(format!(
+            "{labels}apad,atrim=duration={output_duration:.9},asetpts=N/SR/TB[aout]"
+        ));
+    } else {
+        filters.push(format!(
+            "{labels}amix=inputs={}:normalize=0:duration=longest,apad,atrim=duration={output_duration:.9},asetpts=N/SR/TB[aout]",
+            config.audio_tracks.len()
+        ));
+    }
+    filters.join(";")
 }
 
 /// Save a single `RgbaImage` frame to disk.
@@ -540,6 +659,40 @@ mod tests {
             args.contains(&"/tmp/out.mp4".to_string()),
             "args should contain output path"
         );
+        assert!(args.contains(&"-an".to_string()));
+    }
+
+    #[test]
+    fn test_audio_filter_args_mix_tracks() {
+        let mut first = AudioTrack::new("first.wav");
+        first.start_from = 0.25;
+        first.timeline_start = 0.5;
+        first.volume = 0.75;
+        let mut second = AudioTrack::new("second.wav");
+        second.looped = true;
+        second.playback_rate = 1.25;
+        let config = PipeConfig::new(1920, 1080, 30.0, 90, "/tmp/out.mp4")
+            .with_audio_tracks([first, second]);
+
+        let args = build_pipe_ffmpeg_args(&config);
+        let filter_index = args
+            .iter()
+            .position(|arg| arg == "-filter_complex")
+            .unwrap();
+        let filter = &args[filter_index + 1];
+        assert!(filter.contains("adelay=500:all=1"));
+        assert!(filter.contains("atempo=1.250000000"));
+        assert!(filter.contains("amix=inputs=2"));
+        assert!(args.contains(&"-stream_loop".to_string()));
+        assert!(args.contains(&"[aout]".to_string()));
+    }
+
+    #[test]
+    fn test_audio_track_validation_rejects_invalid_volume() {
+        let mut track = AudioTrack::new(std::env::current_exe().unwrap().display().to_string());
+        track.volume = 1.5;
+        let error = validate_audio_tracks(&[track]).unwrap_err();
+        assert!(error.to_string().contains("volume must be between"));
     }
 
     #[test]

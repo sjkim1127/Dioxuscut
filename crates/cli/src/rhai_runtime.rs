@@ -6,7 +6,7 @@
 use crate::composition::{
     Composition, CompositionError, NativeCompositionContext, PreparedComposition,
 };
-use dioxuscut_rasterizer::{Color, ImageFit, Scene, SceneNode, Transform2D};
+use dioxuscut_rasterizer::{AudioTrack, Color, ImageFit, Scene, SceneNode, Transform2D};
 use rhai::module_resolvers::DummyModuleResolver;
 use rhai::{
     Dynamic, Engine, EvalAltResult, ImmutableString, Map, Position, Scope, AST, FLOAT, INT,
@@ -136,6 +136,67 @@ impl SceneBuilder {
             h: non_negative_f32("height", h)?,
             fit: parse_image_fit(fit)?,
             opacity,
+        });
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn video(
+        &mut self,
+        x: FLOAT,
+        y: FLOAT,
+        w: FLOAT,
+        h: FLOAT,
+        src: ImmutableString,
+        time: FLOAT,
+        fit: &str,
+        opacity: FLOAT,
+    ) -> RhaiResult<()> {
+        validate_media_source(&src)?;
+        let time = non_negative_f64("video time", time)?;
+        let opacity = unit_f32("opacity", opacity)?;
+        self.scene.push(SceneNode::Video {
+            src: src.into_owned(),
+            time,
+            x: finite_f32("x", x)?,
+            y: finite_f32("y", y)?,
+            w: non_negative_f32("width", w)?,
+            h: non_negative_f32("height", h)?,
+            fit: parse_image_fit(fit)?,
+            opacity,
+        });
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn audio(
+        &mut self,
+        src: ImmutableString,
+        start_from: FLOAT,
+        timeline_start: FLOAT,
+        duration: FLOAT,
+        volume: FLOAT,
+        playback_rate: FLOAT,
+        looped: bool,
+    ) -> RhaiResult<()> {
+        validate_media_source(&src)?;
+        let duration = non_negative_f64("audio duration", duration)?;
+        let playback_rate = finite_f64("audio playback rate", playback_rate)?;
+        if !(0.5..=2.0).contains(&playback_rate) {
+            return Err(runtime_error(
+                "audio playback rate must be between 0.5 and 2.0".into(),
+            ));
+        }
+        self.scene.push(SceneNode::Audio {
+            track: AudioTrack {
+                src: src.into_owned(),
+                start_from: non_negative_f64("audio source offset", start_from)?,
+                timeline_start: non_negative_f64("audio timeline offset", timeline_start)?,
+                duration: (duration > 0.0).then_some(duration),
+                volume: f64::from(unit_f32("audio volume", volume)?),
+                playback_rate,
+                looped,
+            },
         });
         Ok(())
     }
@@ -299,6 +360,8 @@ fn register_scene_api(engine: &mut Engine) {
     engine.register_fn("text", SceneBuilder::text);
     engine.register_fn("text_bold", SceneBuilder::text_bold);
     engine.register_fn("image", SceneBuilder::image);
+    engine.register_fn("video", SceneBuilder::video);
+    engine.register_fn("audio", SceneBuilder::audio);
     engine.register_fn("group", SceneBuilder::group);
     engine.register_fn(
         "interpolate",
@@ -348,6 +411,37 @@ fn non_negative_f32(name: &str, value: FLOAT) -> RhaiResult<f32> {
         return Err(runtime_error(format!("{name} must not be negative")));
     }
     Ok(value)
+}
+
+fn finite_f64(name: &str, value: FLOAT) -> RhaiResult<f64> {
+    if !value.is_finite() {
+        return Err(runtime_error(format!("{name} must be finite")));
+    }
+    Ok(value)
+}
+
+fn non_negative_f64(name: &str, value: FLOAT) -> RhaiResult<f64> {
+    let value = finite_f64(name, value)?;
+    if value < 0.0 {
+        return Err(runtime_error(format!("{name} must not be negative")));
+    }
+    Ok(value)
+}
+
+fn unit_f32(name: &str, value: FLOAT) -> RhaiResult<f32> {
+    let value = finite_f32(name, value)?;
+    if !(0.0..=1.0).contains(&value) {
+        return Err(runtime_error(format!("{name} must be between 0.0 and 1.0")));
+    }
+    Ok(value)
+}
+
+fn validate_media_source(value: &str) -> RhaiResult<()> {
+    if value.trim().is_empty() {
+        Err(runtime_error("media source path must not be empty".into()))
+    } else {
+        Ok(())
+    }
 }
 
 fn parse_color(value: &str) -> RhaiResult<Color> {
@@ -472,10 +566,38 @@ mod tests {
     }
 
     #[test]
+    fn script_builds_video_and_audio_nodes() {
+        let script = r#"
+            fn render(ctx, props) {
+                let output = scene();
+                output.video(0.0, 0.0, 320.0, 180.0, props.video, ctx.frame.to_float() / ctx.fps, "cover", 1.0);
+                output.audio(props.video, 0.25, 0.5, 2.0, 0.75, 1.25, true);
+                output
+            }
+        "#;
+        let composition = RhaiComposition::from_source("media", script).unwrap();
+        let prepared = composition
+            .prepare(&serde_json::json!({"video": "assets/clip.mp4"}), context())
+            .unwrap();
+        let scene = prepared.render(3).unwrap();
+
+        assert!(matches!(
+            &scene.nodes[0],
+            SceneNode::Video { src, time, fit: ImageFit::Cover, .. }
+                if src == "assets/clip.mp4" && (*time - 0.1).abs() < f64::EPSILON
+        ));
+        let tracks = scene.audio_tracks();
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].src, "assets/clip.mp4");
+        assert_eq!(tracks[0].duration, Some(2.0));
+        assert!(tracks[0].looped);
+    }
+
+    #[test]
     fn unregistered_scene_api_is_rejected() {
         let composition = RhaiComposition::from_source(
             "unknown-api",
-            "fn render(ctx, props) { let output = scene(); output.video(\"x.mp4\"); output }",
+            "fn render(ctx, props) { let output = scene(); output.read_file(\"secret\"); output }",
         )
         .unwrap();
         let prepared = composition

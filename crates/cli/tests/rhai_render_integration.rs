@@ -32,6 +32,7 @@ async fn rhai_example_renders_a_real_mp4() {
         script: Some(workspace.join("examples/hello.rhai")),
         props: Some(workspace.join("examples/hello-props.json")),
         output: output.clone(),
+        audio: Vec::new(),
         width: 64,
         height: 64,
         fps: 30.0,
