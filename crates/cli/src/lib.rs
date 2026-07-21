@@ -140,7 +140,8 @@ pub async fn execute_render_command(
 
     tracing::info!(
         "Starting native browser-free render for composition '{}' (backend: {:?})",
-        composition, backend
+        composition,
+        backend
     );
 
     // Read props JSON if specified
@@ -154,8 +155,8 @@ pub async fn execute_render_command(
         // ── Native CPU rasterizer (tiny-skia + Rayon parallel + FFmpeg pipe) ──
         RenderBackend::Native => {
             use dioxuscut_rasterizer::{
-                TinySkiaBackend, PipeConfig, Scene, SceneNode, Color,
-                GradientStop, render_to_ffmpeg_pipe,
+                render_to_ffmpeg_pipe, Color, GradientStop, PipeConfig, Scene, SceneNode,
+                TinySkiaBackend,
             };
 
             tracing::info!("Using native tiny-skia CPU rasterizer with Rayon parallel pipeline");
@@ -170,13 +171,13 @@ pub async fn execute_render_command(
                 .get("background_start")
                 .and_then(|v| v.as_str())
                 .and_then(Color::from_hex)
-                .unwrap_or(Color::rgb(15, 23, 42));     // #0f172a
+                .unwrap_or(Color::rgb(15, 23, 42)); // #0f172a
 
             let bg_end = prop_value
                 .get("background_end")
                 .and_then(|v| v.as_str())
                 .and_then(Color::from_hex)
-                .unwrap_or(Color::rgb(30, 27, 75));     // #1e1b4b
+                .unwrap_or(Color::rgb(30, 27, 75)); // #1e1b4b
 
             let raw_title = prop_value
                 .get("title")
@@ -191,14 +192,17 @@ pub async fn execute_render_command(
                 .trim()
                 .to_string();
 
-            let title = if title.is_empty() { "Dioxuscut".to_string() } else { title };
-
+            let title = if title.is_empty() {
+                "Dioxuscut".to_string()
+            } else {
+                title
+            };
 
             let accent = prop_value
                 .get("accent_color")
                 .and_then(|v| v.as_str())
                 .and_then(Color::from_hex)
-                .unwrap_or(Color::rgb(108, 99, 255));   // #6c63ff
+                .unwrap_or(Color::rgb(108, 99, 255)); // #6c63ff
 
             render_to_ffmpeg_pipe(&rasterizer, &pipe_config, |frame| {
                 let mut scene = Scene::new();
@@ -207,13 +211,20 @@ pub async fn execute_render_command(
 
                 // 1. Dynamic background gradient
                 scene.push(SceneNode::LinearGradient {
-                    x: 0.0, y: 0.0,
+                    x: 0.0,
+                    y: 0.0,
                     w: width as f32,
                     h: height as f32,
                     angle_deg: angle,
                     stops: vec![
-                        GradientStop { position: 0.0, color: bg_start },
-                        GradientStop { position: 1.0, color: bg_end },
+                        GradientStop {
+                            position: 0.0,
+                            color: bg_start,
+                        },
+                        GradientStop {
+                            position: 1.0,
+                            color: bg_end,
+                        },
                     ],
                 });
 
@@ -221,7 +232,7 @@ pub async fn execute_render_command(
                 let center_x = width as f32 * 0.5;
                 let center_y = height as f32 * 0.5;
 
-                let r1 = (width.min(height) as f32 * 0.2) + (t * 6.28).sin() * 20.0;
+                let r1 = (width.min(height) as f32 * 0.2) + (t * std::f32::consts::TAU).sin() * 20.0;
                 scene.push(SceneNode::Circle {
                     cx: center_x,
                     cy: center_y,
@@ -231,7 +242,7 @@ pub async fn execute_render_command(
                     stroke_width: 2.0,
                 });
 
-                let r2 = (width.min(height) as f32 * 0.3) + (t * 3.14).cos() * 30.0;
+                let r2 = (width.min(height) as f32 * 0.3) + (t * std::f32::consts::PI).cos() * 30.0;
                 scene.push(SceneNode::Circle {
                     cx: center_x,
                     cy: center_y,
@@ -242,7 +253,8 @@ pub async fn execute_render_command(
                 });
 
                 // 3. Motion graphics accent rects
-                let rect_size = 80.0 + (t * 6.28).sin() * 15.0;
+                let rect_size = 80.0 + (t * std::f32::consts::TAU).sin() * 15.0;
+
                 scene.push(SceneNode::Rect {
                     x: width as f32 * 0.15,
                     y: height as f32 * 0.2,
@@ -305,8 +317,11 @@ pub async fn execute_render_command(
                 scene
             })?;
 
-
-            tracing::info!("Native rasterizer: {} frames rendered directly to {}", duration, output.display());
+            tracing::info!(
+                "Native rasterizer: {} frames rendered directly to {}",
+                duration,
+                output.display()
+            );
         }
 
         // ── wgpu GPU renderer (feature = "gpu") ──────────────────────────────
@@ -319,8 +334,8 @@ pub async fn execute_render_command(
             #[cfg(feature = "gpu")]
             {
                 use dioxuscut_rasterizer::{
-                    WgpuBackend, PipeConfig, Scene, SceneNode, Color,
-                    GradientStop, render_to_ffmpeg_pipe,
+                    render_to_ffmpeg_pipe, Color, GradientStop, PipeConfig, Scene, SceneNode,
+                    WgpuBackend,
                 };
 
                 tracing::info!("Using wgpu GPU-accelerated rasterizer with zero-copy FFmpeg pipe");
@@ -332,37 +347,60 @@ pub async fn execute_render_command(
                 let prop_value: serde_json::Value =
                     serde_json::from_str(&props_json).unwrap_or(serde_json::Value::Null);
 
-                let bg_start = prop_value.get("background_start")
-                    .and_then(|v| v.as_str()).and_then(Color::from_hex)
+                let bg_start = prop_value
+                    .get("background_start")
+                    .and_then(|v| v.as_str())
+                    .and_then(Color::from_hex)
                     .unwrap_or(Color::rgb(15, 23, 42));
-                let bg_end = prop_value.get("background_end")
-                    .and_then(|v| v.as_str()).and_then(Color::from_hex)
+                let bg_end = prop_value
+                    .get("background_end")
+                    .and_then(|v| v.as_str())
+                    .and_then(Color::from_hex)
                     .unwrap_or(Color::rgb(30, 27, 75));
-                let accent = prop_value.get("accent_color")
-                    .and_then(|v| v.as_str()).and_then(Color::from_hex)
+                let accent = prop_value
+                    .get("accent_color")
+                    .and_then(|v| v.as_str())
+                    .and_then(Color::from_hex)
                     .unwrap_or(Color::rgb(108, 99, 255));
 
                 render_to_ffmpeg_pipe(&rasterizer, &pipe_config, |frame| {
                     let mut scene = Scene::new();
                     let t = frame as f32 / duration as f32;
                     scene.push(SceneNode::LinearGradient {
-                        x: 0.0, y: 0.0, w: width as f32, h: height as f32,
+                        x: 0.0,
+                        y: 0.0,
+                        w: width as f32,
+                        h: height as f32,
                         angle_deg: 135.0,
                         stops: vec![
-                            GradientStop { position: 0.0, color: bg_start },
-                            GradientStop { position: 1.0, color: bg_end },
+                            GradientStop {
+                                position: 0.0,
+                                color: bg_start,
+                            },
+                            GradientStop {
+                                position: 1.0,
+                                color: bg_end,
+                            },
                         ],
                     });
-                    let r = (width.min(height) as f32 * 0.15) + t * (width.min(height) as f32 * 0.1);
+                    let r =
+                        (width.min(height) as f32 * 0.15) + t * (width.min(height) as f32 * 0.1);
                     scene.push(SceneNode::Circle {
-                        cx: width as f32 * 0.5, cy: height as f32 * 0.5, r,
+                        cx: width as f32 * 0.5,
+                        cy: height as f32 * 0.5,
+                        r,
                         fill: accent.with_opacity(0.15 + t * 0.15),
-                        stroke: Some(accent), stroke_width: 3.0,
+                        stroke: Some(accent),
+                        stroke_width: 3.0,
                     });
                     scene
                 })?;
 
-                tracing::info!("GPU rasterizer: {} frames rendered directly to {}", duration, output.display());
+                tracing::info!(
+                    "GPU rasterizer: {} frames rendered directly to {}",
+                    duration,
+                    output.display()
+                );
             }
         }
     }

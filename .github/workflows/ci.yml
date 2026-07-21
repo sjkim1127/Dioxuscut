@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ── 1. Code Formatting & Clippy Lints ─────────────────────────────────────
+  fmt_clippy:
+    name: Code Quality (Fmt & Clippy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check Formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy Lints
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # ── 2. Cross-Platform Unit & Integration Tests ──────────────────────────────
+  test:
+    name: Test (${{ matrix.os }})
+    needs: fmt_clippy
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install FFmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-update || true
+          sudo apt-get install -y ffmpeg
+
+      - name: Install FFmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      - name: Install FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y
+
+      - name: Cargo Check Workspace
+        run: cargo check --workspace --all-targets
+
+      - name: Run All Workspace Tests
+        run: cargo test --workspace
