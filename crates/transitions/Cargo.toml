@@ -1,0 +1,13 @@
+[package]
+name        = "dioxuscut-transitions"
+description = "Transition components for Dioxuscut — Fade, Slide, Wipe, etc."
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+
+[dependencies]
+dioxus              = { workspace = true }
+dioxuscut-core      = { path = "../core" }
+dioxuscut-animation = { path = "../animation" }

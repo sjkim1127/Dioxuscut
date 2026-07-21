@@ -1,0 +1,28 @@
+[package]
+name        = "example"
+description = "Dioxuscut Hello World example composition"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+
+[[bin]]
+name = "example"
+path = "src/main.rs"
+
+[dependencies]
+dioxus              = { workspace = true }
+dioxus-web          = { workspace = true }
+dioxuscut-core      = { workspace = true }
+dioxuscut-animation = { workspace = true }
+dioxuscut-player    = { workspace = true }
+dioxuscut-transitions = { workspace = true }
+tracing-subscriber  = { workspace = true }
+serde               = { workspace = true }
+serde_json          = { workspace = true }
+
+[features]
+default = ["web"]
+web     = ["dioxus/web", "dioxuscut-core/web"]
+desktop = ["dioxus/desktop", "dioxuscut-core/desktop"]

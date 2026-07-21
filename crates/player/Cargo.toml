@@ -1,0 +1,16 @@
+[package]
+name        = "dioxuscut-player"
+description = "Interactive video player component for Dioxuscut"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+
+[dependencies]
+dioxus             = { workspace = true }
+dioxuscut-core     = { path = "../core" }
+dioxuscut-animation = { path = "../animation" }
+serde              = { workspace = true }
+tracing            = { workspace = true }
+tokio              = { workspace = true }

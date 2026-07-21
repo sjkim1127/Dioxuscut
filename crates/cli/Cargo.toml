@@ -1,0 +1,21 @@
+[package]
+name        = "dioxuscut-cli"
+description = "CLI tool for rendering Dioxuscut compositions headlessly"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+
+[[bin]]
+name = "dioxuscut"
+path = "src/main.rs"
+
+[dependencies]
+dioxuscut-renderer = { path = "../renderer" }
+dioxuscut-core     = { path = "../core" }
+clap               = { version = "4.4", features = ["derive"] }
+tokio              = { workspace = true }
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow             = { workspace = true }

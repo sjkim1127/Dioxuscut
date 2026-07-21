@@ -1,0 +1,30 @@
+[package]
+name        = "studio"
+description = "Dioxuscut Studio — desktop video editor application"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+
+[[bin]]
+name = "studio"
+path = "src/main.rs"
+
+[dependencies]
+dioxus              = { workspace = true }
+dioxus-desktop      = { workspace = true }
+dioxuscut-core      = { workspace = true }
+dioxuscut-animation = { workspace = true }
+dioxuscut-player    = { workspace = true }
+dioxuscut-renderer  = { workspace = true }
+tokio               = { workspace = true }
+tracing             = { workspace = true }
+tracing-subscriber  = { workspace = true }
+serde               = { workspace = true }
+serde_json          = { workspace = true }
+anyhow              = { workspace = true }
+
+[features]
+default = ["desktop"]
+desktop = ["dioxus/desktop", "dioxuscut-core/desktop"]
