@@ -162,6 +162,7 @@ impl Transform2D {
     pub fn to_tiny_skia(&self) -> tiny_skia::Transform {
         tiny_skia::Transform::from_translate(self.tx, self.ty)
             .post_scale(self.scale_x, self.scale_y)
+            .post_rotate(self.rotate_deg)
     }
 }
 

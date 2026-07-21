@@ -24,6 +24,7 @@ tracing-subscriber = { workspace = true }
 anyhow             = { workspace = true }
 thiserror          = { workspace = true }
 serde_json         = { workspace = true }
+rhai               = { workspace = true, optional = true }
 
 [dev-dependencies]
 dioxuscut-renderer = { workspace = true }
@@ -32,3 +33,4 @@ reqwest            = { workspace = true }
 [features]
 default = []
 gpu     = ["dioxuscut-rasterizer/gpu"]
+rhai    = ["dep:rhai"]

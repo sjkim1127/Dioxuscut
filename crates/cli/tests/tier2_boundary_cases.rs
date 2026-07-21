@@ -4,7 +4,8 @@
 //! zero FPS/duration, and malformed props JSON.
 
 use dioxuscut_cli::{
-    execute_render_command, validate_render_params, RenderBackend, RenderRequest, ValidationError,
+    execute_render_command, validate_composition_source, validate_render_params, RenderBackend,
+    RenderRequest, ValidationError,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -16,6 +17,23 @@ fn test_boundary_empty_composition() {
 
     let res_whitespace = validate_render_params("   ", None, 1920, 1080, 30.0, 150);
     assert_eq!(res_whitespace, Err(ValidationError::EmptyComposition));
+}
+
+#[test]
+fn test_boundary_composition_source_selection() {
+    assert_eq!(
+        validate_composition_source(None, None),
+        Err(ValidationError::MissingCompositionSource)
+    );
+    let script = PathBuf::from("composition.rhai");
+    assert_eq!(
+        validate_composition_source(Some("HelloWorld"), Some(&script)),
+        Err(ValidationError::ConflictingCompositionSources)
+    );
+    assert_eq!(
+        validate_composition_source(None, Some(&script)),
+        Err(ValidationError::ScriptFileNotFound(script))
+    );
 }
 
 #[test]
@@ -112,7 +130,8 @@ async fn test_boundary_malformed_props_fail_before_rendering() {
     fs::write(&props_path, "{not valid json").unwrap();
     let output = temp_dir.join("must-not-exist.mp4");
     let request = RenderRequest {
-        composition: "HelloWorld".into(),
+        composition: Some("HelloWorld".into()),
+        script: None,
         props: Some(props_path),
         output: output.clone(),
         width: 64,

@@ -22,14 +22,93 @@ impl NativeCompositionContext {
     }
 }
 
-/// A browser-free composition that produces the rasterizer scene for one frame.
+/// Errors produced while preparing or rendering a composition.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum CompositionError {
+    #[error("Failed to prepare composition: {0}")]
+    Prepare(String),
+    #[error("Failed to render frame {frame}: {reason}")]
+    Render { frame: u32, reason: String },
+}
+
+impl CompositionError {
+    pub fn render(frame: u32, reason: impl Into<String>) -> Self {
+        Self::Render {
+            frame,
+            reason: reason.into(),
+        }
+    }
+}
+
+/// A composition instance prepared once for a complete render job.
+///
+/// Implementations may cache parsed input, compiled scripts, and other
+/// immutable state here. `render` can be called concurrently for different
+/// frames.
+pub trait PreparedComposition: Send + Sync {
+    fn render(&self, frame: u32) -> Result<Scene, CompositionError>;
+}
+
+/// General composition contract used by the registry.
+pub trait Composition: Send + Sync {
+    fn id(&self) -> &str;
+
+    fn prepare(
+        &self,
+        props: &Value,
+        context: NativeCompositionContext,
+    ) -> Result<Box<dyn PreparedComposition + '_>, CompositionError>;
+}
+
+/// A browser-free Rust composition that produces one rasterizer scene per frame.
 ///
 /// Applications can implement this trait, register implementations in a
 /// [`CompositionRegistry`], and call `execute_render_command_with_registry`.
 pub trait NativeComposition: Send + Sync {
-    fn id(&self) -> &'static str;
+    fn id(&self) -> &str;
 
-    fn render(&self, frame: u32, props: &Value, context: NativeCompositionContext) -> Scene;
+    fn render(
+        &self,
+        frame: u32,
+        props: &Value,
+        context: NativeCompositionContext,
+    ) -> Result<Scene, CompositionError>;
+}
+
+struct PreparedNativeComposition<'a, C> {
+    composition: &'a C,
+    props: Value,
+    context: NativeCompositionContext,
+}
+
+impl<C> PreparedComposition for PreparedNativeComposition<'_, C>
+where
+    C: NativeComposition,
+{
+    fn render(&self, frame: u32) -> Result<Scene, CompositionError> {
+        self.composition.render(frame, &self.props, self.context)
+    }
+}
+
+impl<C> Composition for C
+where
+    C: NativeComposition,
+{
+    fn id(&self) -> &str {
+        NativeComposition::id(self)
+    }
+
+    fn prepare(
+        &self,
+        props: &Value,
+        context: NativeCompositionContext,
+    ) -> Result<Box<dyn PreparedComposition + '_>, CompositionError> {
+        Ok(Box::new(PreparedNativeComposition {
+            composition: self,
+            props: props.clone(),
+            context,
+        }))
+    }
 }
 
 /// Errors produced while building or querying a composition registry.
@@ -47,7 +126,7 @@ pub enum CompositionRegistryError {
 /// Deterministic registry used by the CLI to resolve `--composition` IDs.
 #[derive(Default)]
 pub struct CompositionRegistry {
-    compositions: BTreeMap<String, Box<dyn NativeComposition>>,
+    compositions: BTreeMap<String, Box<dyn Composition>>,
 }
 
 impl CompositionRegistry {
@@ -57,7 +136,7 @@ impl CompositionRegistry {
 
     pub fn register<C>(&mut self, composition: C) -> Result<(), CompositionRegistryError>
     where
-        C: NativeComposition + 'static,
+        C: Composition + 'static,
     {
         let id = composition.id().to_string();
         if self.compositions.contains_key(&id) {
@@ -67,7 +146,7 @@ impl CompositionRegistry {
         Ok(())
     }
 
-    pub fn get(&self, id: &str) -> Result<&dyn NativeComposition, CompositionRegistryError> {
+    pub fn get(&self, id: &str) -> Result<&dyn Composition, CompositionRegistryError> {
         self.compositions.get(id).map(Box::as_ref).ok_or_else(|| {
             CompositionRegistryError::Unknown {
                 requested: id.to_string(),
@@ -94,11 +173,16 @@ pub fn built_in_registry() -> CompositionRegistry {
 pub struct HelloWorldComposition;
 
 impl NativeComposition for HelloWorldComposition {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "HelloWorld"
     }
 
-    fn render(&self, frame: u32, props: &Value, context: NativeCompositionContext) -> Scene {
+    fn render(
+        &self,
+        frame: u32,
+        props: &Value,
+        context: NativeCompositionContext,
+    ) -> Result<Scene, CompositionError> {
         let width = context.width as f32;
         let height = context.height as f32;
         let t = context.progress(frame);
@@ -203,7 +287,7 @@ impl NativeComposition for HelloWorldComposition {
             color: Color::rgb(0, 242, 254),
             font_weight: 400,
         });
-        scene
+        Ok(scene)
     }
 }
 
@@ -259,7 +343,7 @@ mod tests {
             duration_in_frames: 3,
         };
         let props = serde_json::json!({"title": "Custom title"});
-        let scene = HelloWorldComposition.render(2, &props, context);
+        let scene = HelloWorldComposition.render(2, &props, context).unwrap();
 
         assert!(scene.nodes.iter().any(|node| matches!(
             node,

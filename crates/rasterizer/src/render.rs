@@ -245,6 +245,26 @@ where
     B: RasterizerBackend + Send + Sync,
     F: Fn(u32) -> Scene + Send + Sync,
 {
+    render_to_ffmpeg_pipe_fallible(backend, config, |frame| {
+        Ok::<Scene, std::convert::Infallible>(scene_fn(frame))
+    })
+}
+
+/// Fallible variant of [`render_to_ffmpeg_pipe`].
+///
+/// Scene generation errors are annotated with the frame number and propagated
+/// before rasterization. This is intended for script-backed compositions and
+/// other dynamic scene sources that can fail while evaluating a frame.
+pub fn render_to_ffmpeg_pipe_fallible<F, B, E>(
+    backend: &B,
+    config: &PipeConfig,
+    scene_fn: F,
+) -> Result<(), RasterError>
+where
+    B: RasterizerBackend + Send + Sync,
+    F: Fn(u32) -> Result<Scene, E> + Send + Sync,
+    E: std::fmt::Display + Send,
+{
     let width = config.width;
     let height = config.height;
     let fps = config.fps;
@@ -295,7 +315,10 @@ where
             (batch_start..batch_end)
                 .into_par_iter()
                 .map(|frame| {
-                    let scene = scene_fn(frame);
+                    let scene = scene_fn(frame).map_err(|error| RasterError::Frame {
+                        frame,
+                        reason: error.to_string(),
+                    })?;
                     let frame_cfg = FrameConfig::new(width, height, frame, fps);
                     let img = backend.render_frame(&scene, &frame_cfg)?;
                     Ok((frame, img.into_raw()))

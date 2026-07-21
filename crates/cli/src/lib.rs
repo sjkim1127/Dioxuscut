@@ -1,11 +1,16 @@
 //! CLI options, validation, native composition registry, and render execution.
 
 pub mod composition;
+#[cfg(feature = "rhai")]
+pub mod rhai_runtime;
 
 pub use composition::{
-    built_in_registry, CompositionRegistry, CompositionRegistryError, HelloWorldComposition,
-    NativeComposition, NativeCompositionContext,
+    built_in_registry, Composition, CompositionError, CompositionRegistry,
+    CompositionRegistryError, HelloWorldComposition, NativeComposition, NativeCompositionContext,
+    PreparedComposition,
 };
+#[cfg(feature = "rhai")]
+pub use rhai_runtime::{RhaiComposition, SceneBuilder};
 
 use clap::{Parser, Subcommand, ValueEnum};
 use std::fs;
@@ -17,6 +22,12 @@ use thiserror::Error;
 pub enum ValidationError {
     #[error("Composition name cannot be empty")]
     EmptyComposition,
+    #[error("Provide exactly one composition source: --composition <ID> or --script <PATH>")]
+    MissingCompositionSource,
+    #[error("--composition and --script cannot be used together")]
+    ConflictingCompositionSources,
+    #[error("Rhai script file not found: {0}")]
+    ScriptFileNotFound(PathBuf),
     #[error("Props file not found: {0}")]
     PropsFileNotFound(PathBuf),
     #[error("Invalid resolution: width ({0}) and height ({1}) must be greater than 0")]
@@ -39,7 +50,7 @@ pub enum RenderBackend {
     Gpu,
 }
 
-/// Dioxuscut CLI — render registered native compositions to video.
+/// Dioxuscut CLI — render registered Rust or Rhai compositions to video.
 #[derive(Parser, Debug, Clone, PartialEq)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
@@ -49,11 +60,24 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug, Clone, PartialEq)]
 pub enum Commands {
-    /// Render a registered native composition to a video file.
+    /// Render a registered Rust composition or Rhai script to a video file.
     Render {
         /// ID of the composition to render.
-        #[arg(long, short)]
-        composition: String,
+        #[arg(
+            long,
+            short,
+            required_unless_present = "script",
+            conflicts_with = "script"
+        )]
+        composition: Option<String>,
+
+        /// Path to a Rhai composition script. Requires the `rhai` feature.
+        #[arg(
+            long,
+            required_unless_present = "composition",
+            conflicts_with = "composition"
+        )]
+        script: Option<PathBuf>,
 
         /// Path to a JSON file containing input props.
         #[arg(long, short)]
@@ -88,7 +112,8 @@ pub enum Commands {
 /// A validated render request independent from argument parsing.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderRequest {
-    pub composition: String,
+    pub composition: Option<String>,
+    pub script: Option<PathBuf>,
     pub props: Option<PathBuf>,
     pub output: PathBuf,
     pub width: u32,
@@ -96,6 +121,25 @@ pub struct RenderRequest {
     pub fps: f64,
     pub duration: u32,
     pub backend: RenderBackend,
+}
+
+/// Validates that a render request selects exactly one available composition source.
+pub fn validate_composition_source(
+    composition: Option<&str>,
+    script: Option<&PathBuf>,
+) -> Result<(), ValidationError> {
+    match (composition, script) {
+        (None, None) => Err(ValidationError::MissingCompositionSource),
+        (Some(_), Some(_)) => Err(ValidationError::ConflictingCompositionSources),
+        (Some(composition), None) if composition.trim().is_empty() => {
+            Err(ValidationError::EmptyComposition)
+        }
+        (Some(_), None) => Ok(()),
+        (None, Some(path)) if !path.is_file() => {
+            Err(ValidationError::ScriptFileNotFound(path.clone()))
+        }
+        (None, Some(_)) => Ok(()),
+    }
 }
 
 /// Validates command-line parameters prior to launching the renderer.
@@ -141,8 +185,9 @@ pub async fn execute_render_command_with_registry(
     request: &RenderRequest,
     registry: &CompositionRegistry,
 ) -> anyhow::Result<()> {
+    validate_composition_source(request.composition.as_deref(), request.script.as_ref())?;
     validate_render_params(
-        &request.composition,
+        request.composition.as_deref().unwrap_or("RhaiScript"),
         request.props.as_ref(),
         request.width,
         request.height,
@@ -150,7 +195,6 @@ pub async fn execute_render_command_with_registry(
         request.duration,
     )?;
 
-    let composition = registry.get(&request.composition)?;
     let props = match &request.props {
         Some(path) => {
             let json = fs::read_to_string(path)?;
@@ -167,6 +211,46 @@ pub async fn execute_render_command_with_registry(
         duration_in_frames: request.duration,
     };
 
+    #[cfg(feature = "rhai")]
+    let script_composition = request
+        .script
+        .as_deref()
+        .map(RhaiComposition::from_file)
+        .transpose()?;
+
+    #[cfg(feature = "rhai")]
+    let composition: &dyn Composition = match script_composition.as_ref() {
+        Some(composition) => composition,
+        None => registry.get(
+            request
+                .composition
+                .as_deref()
+                .expect("validated native composition ID"),
+        )?,
+    };
+
+    #[cfg(not(feature = "rhai"))]
+    let composition: &dyn Composition = {
+        if request.script.is_some() {
+            anyhow::bail!(
+                "Rhai support is not compiled in. Rebuild with `--features rhai`:\n  \
+                 cargo build -p dioxuscut-cli --features rhai"
+            );
+        }
+        registry.get(
+            request
+                .composition
+                .as_deref()
+                .expect("validated native composition ID"),
+        )?
+    };
+
+    let prepared = composition.prepare(&props, context)?;
+
+    // Validate the first frame before starting FFmpeg. Dynamic compositions
+    // therefore report syntax, type, and API errors without creating an output.
+    prepared.render(0)?;
+
     tracing::info!(
         composition = composition.id(),
         backend = ?request.backend,
@@ -175,7 +259,9 @@ pub async fn execute_render_command_with_registry(
 
     match request.backend {
         RenderBackend::Native => {
-            use dioxuscut_rasterizer::{render_to_ffmpeg_pipe, PipeConfig, TinySkiaBackend};
+            use dioxuscut_rasterizer::{
+                render_to_ffmpeg_pipe_fallible, PipeConfig, TinySkiaBackend,
+            };
 
             let rasterizer = TinySkiaBackend::new();
             let pipe_config = PipeConfig::new(
@@ -185,8 +271,8 @@ pub async fn execute_render_command_with_registry(
                 request.duration,
                 &request.output,
             );
-            render_to_ffmpeg_pipe(&rasterizer, &pipe_config, |frame| {
-                composition.render(frame, &props, context)
+            render_to_ffmpeg_pipe_fallible(&rasterizer, &pipe_config, |frame| {
+                prepared.render(frame)
             })?;
         }
         RenderBackend::Gpu => {
@@ -198,7 +284,9 @@ pub async fn execute_render_command_with_registry(
 
             #[cfg(feature = "gpu")]
             {
-                use dioxuscut_rasterizer::{render_to_ffmpeg_pipe, PipeConfig, WgpuBackend};
+                use dioxuscut_rasterizer::{
+                    render_to_ffmpeg_pipe_fallible, PipeConfig, WgpuBackend,
+                };
 
                 let rasterizer = WgpuBackend::new()
                     .map_err(|error| anyhow::anyhow!("GPU backend init failed: {error}"))?;
@@ -209,8 +297,8 @@ pub async fn execute_render_command_with_registry(
                     request.duration,
                     &request.output,
                 );
-                render_to_ffmpeg_pipe(&rasterizer, &pipe_config, |frame| {
-                    composition.render(frame, &props, context)
+                render_to_ffmpeg_pipe_fallible(&rasterizer, &pipe_config, |frame| {
+                    prepared.render(frame)
                 })?;
             }
         }

@@ -27,7 +27,7 @@ The repository also contains Dioxus timeline, media, shape, transition, player, 
 - CPU rendering through `tiny-skia`.
 - Experimental GPU rendering through `wgpu`; unsupported scene features fall back to the CPU renderer for correctness.
 - Bounded-memory parallel frame rendering into an FFmpeg stdin pipe.
-- Registry-based composition selection with JSON props.
+- Registry-based Rust compositions and optional sandboxed Rhai compositions, both with JSON props.
 - Animation, shape, path, caption, noise, timeline, player, server, encoder, and CLI test coverage.
 - Dioxus web example and desktop Studio preview shell.
 
@@ -36,8 +36,9 @@ The repository also contains Dioxus timeline, media, shape, transition, player, 
 ```text
 Native export
   RenderRequest
-      -> CompositionRegistry
-      -> NativeComposition::render(frame, props, context)
+      -> CompositionRegistry or compiled Rhai AST
+      -> Composition::prepare(props, context)
+      -> PreparedComposition::render(frame)
       -> Scene
       -> TinySkiaBackend / WgpuBackend with CPU fallback
       -> bounded ordered RGBA batches
@@ -110,13 +111,40 @@ cargo run -p dioxuscut-cli -- render \
 
 An unknown composition ID or malformed props file fails before FFmpeg starts.
 
+## Rhai compositions
+
+The optional `rhai` feature adds scriptable composition logic while preserving
+JSON as the external data contract. Scripts are compiled once per render job,
+receive `ctx` and `props`, and return a restricted native scene builder:
+
+```bash
+cargo run -p dioxuscut-cli --features rhai -- render \
+  --script examples/hello.rhai \
+  --props examples/hello-props.json \
+  --output rhai-output.mp4 \
+  --width 1280 \
+  --height 720 \
+  --duration 150
+```
+
+Each script defines `fn render(ctx, props)`. The context contains `frame`,
+`width`, `height`, `fps`, `duration`, and normalized `progress`. The initial API
+exposes `scene()`, `rect`, `round_rect`, `circle`, `text`, `text_bold`, `group`,
+and `interpolate`. See [`examples/hello.rhai`](examples/hello.rhai) for a complete
+composition.
+
+The runtime disables module imports and limits operations, call depth,
+expression depth, variables, functions, strings, arrays, and maps. It does not
+expose filesystem, network, clock, or random APIs. A new Rhai scope is created
+for every frame so parallel rendering does not share mutable script state.
+
 ## Registering a native composition
 
 Applications can use `dioxuscut-cli` as a library and provide their own registry:
 
 ```rust,ignore
 use dioxuscut_cli::{
-    execute_render_command_with_registry, CompositionRegistry,
+    execute_render_command_with_registry, CompositionError, CompositionRegistry,
     NativeComposition, NativeCompositionContext, RenderRequest,
 };
 use dioxuscut_rasterizer::{Color, Scene, SceneNode};
@@ -125,7 +153,7 @@ use serde_json::Value;
 struct TitleCard;
 
 impl NativeComposition for TitleCard {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "TitleCard"
     }
 
@@ -134,7 +162,7 @@ impl NativeComposition for TitleCard {
         frame: u32,
         _props: &Value,
         context: NativeCompositionContext,
-    ) -> Scene {
+    ) -> Result<Scene, CompositionError> {
         let mut scene = Scene::new();
         scene.push(SceneNode::Rect {
             x: 0.0,
@@ -146,7 +174,7 @@ impl NativeComposition for TitleCard {
             stroke_width: 0.0,
             corner_radius: 0.0,
         });
-        scene
+        Ok(scene)
     }
 }
 
@@ -157,9 +185,10 @@ impl NativeComposition for TitleCard {
 ## CLI reference
 
 ```text
-dioxuscut render [OPTIONS] --composition <ID>
+dioxuscut render [OPTIONS] (--composition <ID> | --script <PATH>)
 
   -c, --composition <ID>       Registered composition ID
+      --script <PATH>          Rhai composition file; requires feature `rhai`
   -p, --props <PATH>           JSON props file
   -o, --output <PATH>          Output path [default: out.mp4]
       --width <PX>             Even output width [default: 1920]
@@ -174,6 +203,8 @@ Build GPU support explicitly:
 ```bash
 cargo build -p dioxuscut-cli --features gpu
 ```
+
+Build Rhai and GPU support together with `--features rhai,gpu`.
 
 ## Testing
 

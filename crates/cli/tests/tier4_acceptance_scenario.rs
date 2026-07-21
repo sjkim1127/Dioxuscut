@@ -32,7 +32,8 @@ async fn test_tier4_real_world_acceptance_scenario() {
 
     // Execute full acceptance render workflow via Native CPU rasterizer
     let request = RenderRequest {
-        composition: "HelloWorld".into(),
+        composition: Some("HelloWorld".into()),
+        script: None,
         props: Some(props_path),
         output: output_mp4.clone(),
         width: 1280,

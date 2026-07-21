@@ -12,6 +12,7 @@ async fn main() -> anyhow::Result<()> {
     match &cli.command {
         Commands::Render {
             composition,
+            script,
             props,
             output,
             width,
@@ -22,6 +23,7 @@ async fn main() -> anyhow::Result<()> {
         } => {
             let request = RenderRequest {
                 composition: composition.clone(),
+                script: script.clone(),
                 props: props.clone(),
                 output: output.clone(),
                 width: *width,

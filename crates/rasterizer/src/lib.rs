@@ -37,7 +37,8 @@ pub use backend::{FrameConfig, RasterError, RasterizerBackend};
 pub use font::FontCache;
 pub use render::{
     build_pipe_ffmpeg_args, render_all_frames, render_frame_timed, render_parallel,
-    render_to_ffmpeg_pipe, save_frame, NativeRenderConfig, PipeConfig,
+    render_to_ffmpeg_pipe, render_to_ffmpeg_pipe_fallible, save_frame, NativeRenderConfig,
+    PipeConfig,
 };
 pub use scene::{Color, GradientStop, Scene, SceneNode, Transform2D};
 pub use tiny_skia_backend::TinySkiaBackend;

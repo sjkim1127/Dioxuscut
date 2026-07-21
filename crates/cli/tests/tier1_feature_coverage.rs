@@ -15,6 +15,7 @@ fn test_cli_flag_defaults() {
     match cli.command {
         Commands::Render {
             composition,
+            script,
             props,
             output,
             width,
@@ -23,7 +24,8 @@ fn test_cli_flag_defaults() {
             duration,
             backend,
         } => {
-            assert_eq!(composition, "HelloWorld");
+            assert_eq!(composition, Some("HelloWorld".into()));
+            assert_eq!(script, None);
             assert_eq!(props, None);
             assert_eq!(output, PathBuf::from("out.mp4"));
             assert_eq!(width, 1920);
@@ -61,6 +63,7 @@ fn test_cli_flag_custom_values() {
     match cli.command {
         Commands::Render {
             composition,
+            script,
             props,
             output,
             width,
@@ -69,7 +72,8 @@ fn test_cli_flag_custom_values() {
             duration,
             backend,
         } => {
-            assert_eq!(composition, "CustomComposition");
+            assert_eq!(composition, Some("CustomComposition".into()));
+            assert_eq!(script, None);
             assert_eq!(props, Some(PathBuf::from("input_data.json")));
             assert_eq!(output, PathBuf::from("result_video.mp4"));
             assert_eq!(width, 1280);
@@ -103,11 +107,41 @@ fn test_cli_short_flags() {
             output,
             ..
         } => {
-            assert_eq!(composition, "ShortFlagComp");
+            assert_eq!(composition, Some("ShortFlagComp".into()));
             assert_eq!(props, Some(PathBuf::from("props.json")));
             assert_eq!(output, PathBuf::from("out_short.mp4"));
         }
     }
+}
+
+#[test]
+fn test_cli_accepts_rhai_script_as_the_composition_source() {
+    let cli = Cli::try_parse_from(["dioxuscut", "render", "--script", "composition.rhai"])
+        .expect("Failed to parse Rhai script argument");
+
+    match cli.command {
+        Commands::Render {
+            composition,
+            script,
+            ..
+        } => {
+            assert_eq!(composition, None);
+            assert_eq!(script, Some(PathBuf::from("composition.rhai")));
+        }
+    }
+}
+
+#[test]
+fn test_cli_rejects_conflicting_composition_sources() {
+    let result = Cli::try_parse_from([
+        "dioxuscut",
+        "render",
+        "--composition",
+        "HelloWorld",
+        "--script",
+        "composition.rhai",
+    ]);
+    assert!(result.is_err());
 }
 
 #[test]
