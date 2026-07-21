@@ -14,6 +14,7 @@ members = [
     "crates/captions",
     "crates/noise",
     "crates/rasterizer",
+    "crates/vdom",
     "apps/studio",
     "apps/example",
 ]
@@ -31,6 +32,7 @@ readme       = "README.md"
 dioxus            = { version = "0.6", features = ["web", "desktop"] }
 dioxus-web        = { version = "0.6" }
 dioxus-desktop    = { version = "0.6" }
+dioxus-core       = { version = "0.6" }
 
 # Async runtime
 tokio             = { version = "1", features = ["full"] }
@@ -56,6 +58,7 @@ ab_glyph          = "0.2"
 rustybuzz         = "0.20.1"
 unicode-linebreak = "0.1.5"
 unicode-segmentation = "1.13.3"
+taffy             = "0.12.2"
 
 # Error handling
 anyhow            = "1"
@@ -82,6 +85,7 @@ dioxuscut-paths       = { version = "0.1.2", path = "crates/paths" }
 dioxuscut-captions    = { version = "0.1.2", path = "crates/captions" }
 dioxuscut-noise       = { version = "0.1.2", path = "crates/noise" }
 dioxuscut-rasterizer  = { version = "0.1.2", path = "crates/rasterizer" }
+dioxuscut-vdom        = { version = "0.1.2", path = "crates/vdom" }
 
 
 

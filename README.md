@@ -15,7 +15,7 @@
 
 Dioxuscut is an early-stage programmatic video toolkit written in Rust. Its native export path renders a registered `NativeComposition` into a small scene graph, rasterizes frames with `tiny-skia` or `wgpu`, and sends bounded batches of raw RGBA frames to FFmpeg. Local video frames are decoded through FFmpeg, and declared audio tracks are mixed into the encoded output. The same native scene can be displayed in the Dioxus Player through `NativeCompositionPreview`.
 
-The repository also contains Dioxus timeline, media, shape, transition, player, and Studio-preview components. These components currently form the interactive preview layer; arbitrary Dioxus VDOM is **not yet automatically translated** into the native scene graph.
+The repository also contains Dioxus timeline, media, shape, transition, player, and Studio-preview components. The opt-in `dioxuscut-vdom` adapter can translate ordinary Dioxus elements, a documented CSS subset, text, local media elements, and basic SVG shapes into the native scene graph. Existing explicit `Scene` and `SceneEmitter` APIs remain available for precise rendering control.
 
 ## What works today
 
@@ -26,6 +26,7 @@ The repository also contains Dioxus timeline, media, shape, transition, player, 
 - Cached FFprobe metadata and persistent, bounded FFmpeg rawvideo decoder sessions.
 - Registry-based Rust compositions and optional sandboxed Rhai compositions, both with JSON props.
 - Shared native composition contract for CLI export and Dioxus Player/Studio preview.
+- Dioxus 0.6 `VirtualDom` mutation renderer with block, Flexbox, and Grid layout through Taffy.
 - Composable `SceneEmitter` adapters for media, procedural shapes, kinetic captions, fitted multiline text, fades, slides, sequences, freezes, and composited layers.
 - Player media synchronization for seek, pause/play, buffering, volume, rate, looping, timeline offsets, and drift correction.
 - H.264, H.265, VP9, AV1, ProRes, and GIF video output plus direct PNG, JPEG, and WebP still rendering.
@@ -39,7 +40,7 @@ The repository also contains Dioxus timeline, media, shape, transition, player, 
 ```text
 Native export
   RenderRequest
-      -> CompositionRegistry or compiled Rhai AST
+      -> CompositionRegistry, VdomComposition, or compiled Rhai AST
       -> Composition::prepare(props, context)
       -> PreparedComposition::render(frame)
       -> Scene
@@ -61,7 +62,7 @@ General Dioxus preview
       -> Dioxus web or desktop UI
 ```
 
-Native compositions now share one `Scene` contract between preview and export. General Dioxus VDOM components still have an explicit boundary because arbitrary Dioxus elements are not compiled into native `Scene` nodes.
+Native compositions share one `Scene` contract between preview and export. `VdomComposition` crosses the Dioxus/native boundary for its supported DOM and CSS subset, while direct `Scene` and `SceneEmitter` compositions bypass that conversion when exact scene control is preferable.
 
 ## Workspace
 
@@ -78,6 +79,7 @@ Native compositions now share one `Scene` contract between preview and export. G
 | `dioxuscut-noise` | Deterministic simplex noise helpers |
 | `dioxuscut-transitions` | Dioxus fade and slide transitions |
 | `dioxuscut-rasterizer` | Scene IR, CPU renderer, experimental GPU renderer, FFmpeg pipe |
+| `dioxuscut-vdom` | Dioxus VDOM mutation renderer, CSS cascade, Taffy layout, and Scene conversion |
 | `dioxuscut-renderer` | Static server and PNG-sequence encoding utilities |
 | `dioxuscut-cli` | Render command and Rhai composition runtime |
 | `apps/example` | Dioxus web composition preview |
@@ -208,6 +210,64 @@ impl NativeComposition for TitleCard {
 // execute_render_command_with_registry(&request, &registry).await?;
 ```
 
+## Rendering a Dioxus VDOM natively
+
+`VdomComposition` creates a fresh `VirtualDom` for each frame and implements the
+same `NativeComposition` contract used by the CLI, Player, and Studio. This
+keeps parallel frame rendering isolated:
+
+```rust,ignore
+use dioxus::prelude::*;
+use dioxus_core::VirtualDom;
+use dioxuscut_composition::{CompositionRegistry, NativeCompositionContext};
+use dioxuscut_vdom::VdomComposition;
+
+#[derive(Clone, PartialEq, Props)]
+struct CardProps {
+    frame: u32,
+}
+
+fn Card(props: CardProps) -> Element {
+    rsx! {
+        main { class: "card",
+            h1 { "Frame {props.frame}" }
+            img { src: "assets/poster.png", class: "poster" }
+        }
+    }
+}
+
+let composition = VdomComposition::new(
+    "DioxusCard",
+    |frame, _props, _context: NativeCompositionContext| {
+        VirtualDom::new_with_props(Card, CardProps { frame })
+    },
+)
+.with_css(r#"
+    .card {
+        display: flex;
+        width: 1280px;
+        height: 720px;
+        padding: 64px;
+        gap: 32px;
+        background: #0f172a;
+        color: white;
+    }
+    .poster { width: 480px; height: 270px; object-fit: cover; }
+"#)?;
+
+let mut registry = CompositionRegistry::new();
+registry.register(composition)?;
+```
+
+Supported selectors are `tag`, `.class`, `#id`, `*`, comma-separated groups,
+and compounds such as `main.card#hero`. The CSS subset covers block, Flexbox,
+and Grid sizing and placement; position and inset; margin, padding, and gap;
+alignment; solid backgrounds and borders; font size, weight, line height, color,
+opacity, overflow clipping, aspect ratio, and media object fit. Inline `style`
+and Dioxus style-namespace attributes override stylesheet rules. Complex
+combinators, pseudo-selectors, browser APIs, event behavior, and the full CSS
+painting model are intentionally outside this adapter.
+
 ## CLI reference
 
 ```text
@@ -274,7 +334,7 @@ written into workflow files.
 
 ## Current limitations
 
-- General Dioxus VDOM compositions are not automatically translated into native `Scene` nodes; native compositions use explicit `SceneEmitter` adapters for media, shapes, captions, transitions, sequences, freezes, and composited layers.
+- `dioxuscut-vdom` translates an explicit DOM/CSS subset, not a browser engine. Complex selectors, intrinsic browser layout, canvas/WebGL, DOM APIs, events, CSS gradients, transforms, animations, and advanced paint effects still require direct Scene APIs or further adapter work.
 - Native image, video, and audio sources are local files; remote URLs and data URIs are not supported.
 - Video frames use cached FFprobe stream metadata, up to four persistent FFmpeg decoder sources, fixed-output-FPS sampling for VFR input, and a 128 MiB frame LRU. Backward or large forward seeks restart only the affected decoder.
 - Audio declarations are taken from frame zero and must be static for the render.
@@ -285,7 +345,7 @@ written into workflow files.
 
 ## Roadmap
 
-1. Expand `SceneEmitter` layout and style parity beyond the current explicit adapters.
+1. Expand VDOM/CSS conversion beyond the current simple-selector and native-paint subset.
 2. Full bidirectional paragraph layout, variable-font axes, and advanced typography controls.
 3. Full GPU parity for paths, text, media, groups, composited layers, strokes, and multi-stop gradients.
 4. Additional color, distortion, and convolution filter primitives.
