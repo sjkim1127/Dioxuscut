@@ -7,8 +7,10 @@
 
 pub mod audio;
 pub mod img;
+pub mod scene;
 pub mod video;
 
 pub use audio::{Audio, AudioProps};
 pub use img::{ImageFit, Img, ImgProps};
+pub use scene::{SceneAudio, SceneImage, SceneVideo};
 pub use video::{Video, VideoProps};
