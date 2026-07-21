@@ -14,8 +14,10 @@ tiny-skia  = { workspace = true }
 ab_glyph   = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
+wgpu       = { version = "22", optional = true }
+pollster   = { version = "0.4", optional = true }
 
 [features]
 default = []
 # Enable wgpu GPU-accelerated offscreen rendering
-gpu = []
+gpu = ["wgpu", "pollster"]

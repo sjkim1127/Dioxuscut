@@ -3,6 +3,7 @@
 //! Renders a [`Scene`] into an RGBA pixel buffer without any GPU or browser dependency.
 
 use crate::backend::{FrameConfig, RasterError, RasterizerBackend};
+use crate::font::FontCache;
 use crate::scene::{Color, SceneNode, Scene};
 use image::RgbaImage;
 use tiny_skia::{
@@ -14,11 +15,20 @@ use tiny_skia::{
 ///
 /// Zero dependencies on GPU drivers, Chrome, or any external process.
 /// Works in CI, Docker, and serverless environments out of the box.
-pub struct TinySkiaBackend;
+/// Text is rendered using real TTF glyph data via `ab_glyph`.
+pub struct TinySkiaBackend {
+    font: FontCache,
+}
 
 impl TinySkiaBackend {
+    /// Create a new backend, loading a system font automatically.
     pub fn new() -> Self {
-        Self
+        Self { font: FontCache::load() }
+    }
+
+    /// Create without loading a font (text will use placeholder blocks).
+    pub fn headless() -> Self {
+        Self { font: FontCache::headless() }
     }
 }
 
@@ -36,7 +46,7 @@ impl RasterizerBackend for TinySkiaBackend {
         // Clear to transparent
         pixmap.fill(tiny_skia::Color::TRANSPARENT);
 
-        render_nodes(&mut pixmap, &scene.nodes, Transform::identity(), 1.0);
+        render_nodes(&mut pixmap, &scene.nodes, Transform::identity(), 1.0, &self.font);
 
         // Convert tiny-skia Pixmap (RGBA premultiplied) to image::RgbaImage
         let raw_data = pixmap.data().to_vec();
@@ -45,13 +55,13 @@ impl RasterizerBackend for TinySkiaBackend {
     }
 }
 
-fn render_nodes(pixmap: &mut Pixmap, nodes: &[SceneNode], parent_transform: Transform, parent_opacity: f32) {
+fn render_nodes(pixmap: &mut Pixmap, nodes: &[SceneNode], parent_transform: Transform, parent_opacity: f32, font: &FontCache) {
     for node in nodes {
-        render_node(pixmap, node, parent_transform, parent_opacity);
+        render_node(pixmap, node, parent_transform, parent_opacity, font);
     }
 }
 
-fn render_node(pixmap: &mut Pixmap, node: &SceneNode, transform: Transform, opacity: f32) {
+fn render_node(pixmap: &mut Pixmap, node: &SceneNode, transform: Transform, opacity: f32, font: &FontCache) {
     match node {
         SceneNode::Rect { x, y, w, h, fill, stroke, stroke_width, corner_radius } => {
             let rect = match Rect::from_xywh(*x, *y, *w, *h) {
@@ -190,25 +200,69 @@ fn render_node(pixmap: &mut Pixmap, node: &SceneNode, transform: Transform, opac
         SceneNode::Group { transform: group_transform, opacity: group_opacity, children } => {
             let new_transform = transform.post_concat(group_transform.to_tiny_skia());
             let new_opacity = opacity * group_opacity;
-            render_nodes(pixmap, children, new_transform, new_opacity);
+            render_nodes(pixmap, children, new_transform, new_opacity, font);
         }
 
         SceneNode::Text { x, y, content, font_size, color, .. } => {
-            // Basic text: render as filled rect placeholder per character
-            // Full text rendering requires ab_glyph + font loading; placeholder for now
-            let char_w = font_size * 0.6;
-            let mut cx = *x;
-            for _ch in content.chars() {
-                let rect = match Rect::from_xywh(cx, *y - font_size, char_w.max(1.0), font_size.max(1.0)) {
-                    Some(r) => r,
-                    None => { cx += char_w; continue; },
-                };
-                let path = PathBuilder::from_rect(rect);
-                let mut paint = Paint::default();
-                paint.set_color(apply_opacity(*color, opacity));
-                paint.anti_alias = true;
-                pixmap.fill_path(&path, &paint, FillRule::Winding, transform, None);
-                cx += char_w;
+            let text_color = apply_opacity(*color, opacity);
+
+            if let Some(rendered) = font.rasterize(content, *font_size) {
+                // Blit the glyph coverage map onto the pixmap at (x, y - baseline)
+                let origin_x = x.floor() as i32;
+                let origin_y = (*y - rendered.baseline as f32).floor() as i32;
+
+                let pw = pixmap.width() as i32;
+                let ph = pixmap.height() as i32;
+                let pixmap_width = pixmap.width(); // cache before mutable borrow
+
+                let pixels_rgba = pixmap.pixels_mut();
+
+                for gy in 0..rendered.height {
+                    for gx in 0..rendered.width {
+                        let coverage = rendered.pixels[(gy * rendered.width + gx) as usize];
+                        if coverage == 0 { continue; }
+
+                        let px = origin_x + gx as i32;
+                        let py = origin_y + gy as i32;
+                        if px < 0 || py < 0 || px >= pw || py >= ph { continue; }
+
+                        let idx = (py as u32 * pixmap_width + px as u32) as usize;
+                        // Alpha-composite glyph pixel over existing pixel
+                        let src_a = (coverage as f32 / 255.0)
+                            * (text_color.alpha() as f32 / 255.0);
+                        let dst = pixels_rgba[idx];
+                        let dst_a = dst.alpha() as f32 / 255.0;
+                        let out_a = src_a + dst_a * (1.0 - src_a);
+                        if out_a > 0.0 {
+                            let blend = |src_c: f32, dst_c: f32| -> u8 {
+                                ((src_c * src_a + dst_c * dst_a * (1.0 - src_a)) / out_a * 255.0)
+                                    .clamp(0.0, 255.0) as u8
+                            };
+                            let r = blend(text_color.red() as f32,   dst.red() as f32);
+                            let g = blend(text_color.green() as f32, dst.green() as f32);
+                            let b = blend(text_color.blue() as f32,  dst.blue() as f32);
+                            let a = (out_a * 255.0).clamp(0.0, 255.0) as u8;
+                            pixels_rgba[idx] = tiny_skia::PremultipliedColorU8::from_rgba(r, g, b, a)
+                                .unwrap_or(pixels_rgba[idx]);
+                        }
+                    }
+                }
+            } else {
+                // Fallback: draw a solid colour block per character (no font loaded)
+                let char_w = *font_size * 0.6;
+                let mut cx = *x;
+                for _ch in content.chars() {
+                    let rect = match Rect::from_xywh(cx, *y - font_size, char_w.max(1.0), font_size.max(1.0)) {
+                        Some(r) => r,
+                        None => { cx += char_w; continue; },
+                    };
+                    let path = PathBuilder::from_rect(rect);
+                    let mut paint = Paint::default();
+                    paint.set_color(text_color);
+                    paint.anti_alias = true;
+                    pixmap.fill_path(&path, &paint, FillRule::Winding, transform, None);
+                    cx += char_w;
+                }
             }
         }
     }

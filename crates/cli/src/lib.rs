@@ -29,6 +29,8 @@ pub enum RenderBackend {
     /// Pure-Rust CPU rasterizer — no browser or GPU required. Default.
     #[default]
     Native,
+    /// GPU-accelerated rasterizer via wgpu (Vulkan/Metal/DX12). Requires `--features gpu`.
+    Gpu,
     /// Headless Chrome CDP renderer (Phase 2/3 behaviour). Requires Chrome installed.
     Chrome,
 }
@@ -249,6 +251,63 @@ pub async fn execute_render_command(
             })?;
 
             tracing::info!("Native rasterizer: {} frames written to {:?}", duration, out_dir);
+        }
+
+        // ── wgpu GPU renderer (Phase 4, feature = "gpu") ─────────────────────
+        RenderBackend::Gpu => {
+            #[cfg(not(feature = "gpu"))]
+            {
+                anyhow::bail!("GPU backend is not compiled in. Rebuild with `--features gpu`:\n  cargo build -p dioxuscut-cli --features dioxuscut-rasterizer/gpu");
+            }
+
+            #[cfg(feature = "gpu")]
+            {
+                use dioxuscut_rasterizer::{
+                    WgpuBackend, NativeRenderConfig, Scene, SceneNode, Color,
+                    GradientStop, render_all_frames,
+                };
+
+                tracing::info!("Using wgpu GPU-accelerated rasterizer");
+
+                let rasterizer = WgpuBackend::new()
+                    .map_err(|e| anyhow::anyhow!("GPU backend init failed: {e}"))?;
+                let native_config = NativeRenderConfig::new(width, height, fps, duration, &out_dir);
+
+                let prop_value: serde_json::Value =
+                    serde_json::from_str(&props_json).unwrap_or(serde_json::Value::Null);
+
+                let bg_start = prop_value.get("background_start")
+                    .and_then(|v| v.as_str()).and_then(Color::from_hex)
+                    .unwrap_or(Color::rgb(15, 23, 42));
+                let bg_end = prop_value.get("background_end")
+                    .and_then(|v| v.as_str()).and_then(Color::from_hex)
+                    .unwrap_or(Color::rgb(30, 27, 75));
+                let accent = prop_value.get("accent_color")
+                    .and_then(|v| v.as_str()).and_then(Color::from_hex)
+                    .unwrap_or(Color::rgb(108, 99, 255));
+
+                render_all_frames(&rasterizer, &native_config, |frame| {
+                    let mut scene = Scene::new();
+                    let t = frame as f32 / duration as f32;
+                    scene.push(SceneNode::LinearGradient {
+                        x: 0.0, y: 0.0, w: width as f32, h: height as f32,
+                        angle_deg: 135.0,
+                        stops: vec![
+                            GradientStop { position: 0.0, color: bg_start },
+                            GradientStop { position: 1.0, color: bg_end },
+                        ],
+                    });
+                    let r = (width.min(height) as f32 * 0.15) + t * (width.min(height) as f32 * 0.1);
+                    scene.push(SceneNode::Circle {
+                        cx: width as f32 * 0.5, cy: height as f32 * 0.5, r,
+                        fill: accent.with_opacity(0.15 + t * 0.15),
+                        stroke: Some(accent), stroke_width: 3.0,
+                    });
+                    scene
+                })?;
+
+                tracing::info!("GPU rasterizer: {} frames written to {:?}", duration, out_dir);
+            }
         }
 
         // ── Chrome CDP renderer (Phase 2/3 legacy) ───────────────────────────

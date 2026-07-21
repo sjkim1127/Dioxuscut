@@ -26,11 +26,17 @@
 //! ```
 
 pub mod backend;
+pub mod font;
 pub mod scene;
 pub mod render;
 pub mod tiny_skia_backend;
+#[cfg(feature = "gpu")]
+pub mod wgpu_backend;
 
 pub use backend::{FrameConfig, RasterError, RasterizerBackend};
+pub use font::FontCache;
 pub use scene::{Color, GradientStop, Scene, SceneNode, Transform2D};
 pub use tiny_skia_backend::TinySkiaBackend;
 pub use render::{NativeRenderConfig, render_all_frames, save_frame};
+#[cfg(feature = "gpu")]
+pub use wgpu_backend::WgpuBackend;
