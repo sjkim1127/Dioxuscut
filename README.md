@@ -257,11 +257,12 @@ written into workflow files.
 
 ## Current limitations
 
-- General Dioxus VDOM compositions are not automatically translated into native `Scene` nodes; native compositions use explicit `SceneEmitter` adapters for media, shapes, captions, transitions, sequences, and freezes.
+- General Dioxus VDOM compositions are not automatically translated into native `Scene` nodes; native compositions use explicit `SceneEmitter` adapters for media, shapes, captions, transitions, sequences, freezes, and composited layers.
 - Native image, video, and audio sources are local files; remote URLs and data URIs are not supported.
 - Video frames use cached FFprobe stream metadata, up to four persistent FFmpeg decoder sources, fixed-output-FPS sampling for VFR input, and a 128 MiB frame LRU. Backward or large forward seeks restart only the affected decoder.
 - Audio declarations are taken from frame zero and must be static for the render.
-- GPU acceleration covers a subset of scene primitives and uses whole-frame CPU fallback otherwise.
+- `SceneLayer` supports rectangular or SVG-path clips, alpha or luminance masks, twelve blend modes, ordered blur/brightness/grayscale/opacity filters, and drop shadows. These effects use CPU offscreen surfaces for export and SVG/CSS equivalents for Player preview.
+- GPU acceleration covers a subset of scene primitives and uses whole-frame CPU fallback for composited layers and other unsupported nodes.
 - Font discovery uses platform fonts, so pixel-identical cross-platform text output is not guaranteed.
 - Studio is a preview shell, not yet a full editor.
 
@@ -269,8 +270,8 @@ written into workflow files.
 
 1. Expand `SceneEmitter` layout and style parity beyond the current explicit adapters.
 2. Explicit font assets and fallback chains for reproducible text.
-3. Scene clipping, masks, blend modes, shadows, and filter compositing.
-4. Full GPU parity for paths, text, media, groups, strokes, and multi-stop gradients.
+3. Full GPU parity for paths, text, media, groups, composited layers, strokes, and multi-stop gradients.
+4. Additional color, distortion, and convolution filter primitives.
 5. Studio project loading, media editing, and render queue integration.
 
 ## License

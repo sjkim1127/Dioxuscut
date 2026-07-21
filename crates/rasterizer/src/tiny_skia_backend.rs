@@ -5,11 +5,14 @@
 use crate::backend::{FrameConfig, RasterError, RasterizerBackend};
 use crate::font::FontCache;
 use crate::image_cache::ImageCache;
-use crate::scene::{Color, ImageFit, Scene, SceneNode};
+use crate::scene::{
+    BlendMode, ClipRegion, Color, ImageFit, MaskMode, Scene, SceneFilter, SceneNode, SceneShadow,
+};
 use crate::video_cache::VideoFrameCache;
 use image::{imageops, RgbaImage};
 use tiny_skia::{
-    FillRule, IntSize, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke, Transform,
+    BlendMode as SkBlendMode, FillRule, IntSize, Mask, MaskType, Paint, Path, PathBuilder, Pixmap,
+    PixmapPaint, Rect, Stroke, Transform,
 };
 
 const MAX_IMAGE_NODE_PIXELS: u64 = 16 * 1024 * 1024;
@@ -363,6 +366,69 @@ fn render_node(
             render_nodes(pixmap, children, new_transform, new_opacity, resources)?;
         }
 
+        SceneNode::Layer {
+            opacity: layer_opacity,
+            blend_mode,
+            clip,
+            mask,
+            mask_mode,
+            filters,
+            shadow,
+            children,
+        } => {
+            if !opacity.is_finite() || !layer_opacity.is_finite() {
+                return Err(RasterError::Scene(
+                    "layer and inherited opacity must be finite".into(),
+                ));
+            }
+            let mut layer = Pixmap::new(pixmap.width(), pixmap.height())
+                .ok_or_else(|| RasterError::Scene("failed to allocate layer surface".into()))?;
+            render_nodes(&mut layer, children, transform, 1.0, resources)?;
+
+            for filter in filters {
+                apply_filter(&mut layer, filter)?;
+            }
+            if let Some(clip) = clip {
+                let clip_mask = render_clip_mask(pixmap.width(), pixmap.height(), clip, transform)?;
+                layer.apply_mask(&clip_mask);
+            }
+            if let Some(mask_nodes) = mask {
+                let mut mask_pixmap = Pixmap::new(pixmap.width(), pixmap.height())
+                    .ok_or_else(|| RasterError::Scene("failed to allocate mask surface".into()))?;
+                render_nodes(&mut mask_pixmap, mask_nodes, transform, 1.0, resources)?;
+                let mask_type = match mask_mode {
+                    MaskMode::Alpha => MaskType::Alpha,
+                    MaskMode::Luminance => MaskType::Luminance,
+                };
+                layer.apply_mask(&Mask::from_pixmap(mask_pixmap.as_ref(), mask_type));
+            }
+
+            let composite_paint = PixmapPaint {
+                opacity: (opacity * layer_opacity).clamp(0.0, 1.0),
+                blend_mode: tiny_skia_blend_mode(*blend_mode),
+                ..Default::default()
+            };
+            if let Some(shadow) = shadow {
+                let shadow_pixmap = make_shadow(&layer, shadow)?;
+                pixmap.draw_pixmap(
+                    shadow.offset_x.round() as i32,
+                    shadow.offset_y.round() as i32,
+                    shadow_pixmap.as_ref(),
+                    &composite_paint,
+                    Transform::identity(),
+                    None,
+                );
+            }
+            pixmap.draw_pixmap(
+                0,
+                0,
+                layer.as_ref(),
+                &composite_paint,
+                Transform::identity(),
+                None,
+            );
+        }
+
         SceneNode::Text {
             x,
             y,
@@ -453,6 +519,214 @@ fn render_node(
 fn apply_opacity(color: Color, opacity: f32) -> tiny_skia::Color {
     let a = (color.a as f32 * opacity.clamp(0.0, 1.0)) as u8;
     tiny_skia::Color::from_rgba8(color.r, color.g, color.b, a)
+}
+
+fn tiny_skia_blend_mode(mode: BlendMode) -> SkBlendMode {
+    match mode {
+        BlendMode::Normal => SkBlendMode::SourceOver,
+        BlendMode::Multiply => SkBlendMode::Multiply,
+        BlendMode::Screen => SkBlendMode::Screen,
+        BlendMode::Overlay => SkBlendMode::Overlay,
+        BlendMode::Darken => SkBlendMode::Darken,
+        BlendMode::Lighten => SkBlendMode::Lighten,
+        BlendMode::ColorDodge => SkBlendMode::ColorDodge,
+        BlendMode::ColorBurn => SkBlendMode::ColorBurn,
+        BlendMode::HardLight => SkBlendMode::HardLight,
+        BlendMode::SoftLight => SkBlendMode::SoftLight,
+        BlendMode::Difference => SkBlendMode::Difference,
+        BlendMode::Exclusion => SkBlendMode::Exclusion,
+    }
+}
+
+fn render_clip_mask(
+    width: u32,
+    height: u32,
+    clip: &ClipRegion,
+    transform: Transform,
+) -> Result<Mask, RasterError> {
+    let mut clip_pixmap = Pixmap::new(width, height)
+        .ok_or_else(|| RasterError::Scene("failed to allocate clip surface".into()))?;
+    let path = match clip {
+        ClipRegion::Rect {
+            x,
+            y,
+            w,
+            h,
+            corner_radius,
+        } => {
+            let Some(rect) = Rect::from_xywh(*x, *y, *w, *h) else {
+                return Mask::new(width, height).ok_or_else(|| {
+                    RasterError::Scene("failed to allocate empty clip mask".into())
+                });
+            };
+            if *corner_radius > 0.0 {
+                build_rounded_rect(*x, *y, *w, *h, *corner_radius)
+            } else {
+                PathBuilder::from_rect(rect)
+            }
+        }
+        ClipRegion::Path { d } => svgpath_to_tiny_skia(d)
+            .ok_or_else(|| RasterError::Scene(format!("invalid SVG clip path: {d}")))?,
+    };
+    let mut paint = Paint::default();
+    paint.set_color(tiny_skia::Color::WHITE);
+    paint.anti_alias = true;
+    clip_pixmap.fill_path(&path, &paint, FillRule::Winding, transform, None);
+    Ok(Mask::from_pixmap(clip_pixmap.as_ref(), MaskType::Alpha))
+}
+
+fn apply_filter(pixmap: &mut Pixmap, filter: &SceneFilter) -> Result<(), RasterError> {
+    match *filter {
+        SceneFilter::Blur { sigma } => {
+            if !sigma.is_finite() || !(0.0..=100.0).contains(&sigma) {
+                return Err(RasterError::Scene(format!(
+                    "blur sigma must be finite and between 0 and 100, got {sigma}"
+                )));
+            }
+            let radius = (sigma * 1.5).ceil().clamp(0.0, 128.0) as usize;
+            box_blur(pixmap, radius);
+        }
+        SceneFilter::Brightness { amount } => {
+            if !amount.is_finite() || !(0.0..=10.0).contains(&amount) {
+                return Err(RasterError::Scene(format!(
+                    "brightness must be finite and between 0 and 10, got {amount}"
+                )));
+            }
+            for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+                let alpha = pixel[3];
+                for channel in &mut pixel[..3] {
+                    *channel = (f32::from(*channel) * amount)
+                        .round()
+                        .clamp(0.0, f32::from(alpha)) as u8;
+                }
+            }
+        }
+        SceneFilter::Grayscale { amount } => {
+            if !amount.is_finite() || !(0.0..=1.0).contains(&amount) {
+                return Err(RasterError::Scene(format!(
+                    "grayscale must be finite and between 0 and 1, got {amount}"
+                )));
+            }
+            for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+                let alpha = pixel[3];
+                let gray = 0.2126 * f32::from(pixel[0])
+                    + 0.7152 * f32::from(pixel[1])
+                    + 0.0722 * f32::from(pixel[2]);
+                for channel in &mut pixel[..3] {
+                    *channel = (f32::from(*channel) + (gray - f32::from(*channel)) * amount)
+                        .round()
+                        .clamp(0.0, f32::from(alpha)) as u8;
+                }
+            }
+        }
+        SceneFilter::Opacity { amount } => {
+            if !amount.is_finite() || !(0.0..=1.0).contains(&amount) {
+                return Err(RasterError::Scene(format!(
+                    "filter opacity must be finite and between 0 and 1, got {amount}"
+                )));
+            }
+            for channel in pixmap.data_mut() {
+                *channel = (f32::from(*channel) * amount).round() as u8;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn make_shadow(source: &Pixmap, shadow: &SceneShadow) -> Result<Pixmap, RasterError> {
+    if !shadow.blur_sigma.is_finite() || !(0.0..=100.0).contains(&shadow.blur_sigma) {
+        return Err(RasterError::Scene(format!(
+            "shadow blur sigma must be finite and between 0 and 100, got {}",
+            shadow.blur_sigma
+        )));
+    }
+    if !shadow.offset_x.is_finite() || !shadow.offset_y.is_finite() {
+        return Err(RasterError::Scene("shadow offsets must be finite".into()));
+    }
+    let mut output = Pixmap::new(source.width(), source.height())
+        .ok_or_else(|| RasterError::Scene("failed to allocate shadow surface".into()))?;
+    for (source_pixel, shadow_pixel) in source
+        .data()
+        .chunks_exact(4)
+        .zip(output.data_mut().chunks_exact_mut(4))
+    {
+        let alpha = (u16::from(source_pixel[3]) * u16::from(shadow.color.a) / 255) as u8;
+        shadow_pixel[0] = (u16::from(shadow.color.r) * u16::from(alpha) / 255) as u8;
+        shadow_pixel[1] = (u16::from(shadow.color.g) * u16::from(alpha) / 255) as u8;
+        shadow_pixel[2] = (u16::from(shadow.color.b) * u16::from(alpha) / 255) as u8;
+        shadow_pixel[3] = alpha;
+    }
+    let radius = (shadow.blur_sigma * 1.5).ceil().clamp(0.0, 128.0) as usize;
+    box_blur(&mut output, radius);
+    Ok(output)
+}
+
+fn box_blur(pixmap: &mut Pixmap, radius: usize) {
+    if radius == 0 {
+        return;
+    }
+    let width = pixmap.width() as usize;
+    let height = pixmap.height() as usize;
+    let kernel = (radius * 2 + 1) as u32;
+    let source = pixmap.data().to_vec();
+    let mut horizontal = vec![0_u8; source.len()];
+
+    for y in 0..height {
+        let mut sums = [0_u32; 4];
+        for x in 0..=radius.min(width - 1) {
+            let index = (y * width + x) * 4;
+            for channel in 0..4 {
+                sums[channel] += u32::from(source[index + channel]);
+            }
+        }
+        for x in 0..width {
+            let index = (y * width + x) * 4;
+            for channel in 0..4 {
+                horizontal[index + channel] = (sums[channel] / kernel) as u8;
+            }
+            if x >= radius {
+                let remove = (y * width + x - radius) * 4;
+                for channel in 0..4 {
+                    sums[channel] -= u32::from(source[remove + channel]);
+                }
+            }
+            if x + radius + 1 < width {
+                let add = (y * width + x + radius + 1) * 4;
+                for channel in 0..4 {
+                    sums[channel] += u32::from(source[add + channel]);
+                }
+            }
+        }
+    }
+
+    let output = pixmap.data_mut();
+    for x in 0..width {
+        let mut sums = [0_u32; 4];
+        for y in 0..=radius.min(height - 1) {
+            let index = (y * width + x) * 4;
+            for channel in 0..4 {
+                sums[channel] += u32::from(horizontal[index + channel]);
+            }
+        }
+        for y in 0..height {
+            let index = (y * width + x) * 4;
+            for channel in 0..4 {
+                output[index + channel] = (sums[channel] / kernel) as u8;
+            }
+            if y >= radius {
+                let remove = ((y - radius) * width + x) * 4;
+                for channel in 0..4 {
+                    sums[channel] -= u32::from(horizontal[remove + channel]);
+                }
+            }
+            if y + radius + 1 < height {
+                let add = ((y + radius + 1) * width + x) * 4;
+                for channel in 0..4 {
+                    sums[channel] += u32::from(horizontal[add + channel]);
+                }
+            }
+        }
+    }
 }
 
 fn rounded_dimension(value: f32) -> u32 {
@@ -1029,6 +1303,194 @@ mod tests {
             px[3] > 50 && px[3] < 200,
             "Group opacity should reduce alpha"
         );
+    }
+
+    fn composited_layer(children: Vec<SceneNode>) -> SceneNode {
+        SceneNode::Layer {
+            opacity: 1.0,
+            blend_mode: BlendMode::Normal,
+            clip: None,
+            mask: None,
+            mask_mode: MaskMode::Alpha,
+            filters: Vec::new(),
+            shadow: None,
+            children,
+        }
+    }
+
+    fn solid_rect(fill: Color, x: f32, y: f32, w: f32, h: f32) -> SceneNode {
+        SceneNode::Rect {
+            x,
+            y,
+            w,
+            h,
+            fill,
+            stroke: None,
+            stroke_width: 0.0,
+            corner_radius: 0.0,
+        }
+    }
+
+    #[test]
+    fn layer_rect_clip_limits_pixels() {
+        let mut layer = composited_layer(vec![solid_rect(
+            Color::rgb(255, 0, 0),
+            0.0,
+            0.0,
+            64.0,
+            64.0,
+        )]);
+        let SceneNode::Layer { clip, .. } = &mut layer else {
+            unreachable!();
+        };
+        *clip = Some(ClipRegion::Rect {
+            x: 16.0,
+            y: 16.0,
+            w: 32.0,
+            h: 32.0,
+            corner_radius: 0.0,
+        });
+        let image = render(&Scene { nodes: vec![layer] }, 64, 64);
+
+        assert_eq!(image.get_pixel(32, 32), &Rgba([255, 0, 0, 255]));
+        assert_eq!(image.get_pixel(8, 8)[3], 0);
+    }
+
+    #[test]
+    fn layer_alpha_mask_controls_coverage() {
+        let mut layer = composited_layer(vec![solid_rect(
+            Color::rgb(255, 0, 0),
+            0.0,
+            0.0,
+            64.0,
+            64.0,
+        )]);
+        let SceneNode::Layer { mask, .. } = &mut layer else {
+            unreachable!();
+        };
+        *mask = Some(vec![solid_rect(Color::WHITE, 0.0, 0.0, 32.0, 64.0)]);
+        let image = render(&Scene { nodes: vec![layer] }, 64, 64);
+
+        assert_eq!(image.get_pixel(16, 32), &Rgba([255, 0, 0, 255]));
+        assert_eq!(image.get_pixel(48, 32)[3], 0);
+    }
+
+    #[test]
+    fn layer_luminance_mask_uses_rendered_color() {
+        let mut layer = composited_layer(vec![solid_rect(
+            Color::rgb(0, 0, 255),
+            0.0,
+            0.0,
+            64.0,
+            64.0,
+        )]);
+        let SceneNode::Layer {
+            mask, mask_mode, ..
+        } = &mut layer
+        else {
+            unreachable!();
+        };
+        *mask_mode = MaskMode::Luminance;
+        *mask = Some(vec![
+            solid_rect(Color::WHITE, 0.0, 0.0, 32.0, 64.0),
+            solid_rect(Color::BLACK, 32.0, 0.0, 32.0, 64.0),
+        ]);
+        let image = render(&Scene { nodes: vec![layer] }, 64, 64);
+
+        assert_eq!(image.get_pixel(16, 32), &Rgba([0, 0, 255, 255]));
+        assert_eq!(image.get_pixel(48, 32)[3], 0);
+    }
+
+    #[test]
+    fn layer_multiply_blends_with_destination() {
+        let background = solid_rect(Color::rgb(200, 100, 50), 0.0, 0.0, 32.0, 32.0);
+        let mut layer = composited_layer(vec![solid_rect(
+            Color::rgb(128, 255, 255),
+            0.0,
+            0.0,
+            32.0,
+            32.0,
+        )]);
+        let SceneNode::Layer { blend_mode, .. } = &mut layer else {
+            unreachable!();
+        };
+        *blend_mode = BlendMode::Multiply;
+        let image = render(
+            &Scene {
+                nodes: vec![background, layer],
+            },
+            32,
+            32,
+        );
+        let pixel = image.get_pixel(16, 16);
+
+        assert!((98..=102).contains(&pixel[0]));
+        assert!((98..=102).contains(&pixel[1]));
+        assert!((48..=52).contains(&pixel[2]));
+    }
+
+    #[test]
+    fn layer_filters_apply_in_order() {
+        let mut layer = composited_layer(vec![solid_rect(
+            Color::rgb(255, 0, 0),
+            0.0,
+            0.0,
+            16.0,
+            16.0,
+        )]);
+        let SceneNode::Layer { filters, .. } = &mut layer else {
+            unreachable!();
+        };
+        *filters = vec![
+            SceneFilter::Grayscale { amount: 1.0 },
+            SceneFilter::Opacity { amount: 0.5 },
+        ];
+        let image = render(&Scene { nodes: vec![layer] }, 16, 16);
+        let pixel = image.get_pixel(8, 8);
+
+        assert!((26..=28).contains(&pixel[0]));
+        assert!((26..=28).contains(&pixel[1]));
+        assert!((26..=28).contains(&pixel[2]));
+        assert!((127..=128).contains(&pixel[3]));
+    }
+
+    #[test]
+    fn layer_shadow_uses_masked_alpha_and_blur() {
+        let mut layer = composited_layer(vec![solid_rect(Color::WHITE, 8.0, 8.0, 12.0, 12.0)]);
+        let SceneNode::Layer { shadow, .. } = &mut layer else {
+            unreachable!();
+        };
+        *shadow = Some(SceneShadow {
+            offset_x: 20.0,
+            offset_y: 0.0,
+            blur_sigma: 2.0,
+            color: Color::rgb(255, 0, 0),
+        });
+        let image = render(&Scene { nodes: vec![layer] }, 48, 32);
+        let shadow_pixel = image.get_pixel(34, 14);
+
+        assert!(shadow_pixel[0] > 0);
+        assert_eq!(shadow_pixel[1], 0);
+        assert_eq!(shadow_pixel[2], 0);
+        assert!(image.get_pixel(26, 14)[3] > 0, "blur should expand alpha");
+    }
+
+    #[test]
+    fn invalid_layer_filter_returns_scene_error() {
+        let mut layer = composited_layer(Vec::new());
+        let SceneNode::Layer { filters, .. } = &mut layer else {
+            unreachable!();
+        };
+        filters.push(SceneFilter::Blur { sigma: f32::NAN });
+        let error = TinySkiaBackend::headless()
+            .render_frame(
+                &Scene { nodes: vec![layer] },
+                &FrameConfig::new(16, 16, 0, 30.0),
+            )
+            .unwrap_err();
+
+        assert!(error.to_string().contains("Scene compositing error"));
+        assert!(error.to_string().contains("blur sigma"));
     }
 
     #[test]

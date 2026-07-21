@@ -42,7 +42,10 @@ pub use render::{
     render_to_ffmpeg_pipe, render_to_ffmpeg_pipe_fallible, save_frame, NativeRenderConfig,
     PipeConfig,
 };
-pub use scene::{AudioTrack, Color, GradientStop, ImageFit, Scene, SceneNode, Transform2D};
+pub use scene::{
+    AudioTrack, BlendMode, ClipRegion, Color, GradientStop, ImageFit, MaskMode, Scene, SceneFilter,
+    SceneNode, SceneShadow, Transform2D,
+};
 pub use tiny_skia_backend::TinySkiaBackend;
 pub use video_cache::{probe_video_metadata, VideoMetadata};
 #[cfg(feature = "gpu")]

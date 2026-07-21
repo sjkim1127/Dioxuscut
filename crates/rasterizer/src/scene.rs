@@ -137,6 +137,71 @@ pub enum ImageFit {
     ScaleDown,
 }
 
+/// Layer blend mode shared by CPU rendering and SVG preview.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BlendMode {
+    #[default]
+    Normal,
+    Multiply,
+    Screen,
+    Overlay,
+    Darken,
+    Lighten,
+    ColorDodge,
+    ColorBurn,
+    HardLight,
+    SoftLight,
+    Difference,
+    Exclusion,
+}
+
+/// Geometric clip applied to a composited layer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ClipRegion {
+    Rect {
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        corner_radius: f32,
+    },
+    Path {
+        d: String,
+    },
+}
+
+/// How rendered mask nodes are converted to coverage.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MaskMode {
+    #[default]
+    Alpha,
+    Luminance,
+}
+
+/// Pixel filter applied to an offscreen layer in declaration order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum SceneFilter {
+    Blur { sigma: f32 },
+    Brightness { amount: f32 },
+    Grayscale { amount: f32 },
+    Opacity { amount: f32 },
+}
+
+/// Drop shadow generated from the filtered and masked layer alpha.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SceneShadow {
+    pub offset_x: f32,
+    pub offset_y: f32,
+    pub blur_sigma: f32,
+    pub color: Color,
+}
+
+const fn default_opacity() -> f32 {
+    1.0
+}
+
 /// Audio source mixed into the encoded output.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AudioTrack {
@@ -267,6 +332,26 @@ pub enum SceneNode {
         opacity: f32,
         children: Vec<SceneNode>,
     },
+
+    /// Offscreen compositing boundary with filters, clipping, masking, shadow,
+    /// and a destination blend mode.
+    Layer {
+        #[serde(default = "default_opacity")]
+        opacity: f32,
+        #[serde(default)]
+        blend_mode: BlendMode,
+        #[serde(default)]
+        clip: Option<ClipRegion>,
+        #[serde(default)]
+        mask: Option<Vec<SceneNode>>,
+        #[serde(default)]
+        mask_mode: MaskMode,
+        #[serde(default)]
+        filters: Vec<SceneFilter>,
+        #[serde(default)]
+        shadow: Option<SceneShadow>,
+        children: Vec<SceneNode>,
+    },
 }
 
 /// Affine 2D transform (scale + rotation + translation).
@@ -314,7 +399,7 @@ impl Scene {
         self.nodes.push(node);
     }
 
-    /// Collect audio declared in this scene, including nested groups.
+    /// Collect audio declared in this scene, including nested groups and layers.
     pub fn audio_tracks(&self) -> Vec<AudioTrack> {
         fn collect(nodes: &[SceneNode], parent_volume: f64, output: &mut Vec<AudioTrack>) {
             for node in nodes {
@@ -325,6 +410,9 @@ impl Scene {
                         output.push(track);
                     }
                     SceneNode::Group {
+                        opacity, children, ..
+                    } => collect(children, parent_volume * f64::from(*opacity), output),
+                    SceneNode::Layer {
                         opacity, children, ..
                     } => collect(children, parent_volume * f64::from(*opacity), output),
                     _ => {}
@@ -426,5 +514,39 @@ mod tests {
         let tracks = scene.audio_tracks();
         assert_eq!(tracks.len(), 1);
         assert!((tracks[0].volume - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn nested_audio_tracks_inherit_layer_opacity() {
+        let mut track = AudioTrack::new("voice.wav");
+        track.volume = 0.8;
+        let scene = Scene {
+            nodes: vec![SceneNode::Layer {
+                opacity: 0.25,
+                blend_mode: BlendMode::Normal,
+                clip: None,
+                mask: None,
+                mask_mode: MaskMode::Alpha,
+                filters: Vec::new(),
+                shadow: None,
+                children: vec![SceneNode::Audio { track }],
+            }],
+        };
+
+        assert!((scene.audio_tracks()[0].volume - 0.2).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn layer_deserialization_defaults_compositing_options() {
+        let node: SceneNode = serde_json::from_str(r#"{"Layer":{"children":[]}}"#).unwrap();
+        assert!(matches!(
+            node,
+            SceneNode::Layer {
+                opacity,
+                blend_mode: BlendMode::Normal,
+                mask_mode: MaskMode::Alpha,
+                ..
+            } if (opacity - 1.0).abs() < f32::EPSILON
+        ));
     }
 }

@@ -3,7 +3,7 @@
 mod scene_emitter;
 
 pub use scene_emitter::{
-    SceneEmitter, SceneEmitterComposition, SceneFrameContext, SceneFreeze, SceneGroup,
+    SceneEmitter, SceneEmitterComposition, SceneFrameContext, SceneFreeze, SceneGroup, SceneLayer,
     SceneSequence, SceneStack,
 };
 

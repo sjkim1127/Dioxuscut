@@ -5,7 +5,8 @@ use dioxus::prelude::*;
 use dioxuscut_composition::{Composition, CompositionError, NativeCompositionContext};
 use dioxuscut_core::use_current_frame;
 use dioxuscut_rasterizer::{
-    AudioTrack, Color, GradientStop, ImageFit, Scene, SceneNode, Transform2D,
+    AudioTrack, BlendMode, ClipRegion, Color, GradientStop, ImageFit, MaskMode, Scene, SceneFilter,
+    SceneNode, SceneShadow, Transform2D,
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -451,6 +452,123 @@ fn SceneNodeView(props: SceneNodeViewProps) -> Element {
                 }
             }
         }
+        SceneNode::Layer {
+            opacity,
+            blend_mode,
+            clip,
+            mask,
+            mask_mode,
+            filters,
+            shadow,
+            children,
+        } => {
+            let clip_id = format!("dioxuscut-clip-{}", props.node_path);
+            let mask_id = format!("dioxuscut-mask-{}", props.node_path);
+            let mut style = format!("mix-blend-mode:{};", blend_mode_css(blend_mode));
+            if clip.is_some() {
+                style.push_str(&format!("clip-path:url(#{clip_id});"));
+            }
+            if mask.is_some() {
+                style.push_str(&format!("mask:url(#{mask_id});"));
+            }
+            let filter = layer_filter_css(&filters, shadow.as_ref());
+            if !filter.is_empty() {
+                style.push_str(&format!("filter:{filter};"));
+            }
+            let inherited_volume = props.inherited_volume * f64::from(opacity);
+            rsx! {
+                if let Some(clip) = clip {
+                    LayerClipView { id: clip_id, clip }
+                }
+                if let Some(nodes) = mask {
+                    LayerMaskView {
+                        id: mask_id,
+                        mode: mask_mode,
+                        nodes,
+                        node_path: format!("{}-mask", props.node_path),
+                        timeline_time: props.timeline_time,
+                        inherited_volume,
+                    }
+                }
+                g {
+                    opacity,
+                    style,
+                    for (index, node) in children.into_iter().enumerate() {
+                        SceneNodeView {
+                            key: "layer-child-{index}",
+                            node,
+                            node_path: format!("{}-{index}", props.node_path),
+                            timeline_time: props.timeline_time,
+                            inherited_volume,
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+struct LayerClipViewProps {
+    id: String,
+    clip: ClipRegion,
+}
+
+#[component]
+fn LayerClipView(props: LayerClipViewProps) -> Element {
+    rsx! {
+        defs {
+            clipPath {
+                id: props.id,
+                clip_path_units: "userSpaceOnUse",
+                match props.clip {
+                    ClipRegion::Rect { x, y, w, h, corner_radius } => rsx! {
+                        rect { x, y, width: w, height: h, rx: corner_radius, ry: corner_radius }
+                    },
+                    ClipRegion::Path { d } => rsx! { path { d } },
+                }
+            }
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+struct LayerMaskViewProps {
+    id: String,
+    mode: MaskMode,
+    nodes: Vec<SceneNode>,
+    node_path: String,
+    timeline_time: f64,
+    inherited_volume: f64,
+}
+
+#[component]
+fn LayerMaskView(props: LayerMaskViewProps) -> Element {
+    let style = match props.mode {
+        MaskMode::Alpha => "mask-type:alpha;",
+        MaskMode::Luminance => "mask-type:luminance;",
+    };
+    rsx! {
+        defs {
+            mask {
+                id: props.id,
+                mask_units: "userSpaceOnUse",
+                x: "0%",
+                y: "0%",
+                width: "100%",
+                height: "100%",
+                style,
+                for (index, node) in props.nodes.into_iter().enumerate() {
+                    SceneNodeView {
+                        key: "mask-child-{index}",
+                        node,
+                        node_path: format!("{}-{index}", props.node_path),
+                        timeline_time: props.timeline_time,
+                        inherited_volume: props.inherited_volume,
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -474,6 +592,47 @@ fn color_css(color: Color) -> String {
         color.b,
         color.a as f64 / 255.0
     )
+}
+
+fn blend_mode_css(mode: BlendMode) -> &'static str {
+    match mode {
+        BlendMode::Normal => "normal",
+        BlendMode::Multiply => "multiply",
+        BlendMode::Screen => "screen",
+        BlendMode::Overlay => "overlay",
+        BlendMode::Darken => "darken",
+        BlendMode::Lighten => "lighten",
+        BlendMode::ColorDodge => "color-dodge",
+        BlendMode::ColorBurn => "color-burn",
+        BlendMode::HardLight => "hard-light",
+        BlendMode::SoftLight => "soft-light",
+        BlendMode::Difference => "difference",
+        BlendMode::Exclusion => "exclusion",
+    }
+}
+
+fn layer_filter_css(filters: &[SceneFilter], shadow: Option<&SceneShadow>) -> String {
+    let mut values = filters
+        .iter()
+        .map(|filter| match filter {
+            SceneFilter::Blur { sigma } => format!("blur({}px)", sigma.max(0.0)),
+            SceneFilter::Brightness { amount } => format!("brightness({})", amount.max(0.0)),
+            SceneFilter::Grayscale { amount } => {
+                format!("grayscale({})", amount.clamp(0.0, 1.0))
+            }
+            SceneFilter::Opacity { amount } => format!("opacity({})", amount.clamp(0.0, 1.0)),
+        })
+        .collect::<Vec<_>>();
+    if let Some(shadow) = shadow {
+        values.push(format!(
+            "drop-shadow({}px {}px {}px {})",
+            shadow.offset_x,
+            shadow.offset_y,
+            shadow.blur_sigma.max(0.0),
+            color_css(shadow.color)
+        ));
+    }
+    values.join(" ")
 }
 
 fn optional_color_css(color: Option<Color>) -> String {
@@ -582,6 +741,13 @@ fn media_signature(scene: &Scene) -> u64 {
                     opacity, children, ..
                 } => {
                     "group".hash(hasher);
+                    opacity.to_bits().hash(hasher);
+                    hash_nodes(children, inherited_volume * f64::from(*opacity), hasher);
+                }
+                SceneNode::Layer {
+                    opacity, children, ..
+                } => {
+                    "layer".hash(hasher);
                     opacity.to_bits().hash(hasher);
                     hash_nodes(children, inherited_volume * f64::from(*opacity), hasher);
                 }
@@ -697,6 +863,27 @@ mod tests {
         );
         assert_eq!(image_preserve_aspect_ratio(ImageFit::Fill), "none");
         assert_eq!(media_object_fit(ImageFit::ScaleDown), "scale-down");
+    }
+
+    #[test]
+    fn layer_effects_map_to_svg_css() {
+        assert_eq!(blend_mode_css(BlendMode::ColorDodge), "color-dodge");
+        let filter = layer_filter_css(
+            &[
+                SceneFilter::Blur { sigma: 2.5 },
+                SceneFilter::Grayscale { amount: 0.75 },
+            ],
+            Some(&SceneShadow {
+                offset_x: 4.0,
+                offset_y: 5.0,
+                blur_sigma: 6.0,
+                color: Color::rgba(10, 20, 30, 128),
+            }),
+        );
+
+        assert!(filter.contains("blur(2.5px)"));
+        assert!(filter.contains("grayscale(0.75)"));
+        assert!(filter.contains("drop-shadow(4px 5px 6px rgba(10, 20, 30,"));
     }
 
     #[test]

@@ -1,7 +1,9 @@
 //! Composable browser-free scene emitters.
 
 use crate::{CompositionError, NativeComposition, NativeCompositionContext};
-use dioxuscut_rasterizer::{Scene, SceneNode, Transform2D};
+use dioxuscut_rasterizer::{
+    BlendMode, ClipRegion, MaskMode, Scene, SceneFilter, SceneNode, SceneShadow, Transform2D,
+};
 use serde_json::Value;
 
 /// Timeline state passed through a native scene-emitter tree.
@@ -240,6 +242,89 @@ impl<E: SceneEmitter> SceneEmitter for SceneGroup<E> {
     }
 }
 
+/// Creates an offscreen compositing boundary around emitted children.
+pub struct SceneLayer<E> {
+    pub opacity: f32,
+    pub blend_mode: BlendMode,
+    pub clip: Option<ClipRegion>,
+    pub mask: Option<Vec<SceneNode>>,
+    pub mask_mode: MaskMode,
+    pub filters: Vec<SceneFilter>,
+    pub shadow: Option<SceneShadow>,
+    pub child: E,
+}
+
+impl<E> SceneLayer<E> {
+    pub fn new(child: E) -> Self {
+        Self {
+            opacity: 1.0,
+            blend_mode: BlendMode::Normal,
+            clip: None,
+            mask: None,
+            mask_mode: MaskMode::Alpha,
+            filters: Vec::new(),
+            shadow: None,
+            child,
+        }
+    }
+
+    pub fn with_opacity(mut self, opacity: f32) -> Self {
+        self.opacity = opacity.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn with_blend_mode(mut self, blend_mode: BlendMode) -> Self {
+        self.blend_mode = blend_mode;
+        self
+    }
+
+    pub fn with_clip(mut self, clip: ClipRegion) -> Self {
+        self.clip = Some(clip);
+        self
+    }
+
+    pub fn with_mask(mut self, nodes: impl IntoIterator<Item = SceneNode>, mode: MaskMode) -> Self {
+        self.mask = Some(nodes.into_iter().collect());
+        self.mask_mode = mode;
+        self
+    }
+
+    pub fn with_filter(mut self, filter: SceneFilter) -> Self {
+        self.filters.push(filter);
+        self
+    }
+
+    pub fn with_shadow(mut self, shadow: SceneShadow) -> Self {
+        self.shadow = Some(shadow);
+        self
+    }
+}
+
+impl<E: SceneEmitter> SceneEmitter for SceneLayer<E> {
+    fn emit(
+        &self,
+        context: SceneFrameContext,
+        props: &Value,
+        scene: &mut Scene,
+    ) -> Result<(), CompositionError> {
+        let mut child_scene = Scene::new();
+        self.child.emit(context, props, &mut child_scene)?;
+        if !child_scene.nodes.is_empty() {
+            scene.push(SceneNode::Layer {
+                opacity: self.opacity,
+                blend_mode: self.blend_mode,
+                clip: self.clip.clone(),
+                mask: self.mask.clone(),
+                mask_mode: self.mask_mode,
+                filters: self.filters.clone(),
+                shadow: self.shadow.clone(),
+                children: child_scene.nodes,
+            });
+        }
+        Ok(())
+    }
+}
+
 /// Adapts an emitter tree to the existing composition registry contract.
 pub struct SceneEmitterComposition<E> {
     id: String,
@@ -351,6 +436,44 @@ mod tests {
             &scene.nodes[0],
             SceneNode::Group { opacity, children, .. }
                 if (*opacity - 0.5).abs() < f32::EPSILON && children.len() == 2
+        ));
+    }
+
+    #[test]
+    fn layer_collects_compositing_options_and_children() {
+        let layer = SceneLayer::new(frame_text())
+            .with_opacity(0.75)
+            .with_blend_mode(BlendMode::Multiply)
+            .with_clip(ClipRegion::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 100.0,
+                h: 100.0,
+                corner_radius: 8.0,
+            })
+            .with_filter(SceneFilter::Grayscale { amount: 1.0 })
+            .with_shadow(SceneShadow {
+                offset_x: 4.0,
+                offset_y: 6.0,
+                blur_sigma: 3.0,
+                color: Color::rgba(0, 0, 0, 128),
+            });
+        let composition = SceneEmitterComposition::new("layer", layer);
+        let scene = composition.render(3, &Value::Null, context()).unwrap();
+
+        assert!(matches!(
+            &scene.nodes[0],
+            SceneNode::Layer {
+                opacity,
+                blend_mode: BlendMode::Multiply,
+                clip: Some(ClipRegion::Rect { .. }),
+                filters,
+                shadow: Some(_),
+                children,
+                ..
+            } if (*opacity - 0.75).abs() < f32::EPSILON
+                && filters.len() == 1
+                && children.len() == 1
         ));
     }
 }
