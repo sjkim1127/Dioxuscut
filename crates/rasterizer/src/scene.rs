@@ -48,6 +48,60 @@ impl Color {
         }
     }
 
+    /// Parse common CSS color forms used by Dioxuscut primitives.
+    pub fn from_css(value: &str) -> Option<Self> {
+        let value = value.trim();
+        if let Some(color) = Self::from_hex(value) {
+            return Some(color);
+        }
+        match value.to_ascii_lowercase().as_str() {
+            "black" => return Some(Self::BLACK),
+            "white" => return Some(Self::WHITE),
+            "transparent" => return Some(Self::TRANSPARENT),
+            _ => {}
+        }
+
+        let (contents, has_alpha) = if let Some(contents) = value
+            .strip_prefix("rgba(")
+            .and_then(|value| value.strip_suffix(')'))
+        {
+            (contents, true)
+        } else {
+            let contents = value
+                .strip_prefix("rgb(")
+                .and_then(|value| value.strip_suffix(')'))?;
+            (contents, false)
+        };
+        let components = contents.split(',').map(str::trim).collect::<Vec<_>>();
+        if components.len() != if has_alpha { 4 } else { 3 } {
+            return None;
+        }
+        let channel = |value: &str| -> Option<u8> {
+            if let Some(percent) = value.strip_suffix('%') {
+                let percent = percent.parse::<f32>().ok()?;
+                Some((percent.clamp(0.0, 100.0) * 2.55).round() as u8)
+            } else {
+                Some(value.parse::<f32>().ok()?.clamp(0.0, 255.0).round() as u8)
+            }
+        };
+        let alpha = if has_alpha {
+            let value = components[3];
+            if let Some(percent) = value.strip_suffix('%') {
+                (percent.parse::<f32>().ok()?.clamp(0.0, 100.0) * 2.55).round() as u8
+            } else {
+                (value.parse::<f32>().ok()?.clamp(0.0, 1.0) * 255.0).round() as u8
+            }
+        } else {
+            255
+        };
+        Some(Self::rgba(
+            channel(components[0])?,
+            channel(components[1])?,
+            channel(components[2])?,
+            alpha,
+        ))
+    }
+
     /// Apply opacity (0.0 – 1.0) to this colour.
     pub fn with_opacity(mut self, opacity: f32) -> Self {
         self.a = (self.a as f32 * opacity.clamp(0.0, 1.0)) as u8;
@@ -295,6 +349,18 @@ mod tests {
         assert_eq!(c.g, 0x66);
         assert_eq!(c.b, 0x00);
         assert_eq!(c.a, 0xff);
+    }
+
+    #[test]
+    fn css_rgb_and_rgba_colors_are_parsed() {
+        assert_eq!(
+            Color::from_css("rgb(255, 0, 128)"),
+            Some(Color::rgb(255, 0, 128))
+        );
+        assert_eq!(
+            Color::from_css("rgba(100%, 0%, 0%, 0.5)"),
+            Some(Color::rgba(255, 0, 0, 128))
+        );
     }
 
     #[test]

@@ -1618,8 +1618,11 @@ name = "dioxuscut-captions"
 version = "0.1.2"
 dependencies = [
  "dioxus",
+ "dioxuscut-composition",
  "dioxuscut-core",
+ "dioxuscut-rasterizer",
  "serde",
+ "serde_json",
  "thiserror 1.0.69",
 ]
 
@@ -1745,7 +1748,10 @@ version = "0.1.2"
 dependencies = [
  "dioxus",
  "dioxuscut-animation",
+ "dioxuscut-composition",
+ "dioxuscut-rasterizer",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

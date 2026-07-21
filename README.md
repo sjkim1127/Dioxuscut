@@ -26,6 +26,7 @@ The repository also contains Dioxus timeline, media, shape, transition, player, 
 - Cached FFprobe metadata and persistent, bounded FFmpeg rawvideo decoder sessions.
 - Registry-based Rust compositions and optional sandboxed Rhai compositions, both with JSON props.
 - Shared native composition contract for CLI export and Dioxus Player/Studio preview.
+- Composable `SceneEmitter` adapters for media, procedural shapes, kinetic captions, fades, slides, sequences, and freezes.
 - Player media synchronization for seek, pause/play, buffering, volume, rate, looping, timeline offsets, and drift correction.
 - FFmpeg audio trim, timeline delay, volume, playback-rate, looping, multi-track mixing, and AAC muxing.
 - Animation, shape, path, caption, noise, timeline, player, server, encoder, and CLI test coverage.
@@ -256,7 +257,7 @@ written into workflow files.
 
 ## Current limitations
 
-- General Dioxus VDOM compositions are not automatically translated into native `Scene` nodes; native compositions use the shared preview adapter.
+- General Dioxus VDOM compositions are not automatically translated into native `Scene` nodes; native compositions use explicit `SceneEmitter` adapters for media, shapes, captions, transitions, sequences, and freezes.
 - Native image, video, and audio sources are local files; remote URLs and data URIs are not supported.
 - Video frames use cached FFprobe stream metadata, up to four persistent FFmpeg decoder sources, fixed-output-FPS sampling for VFR input, and a 128 MiB frame LRU. Backward or large forward seeks restart only the affected decoder.
 - Audio declarations are taken from frame zero and must be static for the render.
@@ -266,7 +267,7 @@ written into workflow files.
 
 ## Roadmap
 
-1. Migrate reusable Dioxus media, shape, caption, and transition components onto the shared Scene contract.
+1. Expand `SceneEmitter` layout and style parity beyond the current explicit adapters.
 2. Explicit font assets and fallback chains for reproducible text.
 3. Scene clipping, masks, blend modes, shadows, and filter compositing.
 4. Full GPU parity for paths, text, media, groups, strokes, and multi-stop gradients.

@@ -16,6 +16,7 @@ pub mod pie;
 pub mod polygon;
 pub mod rect;
 pub mod render_svg;
+pub mod scene;
 pub mod star;
 pub mod triangle;
 
@@ -25,5 +26,6 @@ pub use pie::{make_pie, Pie, PieProps};
 pub use polygon::{make_polygon, Polygon, PolygonProps};
 pub use rect::{make_rect, Rect, RectProps};
 pub use render_svg::{RenderSvg, RenderSvgProps};
+pub use scene::SceneShape;
 pub use star::{make_star, Star, StarProps};
 pub use triangle::{make_triangle, Triangle, TriangleProps};

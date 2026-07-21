@@ -11,5 +11,8 @@ readme.workspace      = true
 [dependencies]
 dioxus              = { workspace = true }
 dioxuscut-core      = { workspace = true }
+dioxuscut-composition = { workspace = true }
+dioxuscut-rasterizer  = { workspace = true }
 serde               = { workspace = true }
+serde_json          = { workspace = true }
 thiserror           = { workspace = true }
