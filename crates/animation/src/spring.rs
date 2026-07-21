@@ -168,7 +168,10 @@ mod tests {
         let config = SpringConfig::default();
         // By frame 60 (2s at 30fps) a default spring should be settled within 0.001 of 1.0
         let v = spring(60, 30.0, config);
-        assert!((v - 1.0).abs() < 0.001, "frame 60 should be ~1.0, got {v:.6}");
+        assert!(
+            (v - 1.0).abs() < 0.001,
+            "frame 60 should be ~1.0, got {v:.6}"
+        );
     }
 
     #[test]

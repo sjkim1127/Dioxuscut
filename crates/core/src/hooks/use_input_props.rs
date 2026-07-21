@@ -34,11 +34,15 @@ where
         #[cfg(all(target_arch = "wasm32", feature = "web"))]
         {
             if let Some(window) = web_sys::window() {
-                if let Ok(val) = js_sys::Reflect::get(&window, &js_sys::JsString::from("DIOXUSCUT_PROPS")) {
+                if let Ok(val) =
+                    js_sys::Reflect::get(&window, &js_sys::JsString::from("DIOXUSCUT_PROPS"))
+                {
                     if let Some(json_str) = val.as_string() {
                         match serde_json::from_str::<T>(&json_str) {
                             Ok(props) => return props,
-                            Err(e) => tracing::warn!("Failed to parse window.DIOXUSCUT_PROPS: {}", e),
+                            Err(e) => {
+                                tracing::warn!("Failed to parse window.DIOXUSCUT_PROPS: {}", e)
+                            }
                         }
                     }
                 }

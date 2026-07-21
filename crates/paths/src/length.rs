@@ -43,8 +43,16 @@ pub fn get_instructions_length(instructions: &[Instruction]) -> f64 {
                 current_x = start_x;
                 current_y = start_y;
             }
-            Instruction::CubicCurveTo { x1, y1, x2, y2, x, y } => {
-                total_length += cubic_bezier_length(current_x, current_y, *x1, *y1, *x2, *y2, *x, *y);
+            Instruction::CubicCurveTo {
+                x1,
+                y1,
+                x2,
+                y2,
+                x,
+                y,
+            } => {
+                total_length +=
+                    cubic_bezier_length(current_x, current_y, *x1, *y1, *x2, *y2, *x, *y);
                 current_x = *x;
                 current_y = *y;
             }
@@ -60,10 +68,14 @@ pub fn get_instructions_length(instructions: &[Instruction]) -> f64 {
 }
 
 fn cubic_bezier_length(
-    x0: f64, y0: f64,
-    x1: f64, y1: f64,
-    x2: f64, y2: f64,
-    x3: f64, y3: f64,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    x3: f64,
+    y3: f64,
 ) -> f64 {
     let steps = 16;
     let mut length = 0.0;
@@ -74,15 +86,11 @@ fn cubic_bezier_length(
         let t = i as f64 / steps as f64;
         let mt = 1.0 - t;
 
-        let px = mt * mt * mt * x0
-            + 3.0 * mt * mt * t * x1
-            + 3.0 * mt * t * t * x2
-            + t * t * t * x3;
+        let px =
+            mt * mt * mt * x0 + 3.0 * mt * mt * t * x1 + 3.0 * mt * t * t * x2 + t * t * t * x3;
 
-        let py = mt * mt * mt * y0
-            + 3.0 * mt * mt * t * y1
-            + 3.0 * mt * t * t * y2
-            + t * t * t * y3;
+        let py =
+            mt * mt * mt * y0 + 3.0 * mt * mt * t * y1 + 3.0 * mt * t * t * y2 + t * t * t * y3;
 
         let dx = px - prev_x;
         let dy = py - prev_y;
@@ -95,11 +103,7 @@ fn cubic_bezier_length(
     length
 }
 
-fn quad_bezier_length(
-    x0: f64, y0: f64,
-    x1: f64, y1: f64,
-    x2: f64, y2: f64,
-) -> f64 {
+fn quad_bezier_length(x0: f64, y0: f64, x1: f64, y1: f64, x2: f64, y2: f64) -> f64 {
     let steps = 16;
     let mut length = 0.0;
     let mut prev_x = x0;

@@ -52,12 +52,18 @@ impl FontCache {
             }
         }
         eprintln!("[dioxuscut-rasterizer] Warning: No system font found. Text will be rendered as blocks.");
-        Self { font: None, path: None }
+        Self {
+            font: None,
+            path: None,
+        }
     }
 
     /// Create a FontCache with no font loaded (for headless/test environments).
     pub fn headless() -> Self {
-        Self { font: None, path: None }
+        Self {
+            font: None,
+            path: None,
+        }
     }
 
     pub fn is_loaded(&self) -> bool {
@@ -71,11 +77,7 @@ impl FontCache {
     /// Rasterize a string into a list of `(x_offset, y_offset, coverage)` pixel contributions.
     ///
     /// Returns `None` if no font is loaded.
-    pub fn rasterize(
-        &self,
-        text: &str,
-        font_size: f32,
-    ) -> Option<RenderedText> {
+    pub fn rasterize(&self, text: &str, font_size: f32) -> Option<RenderedText> {
         let font = self.font.as_ref()?;
         let scale = PxScale::from(font_size);
         let scaled = font.as_scaled(scale);
@@ -97,7 +99,7 @@ impl FontCache {
         }
 
         let total_width = cursor_x.ceil() as u32;
-        let ascent  = scaled.ascent().ceil() as u32;
+        let ascent = scaled.ascent().ceil() as u32;
         let descent = (-scaled.descent()).ceil() as u32;
         let total_height = ascent + descent;
 
@@ -114,8 +116,6 @@ impl FontCache {
 
         for glyph in &glyphs {
             if let Some(outlined) = font.outline_glyph(glyph.clone()) {
-
-
                 let bounds = outlined.px_bounds();
                 let gx = bounds.min.x.floor() as i32;
                 let gy = bounds.min.y.floor() as i32 + ascent as i32;
@@ -189,7 +189,9 @@ mod tests {
     #[test]
     fn test_rasterize_empty() {
         let cache = FontCache::load();
-        if !cache.is_loaded() { return; }
+        if !cache.is_loaded() {
+            return;
+        }
         let rendered = cache.rasterize("", 24.0).expect("rasterize failed");
         assert_eq!(rendered.width, 0, "Empty string should have 0 width");
     }

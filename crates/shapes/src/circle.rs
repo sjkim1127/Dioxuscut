@@ -1,7 +1,7 @@
 //! `<Circle>` shape component.
 
-use dioxus::prelude::*;
 use crate::render_svg::RenderSvg;
+use dioxus::prelude::*;
 
 /// Props for the `<Circle>` shape component.
 #[derive(Props, Clone, PartialEq)]

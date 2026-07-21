@@ -10,20 +10,20 @@
 //! - [`Arrow`] / [`make_arrow`]
 //! - [`RenderSvg`]
 
-pub mod render_svg;
-pub mod circle;
-pub mod rect;
-pub mod triangle;
-pub mod star;
-pub mod polygon;
-pub mod pie;
 pub mod arrow;
+pub mod circle;
+pub mod pie;
+pub mod polygon;
+pub mod rect;
+pub mod render_svg;
+pub mod star;
+pub mod triangle;
 
+pub use arrow::{make_arrow, Arrow, ArrowProps};
+pub use circle::{make_circle, Circle, CircleProps};
+pub use pie::{make_pie, Pie, PieProps};
+pub use polygon::{make_polygon, Polygon, PolygonProps};
+pub use rect::{make_rect, Rect, RectProps};
 pub use render_svg::{RenderSvg, RenderSvgProps};
-pub use circle::{Circle, CircleProps, make_circle};
-pub use rect::{Rect, RectProps, make_rect};
-pub use triangle::{Triangle, TriangleProps, make_triangle};
-pub use star::{Star, StarProps, make_star};
-pub use polygon::{Polygon, PolygonProps, make_polygon};
-pub use pie::{Pie, PieProps, make_pie};
-pub use arrow::{Arrow, ArrowProps, make_arrow};
+pub use star::{make_star, Star, StarProps};
+pub use triangle::{make_triangle, Triangle, TriangleProps};

@@ -6,12 +6,12 @@
 //! - [`create_tiktok_style_captions`]
 //! - [`TikTokCaptions`]
 
-pub mod types;
-pub mod srt_parser;
 pub mod line_wrapper;
+pub mod srt_parser;
 pub mod tiktok_captions;
+pub mod types;
 
-pub use types::{CaptionToken, CaptionPage};
-pub use srt_parser::{parse_srt, serialize_srt, format_srt_timestamp, CaptionParseError};
 pub use line_wrapper::ensure_max_characters_per_line;
+pub use srt_parser::{format_srt_timestamp, parse_srt, serialize_srt, CaptionParseError};
 pub use tiktok_captions::{create_tiktok_style_captions, TikTokCaptions, TikTokCaptionsProps};
+pub use types::{CaptionPage, CaptionToken};

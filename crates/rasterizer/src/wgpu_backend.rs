@@ -192,15 +192,23 @@ impl GpuContext {
                 force_fallback_adapter: false,
             })
             .await
-            .ok_or_else(|| RasterError::Init("No GPU adapter found. Ensure a GPU is available or use --backend native.".into()))?;
+            .ok_or_else(|| {
+                RasterError::Init(
+                    "No GPU adapter found. Ensure a GPU is available or use --backend native."
+                        .into(),
+                )
+            })?;
 
         let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: Some("dioxuscut-rasterizer"),
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::downlevel_defaults(),
-                memory_hints: Default::default(),
-            }, None)
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("dioxuscut-rasterizer"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: wgpu::Limits::downlevel_defaults(),
+                    memory_hints: Default::default(),
+                },
+                None,
+            )
             .await
             .map_err(|e| RasterError::Init(format!("GPU device creation failed: {e}")))?;
 
@@ -272,7 +280,13 @@ impl GpuContext {
             cache: None,
         });
 
-        Ok(Self { device, queue, pipeline, globals_layout, instance_layout })
+        Ok(Self {
+            device,
+            queue,
+            pipeline,
+            globals_layout,
+            instance_layout,
+        })
     }
 }
 
@@ -298,15 +312,19 @@ impl WgpuBackend {
 
 impl RasterizerBackend for WgpuBackend {
     fn render_frame(&self, scene: &Scene, config: &FrameConfig) -> Result<RgbaImage, RasterError> {
-        let width  = config.width;
+        let width = config.width;
         let height = config.height;
         let device = &self.ctx.device;
-        let queue  = &self.ctx.queue;
+        let queue = &self.ctx.queue;
 
         // ── Offscreen render target ──────────────────────────────────────────
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("frame_texture"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -409,7 +427,11 @@ impl RasterizerBackend for WgpuBackend {
                     rows_per_image: Some(height),
                 },
             },
-            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
         );
 
         queue.submit([encoder.finish()]);
@@ -422,22 +444,29 @@ impl RasterizerBackend for WgpuBackend {
         });
         device.poll(wgpu::Maintain::Wait);
         rx.recv()
-            .map_err(|_| RasterError::Frame { frame: config.frame, reason: "GPU readback channel error".into() })?
-            .map_err(|e| RasterError::Frame { frame: config.frame, reason: format!("GPU map error: {e:?}") })?;
+            .map_err(|_| RasterError::Frame {
+                frame: config.frame,
+                reason: "GPU readback channel error".into(),
+            })?
+            .map_err(|e| RasterError::Frame {
+                frame: config.frame,
+                reason: format!("GPU map error: {e:?}"),
+            })?;
 
         let data = slice.get_mapped_range();
         // Strip row padding
         let mut pixels = Vec::with_capacity((width * height * 4) as usize);
         for row in 0..height {
             let start = (row * bytes_per_row) as usize;
-            let end   = start + (width * 4) as usize;
+            let end = start + (width * 4) as usize;
             pixels.extend_from_slice(&data[start..end]);
         }
         drop(data);
         readback_buf.unmap();
 
-        RgbaImage::from_raw(width, height, pixels)
-            .ok_or_else(|| RasterError::ImageEncode("Failed to assemble RgbaImage from GPU readback".into()))
+        RgbaImage::from_raw(width, height, pixels).ok_or_else(|| {
+            RasterError::ImageEncode("Failed to assemble RgbaImage from GPU readback".into())
+        })
     }
 }
 
@@ -459,45 +488,54 @@ struct GpuInstance {
 
 fn node_to_instance(node: &SceneNode, _w: u32, _h: u32) -> Option<GpuInstance> {
     match node {
-        SceneNode::Rect { x, y, w, h, fill, corner_radius, .. } => {
-            Some(GpuInstance {
-                shape_type: [0.0, 0.0, 0.0, 0.0],
-                bounds: [*x, *y, *w, *h],
-                color: color_to_f32(*fill),
-                color2: [0.0; 4],
-                params: [*corner_radius, 0.0, 0.0, 1.0],
-            })
-        }
+        SceneNode::Rect {
+            x,
+            y,
+            w,
+            h,
+            fill,
+            corner_radius,
+            ..
+        } => Some(GpuInstance {
+            shape_type: [0.0, 0.0, 0.0, 0.0],
+            bounds: [*x, *y, *w, *h],
+            color: color_to_f32(*fill),
+            color2: [0.0; 4],
+            params: [*corner_radius, 0.0, 0.0, 1.0],
+        }),
 
-        SceneNode::Circle { cx, cy, r, fill, .. } => {
-            Some(GpuInstance {
-                shape_type: [1.0, 0.0, 0.0, 0.0],
-                bounds: [cx - r, cy - r, r * 2.0, r * 2.0],
-                color: color_to_f32(*fill),
-                color2: [0.0; 4],
-                params: [0.0, 0.0, 0.0, 1.0],
-            })
-        }
+        SceneNode::Circle {
+            cx, cy, r, fill, ..
+        } => Some(GpuInstance {
+            shape_type: [1.0, 0.0, 0.0, 0.0],
+            bounds: [cx - r, cy - r, r * 2.0, r * 2.0],
+            color: color_to_f32(*fill),
+            color2: [0.0; 4],
+            params: [0.0, 0.0, 0.0, 1.0],
+        }),
 
-        SceneNode::LinearGradient { x, y, w, h, angle_deg, stops } if stops.len() >= 2 => {
-            Some(GpuInstance {
-                shape_type: [2.0, 0.0, 0.0, 0.0],
-                bounds: [*x, *y, *w, *h],
-                color: color_to_f32(stops[0].color),
-                color2: color_to_f32(stops[stops.len() - 1].color),
-                params: [0.0, 0.0, *angle_deg, 1.0],
-            })
-        }
+        SceneNode::LinearGradient {
+            x,
+            y,
+            w,
+            h,
+            angle_deg,
+            stops,
+        } if stops.len() >= 2 => Some(GpuInstance {
+            shape_type: [2.0, 0.0, 0.0, 0.0],
+            bounds: [*x, *y, *w, *h],
+            color: color_to_f32(stops[0].color),
+            color2: color_to_f32(stops[stops.len() - 1].color),
+            params: [0.0, 0.0, *angle_deg, 1.0],
+        }),
 
-        SceneNode::RadialGradient { cx, cy, r, stops } if stops.len() >= 2 => {
-            Some(GpuInstance {
-                shape_type: [3.0, 0.0, 0.0, 0.0],
-                bounds: [cx - r, cy - r, r * 2.0, r * 2.0],
-                color: color_to_f32(stops[0].color),
-                color2: color_to_f32(stops[stops.len() - 1].color),
-                params: [0.0, 0.0, 0.0, 1.0],
-            })
-        }
+        SceneNode::RadialGradient { cx, cy, r, stops } if stops.len() >= 2 => Some(GpuInstance {
+            shape_type: [3.0, 0.0, 0.0, 0.0],
+            bounds: [cx - r, cy - r, r * 2.0, r * 2.0],
+            color: color_to_f32(stops[0].color),
+            color2: color_to_f32(stops[stops.len() - 1].color),
+            params: [0.0, 0.0, 0.0, 1.0],
+        }),
 
         // Group and Text are not yet GPU-accelerated — skip for now.
         _ => None,
@@ -535,7 +573,8 @@ mod tests {
                 // Render a minimal 64x64 scene
                 let scene = crate::scene::Scene::new();
                 let config = FrameConfig::new(64, 64, 0, 30.0);
-                let img = backend.render_frame(&scene, &config)
+                let img = backend
+                    .render_frame(&scene, &config)
                     .expect("GPU render failed");
                 assert_eq!(img.width(), 64);
                 assert_eq!(img.height(), 64);

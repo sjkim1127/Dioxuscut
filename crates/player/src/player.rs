@@ -80,7 +80,11 @@ pub fn Player(props: PlayerProps) -> Element {
             let s = state.read();
             if s.playing {
                 let next_frame = s.frame + 1;
-                let looped = if next_frame >= s.duration { 0 } else { next_frame };
+                let looped = if next_frame >= s.duration {
+                    0
+                } else {
+                    next_frame
+                };
                 drop(s);
                 state.write().frame = looped;
             }

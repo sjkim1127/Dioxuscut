@@ -33,7 +33,11 @@ pub fn get_point_at_length(path: &str, distance: f64) -> Point {
 
                 if accumulated_dist + seg_len >= target_dist {
                     let remaining = target_dist - accumulated_dist;
-                    let ratio = if seg_len > 0.0 { remaining / seg_len } else { 0.0 };
+                    let ratio = if seg_len > 0.0 {
+                        remaining / seg_len
+                    } else {
+                        0.0
+                    };
                     return Point::new(current_x + dx * ratio, current_y + dy * ratio);
                 }
 
@@ -48,7 +52,11 @@ pub fn get_point_at_length(path: &str, distance: f64) -> Point {
 
                 if accumulated_dist + seg_len >= target_dist {
                     let remaining = target_dist - accumulated_dist;
-                    let ratio = if seg_len > 0.0 { remaining / seg_len } else { 0.0 };
+                    let ratio = if seg_len > 0.0 {
+                        remaining / seg_len
+                    } else {
+                        0.0
+                    };
                     return Point::new(current_x + dx * ratio, current_y + dy * ratio);
                 }
 
@@ -56,7 +64,14 @@ pub fn get_point_at_length(path: &str, distance: f64) -> Point {
                 current_x = start_x;
                 current_y = start_y;
             }
-            Instruction::CubicCurveTo { x1, y1, x2, y2, x, y } => {
+            Instruction::CubicCurveTo {
+                x1,
+                y1,
+                x2,
+                y2,
+                x,
+                y,
+            } => {
                 let steps = 16;
                 let mut prev_x = current_x;
                 let mut prev_y = current_y;

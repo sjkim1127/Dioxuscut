@@ -40,7 +40,14 @@ pub struct RenderConfig {
 
 impl RenderConfig {
     /// Create a new render config with sensible defaults.
-    pub fn new(url: String, output_dir: impl Into<std::path::PathBuf>, width: u32, height: u32, fps: f64, duration_in_frames: u32) -> Self {
+    pub fn new(
+        url: String,
+        output_dir: impl Into<std::path::PathBuf>,
+        width: u32,
+        height: u32,
+        fps: f64,
+        duration_in_frames: u32,
+    ) -> Self {
         Self {
             url,
             output_dir: output_dir.into(),

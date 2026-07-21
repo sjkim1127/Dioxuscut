@@ -85,7 +85,13 @@ pub struct PipeConfig {
 }
 
 impl PipeConfig {
-    pub fn new(width: u32, height: u32, fps: f64, duration_in_frames: u32, output: impl Into<PathBuf>) -> Self {
+    pub fn new(
+        width: u32,
+        height: u32,
+        fps: f64,
+        duration_in_frames: u32,
+        output: impl Into<PathBuf>,
+    ) -> Self {
         Self {
             width,
             height,
@@ -133,8 +139,11 @@ where
         let frame_config = FrameConfig::new(config.width, config.height, frame, config.fps);
         let img = backend.render_frame(&scene, &frame_config)?;
 
-        let path = config.output_dir.join(format!("frame_{:06}.png", frame + 1));
-        img.save(&path).map_err(|e| RasterError::ImageEncode(e.to_string()))?;
+        let path = config
+            .output_dir
+            .join(format!("frame_{:06}.png", frame + 1));
+        img.save(&path)
+            .map_err(|e| RasterError::ImageEncode(e.to_string()))?;
         paths.push(path);
     }
 
@@ -162,11 +171,11 @@ where
 {
     std::fs::create_dir_all(&config.output_dir)?;
 
-    let width  = config.width;
+    let width = config.width;
     let height = config.height;
-    let fps    = config.fps;
-    let total  = config.duration_in_frames;
-    let dir    = &config.output_dir;
+    let fps = config.fps;
+    let total = config.duration_in_frames;
+    let dir = &config.output_dir;
 
     // Configure Rayon thread pool if explicit concurrency was requested
     let pool = match config.concurrency {
@@ -200,7 +209,8 @@ where
     let mut paths = Vec::with_capacity(total as usize);
     for (frame, img) in pairs {
         let path = dir.join(format!("frame_{:06}.png", frame + 1));
-        img.save(&path).map_err(|e| RasterError::ImageEncode(e.to_string()))?;
+        img.save(&path)
+            .map_err(|e| RasterError::ImageEncode(e.to_string()))?;
         paths.push(path);
     }
 
@@ -236,10 +246,10 @@ where
     B: RasterizerBackend + Send + Sync,
     F: Fn(u32) -> Scene + Send + Sync,
 {
-    let width  = config.width;
+    let width = config.width;
     let height = config.height;
-    let fps    = config.fps;
-    let total  = config.duration_in_frames;
+    let fps = config.fps;
+    let total = config.duration_in_frames;
 
     // ── 1. Spawn FFmpeg ──────────────────────────────────────────────────────
     let ffmpeg_args = build_pipe_ffmpeg_args(config);
@@ -249,11 +259,16 @@ where
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|e| RasterError::Init(format!("Failed to spawn FFmpeg: {e}\nIs ffmpeg installed?")))?;
+        .map_err(|e| {
+            RasterError::Init(format!("Failed to spawn FFmpeg: {e}\nIs ffmpeg installed?"))
+        })?;
 
     // ── 2. Render frames in parallel ─────────────────────────────────────────
-    let concurrency = config.concurrency
-        .unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4));
+    let concurrency = config.concurrency.unwrap_or_else(|| {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+    });
 
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(concurrency)
@@ -279,24 +294,28 @@ where
 
     // ── 3. Stream sorted RGBA bytes to FFmpeg stdin ───────────────────────────
     {
-        let mut stdin = ffmpeg.stdin.take()
+        let mut stdin = ffmpeg
+            .stdin
+            .take()
             .ok_or_else(|| RasterError::Init("Failed to open FFmpeg stdin".into()))?;
 
         for (_, rgba) in &pairs {
-            stdin.write_all(rgba)
+            stdin
+                .write_all(rgba)
                 .map_err(|e| RasterError::ImageEncode(format!("FFmpeg pipe write error: {e}")))?;
         }
         stdin.flush().ok();
     } // `stdin` drops here -> EOF sent to FFmpeg pipe
 
     // ── 4. Wait for FFmpeg to finish ─────────────────────────────────────────
-    let status = ffmpeg.wait()
+    let status = ffmpeg
+        .wait()
         .map_err(|e| RasterError::ImageEncode(format!("FFmpeg wait error: {e}")))?;
-
 
     if !status.success() {
         return Err(RasterError::ImageEncode(format!(
-            "FFmpeg exited with non-zero status: {:?}", status.code()
+            "FFmpeg exited with non-zero status: {:?}",
+            status.code()
         )));
     }
 
@@ -306,18 +325,27 @@ where
 /// Build FFmpeg arguments for rawvideo stdin pipe → MP4.
 pub fn build_pipe_ffmpeg_args(config: &PipeConfig) -> Vec<String> {
     let args = vec![
-
-        "-y".into(),                                    // overwrite output
-        "-f".into(), "rawvideo".into(),                 // input format
-        "-pix_fmt".into(), "rgba".into(),               // pixel format
-        "-s".into(), format!("{}x{}", config.width, config.height),
-        "-r".into(), format!("{}", config.fps),
-        "-i".into(), "pipe:0".into(),                   // read from stdin
-        "-c:v".into(), "libx264".into(),
-        "-pix_fmt".into(), "yuv420p".into(),
-        "-crf".into(), config.crf.to_string(),
-        "-preset".into(), config.preset.clone(),
-        "-movflags".into(), "+faststart".into(),
+        "-y".into(), // overwrite output
+        "-f".into(),
+        "rawvideo".into(), // input format
+        "-pix_fmt".into(),
+        "rgba".into(), // pixel format
+        "-s".into(),
+        format!("{}x{}", config.width, config.height),
+        "-r".into(),
+        format!("{}", config.fps),
+        "-i".into(),
+        "pipe:0".into(), // read from stdin
+        "-c:v".into(),
+        "libx264".into(),
+        "-pix_fmt".into(),
+        "yuv420p".into(),
+        "-crf".into(),
+        config.crf.to_string(),
+        "-preset".into(),
+        config.preset.clone(),
+        "-movflags".into(),
+        "+faststart".into(),
         config.output.to_string_lossy().to_string(),
     ];
     args
@@ -325,7 +353,8 @@ pub fn build_pipe_ffmpeg_args(config: &PipeConfig) -> Vec<String> {
 
 /// Save a single `RgbaImage` frame to disk.
 pub fn save_frame(img: &RgbaImage, path: &Path) -> Result<(), RasterError> {
-    img.save(path).map_err(|e| RasterError::ImageEncode(e.to_string()))
+    img.save(path)
+        .map_err(|e| RasterError::ImageEncode(e.to_string()))
 }
 
 // ── Benchmark helper ─────────────────────────────────────────────────────────
@@ -351,8 +380,14 @@ mod tests {
         move |_frame| {
             let mut s = Scene::new();
             s.push(SceneNode::Rect {
-                x: 0.0, y: 0.0, w: 64.0, h: 64.0,
-                fill: color, stroke: None, stroke_width: 0.0, corner_radius: 0.0,
+                x: 0.0,
+                y: 0.0,
+                w: 64.0,
+                h: 64.0,
+                fill: color,
+                stroke: None,
+                stroke_width: 0.0,
+                corner_radius: 0.0,
             });
             s
         }
@@ -368,15 +403,23 @@ mod tests {
         let paths = render_all_frames(&backend, &config, |frame| {
             let mut s = Scene::new();
             s.push(SceneNode::Rect {
-                x: 0.0, y: 0.0, w: 64.0, h: 64.0,
+                x: 0.0,
+                y: 0.0,
+                w: 64.0,
+                h: 64.0,
                 fill: Color::rgb(frame as u8 * 40, 0, 0),
-                stroke: None, stroke_width: 0.0, corner_radius: 0.0,
+                stroke: None,
+                stroke_width: 0.0,
+                corner_radius: 0.0,
             });
             s
-        }).expect("sequential render failed");
+        })
+        .expect("sequential render failed");
 
         assert_eq!(paths.len(), 5, "Should have 5 frame files");
-        for p in &paths { assert!(p.exists(), "PNG file should exist: {p:?}"); }
+        for p in &paths {
+            assert!(p.exists(), "PNG file should exist: {p:?}");
+        }
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -386,8 +429,7 @@ mod tests {
         let tmp = std::env::temp_dir().join("dioxuscut_test_par");
         let _ = std::fs::remove_dir_all(&tmp);
 
-        let config = NativeRenderConfig::new(64, 64, 30.0, 10, &tmp)
-            .with_concurrency(4);
+        let config = NativeRenderConfig::new(64, 64, 30.0, 10, &tmp).with_concurrency(4);
 
         let paths = render_parallel(&backend, &config, solid_scene(Color::rgb(0, 0, 255)))
             .expect("parallel render failed");
@@ -412,12 +454,18 @@ mod tests {
             let mut s = Scene::new();
             // Different colour per frame so we can verify correctness
             s.push(SceneNode::Rect {
-                x: 0.0, y: 0.0, w: 64.0, h: 64.0,
+                x: 0.0,
+                y: 0.0,
+                w: 64.0,
+                h: 64.0,
                 fill: Color::rgb(frame as u8 * 60, 0, 0),
-                stroke: None, stroke_width: 0.0, corner_radius: 0.0,
+                stroke: None,
+                stroke_width: 0.0,
+                corner_radius: 0.0,
             });
             s
-        }).expect("parallel pixel render failed");
+        })
+        .expect("parallel pixel render failed");
 
         for (i, path) in paths.iter().enumerate() {
             let img = image::open(path).expect("open frame").into_rgba8();
@@ -432,10 +480,22 @@ mod tests {
     fn test_pipe_config_ffmpeg_args() {
         let config = PipeConfig::new(1920, 1080, 30.0, 10, "/tmp/out.mp4");
         let args = build_pipe_ffmpeg_args(&config);
-        assert!(args.contains(&"rawvideo".to_string()), "args should contain rawvideo");
-        assert!(args.contains(&"1920x1080".to_string()), "args should contain resolution");
-        assert!(args.contains(&"pipe:0".to_string()), "args should read from stdin");
-        assert!(args.contains(&"/tmp/out.mp4".to_string()), "args should contain output path");
+        assert!(
+            args.contains(&"rawvideo".to_string()),
+            "args should contain rawvideo"
+        );
+        assert!(
+            args.contains(&"1920x1080".to_string()),
+            "args should contain resolution"
+        );
+        assert!(
+            args.contains(&"pipe:0".to_string()),
+            "args should read from stdin"
+        );
+        assert!(
+            args.contains(&"/tmp/out.mp4".to_string()),
+            "args should contain output path"
+        );
     }
 
     #[test]
@@ -443,14 +503,17 @@ mod tests {
         let backend = TinySkiaBackend::headless();
         let mut scene = Scene::new();
         scene.push(SceneNode::Circle {
-            cx: 32.0, cy: 32.0, r: 20.0,
+            cx: 32.0,
+            cy: 32.0,
+            r: 20.0,
             fill: Color::rgb(255, 128, 0),
-            stroke: None, stroke_width: 0.0,
+            stroke: None,
+            stroke_width: 0.0,
         });
         let config = FrameConfig::new(64, 64, 0, 30.0);
 
-        let (img, elapsed) = render_frame_timed(&backend, &scene, &config)
-            .expect("timed render failed");
+        let (img, elapsed) =
+            render_frame_timed(&backend, &scene, &config).expect("timed render failed");
         assert_eq!(img.width(), 64);
         println!("Single 64x64 frame: {:?}", elapsed);
     }

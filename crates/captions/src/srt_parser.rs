@@ -15,7 +15,10 @@ pub enum CaptionParseError {
 pub fn parse_srt(srt_content: &str) -> Result<Vec<CaptionToken>, CaptionParseError> {
     let mut tokens = Vec::new();
     let normalized = srt_content.replace("\r\n", "\n");
-    let blocks = normalized.split("\n\n").map(|s| s.trim()).collect::<Vec<_>>();
+    let blocks = normalized
+        .split("\n\n")
+        .map(|s| s.trim())
+        .collect::<Vec<_>>();
 
     for block in blocks {
         if block.is_empty() {
@@ -28,7 +31,13 @@ pub fn parse_srt(srt_content: &str) -> Result<Vec<CaptionToken>, CaptionParseErr
         }
 
         // Line 0 is sequence index (optional/ignored), Line 1 is timestamp range
-        let time_line = if lines[0].contains("-->") { lines[0] } else if lines.len() >= 2 && lines[1].contains("-->") { lines[1] } else { continue };
+        let time_line = if lines[0].contains("-->") {
+            lines[0]
+        } else if lines.len() >= 2 && lines[1].contains("-->") {
+            lines[1]
+        } else {
+            continue;
+        };
 
         let time_parts = time_line.split("-->").map(|s| s.trim()).collect::<Vec<_>>();
         if time_parts.len() != 2 {
@@ -39,7 +48,11 @@ pub fn parse_srt(srt_content: &str) -> Result<Vec<CaptionToken>, CaptionParseErr
         let end_ms = parse_srt_timestamp(time_parts[1])?;
 
         // Text lines (skip index and timestamp line)
-        let text_lines: Vec<&str> = lines.iter().copied().filter(|l| !l.contains("-->") && !l.parse::<usize>().is_ok()).collect();
+        let text_lines: Vec<&str> = lines
+            .iter()
+            .copied()
+            .filter(|l| !l.contains("-->") && !l.parse::<usize>().is_ok())
+            .collect();
         let full_text = text_lines.join(" ");
 
         if full_text.trim().is_empty() {
@@ -78,16 +91,28 @@ fn parse_srt_timestamp(ts: &str) -> Result<u64, CaptionParseError> {
         return Err(CaptionParseError::InvalidTimestamp(ts.to_string()));
     }
 
-    let hours: u64 = parts[0].trim().parse().map_err(|_| CaptionParseError::InvalidTimestamp(ts.to_string()))?;
-    let mins: u64 = parts[1].trim().parse().map_err(|_| CaptionParseError::InvalidTimestamp(ts.to_string()))?;
+    let hours: u64 = parts[0]
+        .trim()
+        .parse()
+        .map_err(|_| CaptionParseError::InvalidTimestamp(ts.to_string()))?;
+    let mins: u64 = parts[1]
+        .trim()
+        .parse()
+        .map_err(|_| CaptionParseError::InvalidTimestamp(ts.to_string()))?;
 
     let sec_parts: Vec<&str> = parts[2].split('.').collect();
     if sec_parts.len() != 2 {
         return Err(CaptionParseError::InvalidTimestamp(ts.to_string()));
     }
 
-    let secs: u64 = sec_parts[0].trim().parse().map_err(|_| CaptionParseError::InvalidTimestamp(ts.to_string()))?;
-    let ms: u64 = sec_parts[1].trim().parse().map_err(|_| CaptionParseError::InvalidTimestamp(ts.to_string()))?;
+    let secs: u64 = sec_parts[0]
+        .trim()
+        .parse()
+        .map_err(|_| CaptionParseError::InvalidTimestamp(ts.to_string()))?;
+    let ms: u64 = sec_parts[1]
+        .trim()
+        .parse()
+        .map_err(|_| CaptionParseError::InvalidTimestamp(ts.to_string()))?;
 
     Ok(hours * 3_600_000 + mins * 60_000 + secs * 1_000 + ms)
 }

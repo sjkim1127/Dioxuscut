@@ -1,7 +1,7 @@
 //! `<Rect>` shape component.
 
-use dioxus::prelude::*;
 use crate::render_svg::RenderSvg;
+use dioxus::prelude::*;
 
 /// Props for the `<Rect>` shape component.
 #[derive(Props, Clone, PartialEq)]

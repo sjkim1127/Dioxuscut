@@ -1,7 +1,7 @@
 //! `<Pie>` shape component (pie chart / arc slices).
 
-use dioxus::prelude::*;
 use crate::render_svg::RenderSvg;
+use dioxus::prelude::*;
 use std::f64::consts::PI;
 
 /// Props for the `<Pie>` shape component.

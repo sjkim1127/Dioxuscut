@@ -232,7 +232,8 @@ pub async fn execute_render_command(
                 let center_x = width as f32 * 0.5;
                 let center_y = height as f32 * 0.5;
 
-                let r1 = (width.min(height) as f32 * 0.2) + (t * std::f32::consts::TAU).sin() * 20.0;
+                let r1 =
+                    (width.min(height) as f32 * 0.2) + (t * std::f32::consts::TAU).sin() * 20.0;
                 scene.push(SceneNode::Circle {
                     cx: center_x,
                     cy: center_y,

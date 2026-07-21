@@ -15,8 +15,8 @@ use dioxuscut_animation::{
     spring::{spring, SpringConfig},
 };
 use dioxuscut_core::{
+    hooks::{use_current_frame, use_input_props, use_video_config},
     AbsoluteFill, Sequence,
-    hooks::{use_current_frame, use_video_config, use_input_props},
 };
 use dioxuscut_player::Player;
 use dioxuscut_transitions::{Fade, Slide, SlideDirection};
@@ -41,7 +41,6 @@ impl Default for ExampleProps {
     }
 }
 
-
 // ─── Composition dimensions ───────────────────────────────────────────────────
 const WIDTH: u32 = 1280;
 const HEIGHT: u32 = 720;
@@ -51,9 +50,7 @@ const DURATION: u32 = 180; // 6 seconds
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
 fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter("info")
-        .init();
+    tracing_subscriber::fmt().with_env_filter("info").init();
 
     dioxus::launch(App);
 }

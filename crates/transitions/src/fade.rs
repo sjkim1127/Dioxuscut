@@ -59,25 +59,26 @@ pub fn Fade(props: FadeProps) -> Element {
     };
 
     // Opacity based on exit fade
-    let exit_opacity = if let (Some(total), exit) = (props.duration_in_frames, props.exit_duration as f64) {
-        if exit > 0.0 {
-            let total_f = total as f64;
-            interpolate(
-                frame,
-                &[total_f - exit, total_f],
-                &[1.0, 0.0],
-                InterpolateOptions {
-                    extrapolate_left: ExtrapolateType::Clamp,
-                    extrapolate_right: ExtrapolateType::Clamp,
-                    ..Default::default()
-                },
-            )
+    let exit_opacity =
+        if let (Some(total), exit) = (props.duration_in_frames, props.exit_duration as f64) {
+            if exit > 0.0 {
+                let total_f = total as f64;
+                interpolate(
+                    frame,
+                    &[total_f - exit, total_f],
+                    &[1.0, 0.0],
+                    InterpolateOptions {
+                        extrapolate_left: ExtrapolateType::Clamp,
+                        extrapolate_right: ExtrapolateType::Clamp,
+                        ..Default::default()
+                    },
+                )
+            } else {
+                1.0
+            }
         } else {
             1.0
-        }
-    } else {
-        1.0
-    };
+        };
 
     let opacity = enter_opacity.min(exit_opacity);
 

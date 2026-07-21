@@ -26,28 +26,46 @@ fn test_boundary_missing_props_file() {
 #[test]
 fn test_boundary_zero_resolution() {
     let res_zero_w = validate_render_params("HelloWorld", None, 0, 1080, 30.0, 150);
-    assert_eq!(res_zero_w, Err(ValidationError::InvalidZeroResolution(0, 1080)));
+    assert_eq!(
+        res_zero_w,
+        Err(ValidationError::InvalidZeroResolution(0, 1080))
+    );
 
     let res_zero_h = validate_render_params("HelloWorld", None, 1920, 0, 30.0, 150);
-    assert_eq!(res_zero_h, Err(ValidationError::InvalidZeroResolution(1920, 0)));
+    assert_eq!(
+        res_zero_h,
+        Err(ValidationError::InvalidZeroResolution(1920, 0))
+    );
 }
 
 #[test]
 fn test_boundary_odd_resolution() {
     let res_odd_w = validate_render_params("HelloWorld", None, 1921, 1080, 30.0, 150);
-    assert_eq!(res_odd_w, Err(ValidationError::InvalidOddResolution(1921, 1080)));
+    assert_eq!(
+        res_odd_w,
+        Err(ValidationError::InvalidOddResolution(1921, 1080))
+    );
 
     let res_odd_h = validate_render_params("HelloWorld", None, 1920, 1081, 30.0, 150);
-    assert_eq!(res_odd_h, Err(ValidationError::InvalidOddResolution(1920, 1081)));
+    assert_eq!(
+        res_odd_h,
+        Err(ValidationError::InvalidOddResolution(1920, 1081))
+    );
 }
 
 #[test]
 fn test_boundary_zero_fps() {
     let res_zero_fps = validate_render_params("HelloWorld", None, 1920, 1080, 0.0, 150);
-    assert_eq!(res_zero_fps, Err(ValidationError::InvalidFps("0".to_string())));
+    assert_eq!(
+        res_zero_fps,
+        Err(ValidationError::InvalidFps("0".to_string()))
+    );
 
     let res_neg_fps = validate_render_params("HelloWorld", None, 1920, 1080, -10.0, 150);
-    assert_eq!(res_neg_fps, Err(ValidationError::InvalidFps("-10".to_string())));
+    assert_eq!(
+        res_neg_fps,
+        Err(ValidationError::InvalidFps("-10".to_string()))
+    );
 }
 
 #[test]
@@ -60,7 +78,10 @@ fn test_boundary_zero_duration() {
 async fn test_boundary_valid_props_file_check() {
     let temp_dir = std::env::temp_dir().join(format!(
         "dioxuscut_test_boundary_{}",
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
     ));
     fs::create_dir_all(&temp_dir).unwrap();
     let props_path = temp_dir.join("valid_props.json");

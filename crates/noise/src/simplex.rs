@@ -34,7 +34,7 @@ pub fn noise_3d(seed: &str, x: f64, y: f64, z: f64) -> f64 {
 
     let v1 = (nx * 1.3 + ny * 2.1 + nz * 0.9).sin();
     let v2 = (nx * 2.7 - ny * 1.5 + nz * 1.8 + s_val * 5.0).cos();
-    let v3 = ((nx * 0.8 + ny * 1.2 - nz * 1.1)).sin();
+    let v3 = (nx * 0.8 + ny * 1.2 - nz * 1.1).sin();
 
     (v1 * 0.45 + v2 * 0.35 + v3 * 0.20).clamp(-1.0, 1.0)
 }

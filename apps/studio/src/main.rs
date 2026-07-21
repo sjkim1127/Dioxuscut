@@ -216,7 +216,7 @@ fn PropertyRow(props: PropertyRowProps) -> Element {
 fn TimelinePanel() -> Element {
     let tracks = [
         ("Scene 1: Title", 0, 60, "#6c63ff"),
-        ("Scene 2: Logo",  50, 70, "#22c55e"),
+        ("Scene 2: Logo", 50, 70, "#22c55e"),
         ("Scene 3: Stats", 110, 70, "#f59e0b"),
     ];
     let total: u32 = 180;

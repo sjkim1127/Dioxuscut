@@ -132,5 +132,8 @@ fn test_cli_short_flags() {
 fn test_cli_missing_required_composition() {
     let args = vec!["dioxuscut", "render"];
     let result = Cli::try_parse_from(args);
-    assert!(result.is_err(), "Expected parsing error when --composition is missing");
+    assert!(
+        result.is_err(),
+        "Expected parsing error when --composition is missing"
+    );
 }

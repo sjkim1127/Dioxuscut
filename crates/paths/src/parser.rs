@@ -38,7 +38,10 @@ pub fn parse_path(d: &str) -> Result<Vec<Instruction>, PathParseError> {
                 let dy = parse_num(&tokens, &mut idx)?;
                 current_x += dx;
                 current_y += dy;
-                instructions.push(Instruction::MoveTo { x: current_x, y: current_y });
+                instructions.push(Instruction::MoveTo {
+                    x: current_x,
+                    y: current_y,
+                });
             }
             "L" => {
                 idx += 1;
@@ -54,31 +57,46 @@ pub fn parse_path(d: &str) -> Result<Vec<Instruction>, PathParseError> {
                 let dy = parse_num(&tokens, &mut idx)?;
                 current_x += dx;
                 current_y += dy;
-                instructions.push(Instruction::LineTo { x: current_x, y: current_y });
+                instructions.push(Instruction::LineTo {
+                    x: current_x,
+                    y: current_y,
+                });
             }
             "H" => {
                 idx += 1;
                 let x = parse_num(&tokens, &mut idx)?;
                 current_x = x;
-                instructions.push(Instruction::LineTo { x: current_x, y: current_y });
+                instructions.push(Instruction::LineTo {
+                    x: current_x,
+                    y: current_y,
+                });
             }
             "h" => {
                 idx += 1;
                 let dx = parse_num(&tokens, &mut idx)?;
                 current_x += dx;
-                instructions.push(Instruction::LineTo { x: current_x, y: current_y });
+                instructions.push(Instruction::LineTo {
+                    x: current_x,
+                    y: current_y,
+                });
             }
             "V" => {
                 idx += 1;
                 let y = parse_num(&tokens, &mut idx)?;
                 current_y = y;
-                instructions.push(Instruction::LineTo { x: current_x, y: current_y });
+                instructions.push(Instruction::LineTo {
+                    x: current_x,
+                    y: current_y,
+                });
             }
             "v" => {
                 idx += 1;
                 let dy = parse_num(&tokens, &mut idx)?;
                 current_y += dy;
-                instructions.push(Instruction::LineTo { x: current_x, y: current_y });
+                instructions.push(Instruction::LineTo {
+                    x: current_x,
+                    y: current_y,
+                });
             }
             "C" => {
                 idx += 1;
@@ -90,7 +108,14 @@ pub fn parse_path(d: &str) -> Result<Vec<Instruction>, PathParseError> {
                 let y = parse_num(&tokens, &mut idx)?;
                 current_x = x;
                 current_y = y;
-                instructions.push(Instruction::CubicCurveTo { x1, y1, x2, y2, x, y });
+                instructions.push(Instruction::CubicCurveTo {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    x,
+                    y,
+                });
             }
             "c" => {
                 idx += 1;
@@ -108,7 +133,14 @@ pub fn parse_path(d: &str) -> Result<Vec<Instruction>, PathParseError> {
                 let y = current_y + dy;
                 current_x = x;
                 current_y = y;
-                instructions.push(Instruction::CubicCurveTo { x1, y1, x2, y2, x, y });
+                instructions.push(Instruction::CubicCurveTo {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    x,
+                    y,
+                });
             }
             "Q" => {
                 idx += 1;
@@ -169,7 +201,11 @@ fn tokenize(d: &str) -> Result<Vec<String>, PathParseError> {
                 current_token = String::new();
             }
             i += 1;
-        } else if c == '-' && !current_token.is_empty() && !current_token.ends_with('e') && !current_token.ends_with('E') {
+        } else if c == '-'
+            && !current_token.is_empty()
+            && !current_token.ends_with('e')
+            && !current_token.ends_with('E')
+        {
             tokens.push(current_token.trim().to_string());
             current_token = String::new();
             current_token.push(c);
@@ -206,9 +242,14 @@ pub fn serialize_instructions(instructions: &[Instruction]) -> String {
         match inst {
             Instruction::MoveTo { x, y } => out.push(format!("M {x:.4} {y:.4}")),
             Instruction::LineTo { x, y } => out.push(format!("L {x:.4} {y:.4}")),
-            Instruction::CubicCurveTo { x1, y1, x2, y2, x, y } => {
-                out.push(format!("C {x1:.4} {y1:.4} {x2:.4} {y2:.4} {x:.4} {y:.4}"))
-            }
+            Instruction::CubicCurveTo {
+                x1,
+                y1,
+                x2,
+                y2,
+                x,
+                y,
+            } => out.push(format!("C {x1:.4} {y1:.4} {x2:.4} {y2:.4} {x:.4} {y:.4}")),
             Instruction::QuadCurveTo { x1, y1, x, y } => {
                 out.push(format!("Q {x1:.4} {y1:.4} {x:.4} {y:.4}"))
             }

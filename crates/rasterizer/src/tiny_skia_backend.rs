@@ -4,12 +4,9 @@
 
 use crate::backend::{FrameConfig, RasterError, RasterizerBackend};
 use crate::font::FontCache;
-use crate::scene::{Color, SceneNode, Scene};
+use crate::scene::{Color, Scene, SceneNode};
 use image::RgbaImage;
-use tiny_skia::{
-    FillRule, Paint, Path, PathBuilder, Pixmap, Rect,
-    Stroke, Transform,
-};
+use tiny_skia::{FillRule, Paint, Path, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
 /// The `tiny-skia` CPU rasterizer.
 ///
@@ -23,12 +20,16 @@ pub struct TinySkiaBackend {
 impl TinySkiaBackend {
     /// Create a new backend, loading a system font automatically.
     pub fn new() -> Self {
-        Self { font: FontCache::load() }
+        Self {
+            font: FontCache::load(),
+        }
     }
 
     /// Create without loading a font (text will use placeholder blocks).
     pub fn headless() -> Self {
-        Self { font: FontCache::headless() }
+        Self {
+            font: FontCache::headless(),
+        }
     }
 }
 
@@ -40,30 +41,59 @@ impl Default for TinySkiaBackend {
 
 impl RasterizerBackend for TinySkiaBackend {
     fn render_frame(&self, scene: &Scene, config: &FrameConfig) -> Result<RgbaImage, RasterError> {
-        let mut pixmap = Pixmap::new(config.width, config.height)
-            .ok_or_else(|| RasterError::Init("Failed to create Pixmap — invalid dimensions".into()))?;
+        let mut pixmap = Pixmap::new(config.width, config.height).ok_or_else(|| {
+            RasterError::Init("Failed to create Pixmap — invalid dimensions".into())
+        })?;
 
         // Clear to transparent
         pixmap.fill(tiny_skia::Color::TRANSPARENT);
 
-        render_nodes(&mut pixmap, &scene.nodes, Transform::identity(), 1.0, &self.font);
+        render_nodes(
+            &mut pixmap,
+            &scene.nodes,
+            Transform::identity(),
+            1.0,
+            &self.font,
+        );
 
         // Convert tiny-skia Pixmap (RGBA premultiplied) to image::RgbaImage
         let raw_data = pixmap.data().to_vec();
-        RgbaImage::from_raw(config.width, config.height, raw_data)
-            .ok_or_else(|| RasterError::ImageEncode("Failed to build RgbaImage from pixel data".into()))
+        RgbaImage::from_raw(config.width, config.height, raw_data).ok_or_else(|| {
+            RasterError::ImageEncode("Failed to build RgbaImage from pixel data".into())
+        })
     }
 }
 
-fn render_nodes(pixmap: &mut Pixmap, nodes: &[SceneNode], parent_transform: Transform, parent_opacity: f32, font: &FontCache) {
+fn render_nodes(
+    pixmap: &mut Pixmap,
+    nodes: &[SceneNode],
+    parent_transform: Transform,
+    parent_opacity: f32,
+    font: &FontCache,
+) {
     for node in nodes {
         render_node(pixmap, node, parent_transform, parent_opacity, font);
     }
 }
 
-fn render_node(pixmap: &mut Pixmap, node: &SceneNode, transform: Transform, opacity: f32, font: &FontCache) {
+fn render_node(
+    pixmap: &mut Pixmap,
+    node: &SceneNode,
+    transform: Transform,
+    opacity: f32,
+    font: &FontCache,
+) {
     match node {
-        SceneNode::Rect { x, y, w, h, fill, stroke, stroke_width, corner_radius } => {
+        SceneNode::Rect {
+            x,
+            y,
+            w,
+            h,
+            fill,
+            stroke,
+            stroke_width,
+            corner_radius,
+        } => {
             let rect = match Rect::from_xywh(*x, *y, *w, *h) {
                 Some(r) => r,
                 None => return,
@@ -87,13 +117,23 @@ fn render_node(pixmap: &mut Pixmap, node: &SceneNode, transform: Transform, opac
                     let mut stroke_paint = Paint::default();
                     stroke_paint.set_color(apply_opacity(*stroke_color, opacity));
                     stroke_paint.anti_alias = true;
-                    let stroke = Stroke { width: *sw, ..Default::default() };
+                    let stroke = Stroke {
+                        width: *sw,
+                        ..Default::default()
+                    };
                     pixmap.stroke_path(&path, &stroke_paint, &stroke, transform, None);
                 }
             }
         }
 
-        SceneNode::Circle { cx, cy, r, fill, stroke, stroke_width } => {
+        SceneNode::Circle {
+            cx,
+            cy,
+            r,
+            fill,
+            stroke,
+            stroke_width,
+        } => {
             let path = build_circle(*cx, *cy, *r);
 
             let mut paint = Paint::default();
@@ -106,13 +146,22 @@ fn render_node(pixmap: &mut Pixmap, node: &SceneNode, transform: Transform, opac
                     let mut stroke_paint = Paint::default();
                     stroke_paint.set_color(apply_opacity(*stroke_color, opacity));
                     stroke_paint.anti_alias = true;
-                    let stroke = Stroke { width: *sw, ..Default::default() };
+                    let stroke = Stroke {
+                        width: *sw,
+                        ..Default::default()
+                    };
                     pixmap.stroke_path(&path, &stroke_paint, &stroke, transform, None);
                 }
             }
         }
 
-        SceneNode::Path { d, fill, stroke, stroke_width, opacity: node_opacity } => {
+        SceneNode::Path {
+            d,
+            fill,
+            stroke,
+            stroke_width,
+            opacity: node_opacity,
+        } => {
             let combined_opacity = opacity * node_opacity;
 
             if let Some(path) = svgpath_to_tiny_skia(d) {
@@ -128,15 +177,27 @@ fn render_node(pixmap: &mut Pixmap, node: &SceneNode, transform: Transform, opac
                         let mut stroke_paint = Paint::default();
                         stroke_paint.set_color(apply_opacity(*stroke_color, combined_opacity));
                         stroke_paint.anti_alias = true;
-                        let stroke = Stroke { width: *sw, ..Default::default() };
+                        let stroke = Stroke {
+                            width: *sw,
+                            ..Default::default()
+                        };
                         pixmap.stroke_path(&path, &stroke_paint, &stroke, transform, None);
                     }
                 }
             }
         }
 
-        SceneNode::LinearGradient { x, y, w, h, angle_deg, stops } => {
-            if stops.is_empty() { return; }
+        SceneNode::LinearGradient {
+            x,
+            y,
+            w,
+            h,
+            angle_deg,
+            stops,
+        } => {
+            if stops.is_empty() {
+                return;
+            }
 
             let rect = match Rect::from_xywh(*x, *y, *w, *h) {
                 Some(r) => r,
@@ -155,9 +216,10 @@ fn render_node(pixmap: &mut Pixmap, node: &SceneNode, transform: Transform, opac
             let x2 = cx + angle_rad.sin() * half_diag;
             let y2 = cy + angle_rad.cos() * half_diag;
 
-            let sk_stops: Vec<tiny_skia::GradientStop> = stops.iter().map(|s| {
-                tiny_skia::GradientStop::new(s.position, apply_opacity(s.color, opacity))
-            }).collect();
+            let sk_stops: Vec<tiny_skia::GradientStop> = stops
+                .iter()
+                .map(|s| tiny_skia::GradientStop::new(s.position, apply_opacity(s.color, opacity)))
+                .collect();
 
             if let Some(shader) = tiny_skia::LinearGradient::new(
                 tiny_skia::Point::from_xy(x1, y1),
@@ -174,13 +236,16 @@ fn render_node(pixmap: &mut Pixmap, node: &SceneNode, transform: Transform, opac
         }
 
         SceneNode::RadialGradient { cx, cy, r, stops } => {
-            if stops.is_empty() { return; }
+            if stops.is_empty() {
+                return;
+            }
 
             let path = build_circle(*cx, *cy, *r);
 
-            let sk_stops: Vec<tiny_skia::GradientStop> = stops.iter().map(|s| {
-                tiny_skia::GradientStop::new(s.position, apply_opacity(s.color, opacity))
-            }).collect();
+            let sk_stops: Vec<tiny_skia::GradientStop> = stops
+                .iter()
+                .map(|s| tiny_skia::GradientStop::new(s.position, apply_opacity(s.color, opacity)))
+                .collect();
 
             if let Some(shader) = tiny_skia::RadialGradient::new(
                 tiny_skia::Point::from_xy(*cx, *cy),
@@ -197,13 +262,24 @@ fn render_node(pixmap: &mut Pixmap, node: &SceneNode, transform: Transform, opac
             }
         }
 
-        SceneNode::Group { transform: group_transform, opacity: group_opacity, children } => {
+        SceneNode::Group {
+            transform: group_transform,
+            opacity: group_opacity,
+            children,
+        } => {
             let new_transform = transform.post_concat(group_transform.to_tiny_skia());
             let new_opacity = opacity * group_opacity;
             render_nodes(pixmap, children, new_transform, new_opacity, font);
         }
 
-        SceneNode::Text { x, y, content, font_size, color, .. } => {
+        SceneNode::Text {
+            x,
+            y,
+            content,
+            font_size,
+            color,
+            ..
+        } => {
             let text_color = apply_opacity(*color, opacity);
 
             if let Some(rendered) = font.rasterize(content, *font_size) {
@@ -220,16 +296,19 @@ fn render_node(pixmap: &mut Pixmap, node: &SceneNode, transform: Transform, opac
                 for gy in 0..rendered.height {
                     for gx in 0..rendered.width {
                         let coverage = rendered.pixels[(gy * rendered.width + gx) as usize];
-                        if coverage == 0 { continue; }
+                        if coverage == 0 {
+                            continue;
+                        }
 
                         let px = origin_x + gx as i32;
                         let py = origin_y + gy as i32;
-                        if px < 0 || py < 0 || px >= pw || py >= ph { continue; }
+                        if px < 0 || py < 0 || px >= pw || py >= ph {
+                            continue;
+                        }
 
                         let idx = (py as u32 * pixmap_width + px as u32) as usize;
                         // Alpha-composite glyph pixel over existing pixel
-                        let src_a = (coverage as f32 / 255.0)
-                            * (text_color.alpha() as f32 / 255.0);
+                        let src_a = (coverage as f32 / 255.0) * (text_color.alpha() as f32 / 255.0);
                         let dst = pixels_rgba[idx];
                         let dst_a = dst.alpha() as f32 / 255.0;
                         let out_a = src_a + dst_a * (1.0 - src_a);
@@ -238,12 +317,13 @@ fn render_node(pixmap: &mut Pixmap, node: &SceneNode, transform: Transform, opac
                                 ((src_c * src_a + dst_c * dst_a * (1.0 - src_a)) / out_a * 255.0)
                                     .clamp(0.0, 255.0) as u8
                             };
-                            let r = blend(text_color.red() as f32,   dst.red() as f32);
+                            let r = blend(text_color.red() as f32, dst.red() as f32);
                             let g = blend(text_color.green() as f32, dst.green() as f32);
-                            let b = blend(text_color.blue() as f32,  dst.blue() as f32);
+                            let b = blend(text_color.blue() as f32, dst.blue() as f32);
                             let a = (out_a * 255.0).clamp(0.0, 255.0) as u8;
-                            pixels_rgba[idx] = tiny_skia::PremultipliedColorU8::from_rgba(r, g, b, a)
-                                .unwrap_or(pixels_rgba[idx]);
+                            pixels_rgba[idx] =
+                                tiny_skia::PremultipliedColorU8::from_rgba(r, g, b, a)
+                                    .unwrap_or(pixels_rgba[idx]);
                         }
                     }
                 }
@@ -252,9 +332,17 @@ fn render_node(pixmap: &mut Pixmap, node: &SceneNode, transform: Transform, opac
                 let char_w = *font_size * 0.6;
                 let mut cx = *x;
                 for _ch in content.chars() {
-                    let rect = match Rect::from_xywh(cx, *y - font_size, char_w.max(1.0), font_size.max(1.0)) {
+                    let rect = match Rect::from_xywh(
+                        cx,
+                        *y - font_size,
+                        char_w.max(1.0),
+                        font_size.max(1.0),
+                    ) {
                         Some(r) => r,
-                        None => { cx += char_w; continue; },
+                        None => {
+                            cx += char_w;
+                            continue;
+                        }
                     };
                     let path = PathBuilder::from_rect(rect);
                     let mut paint = Paint::default();
@@ -285,7 +373,8 @@ fn build_circle(cx: f32, cy: f32, r: f32) -> Path {
     pb.cubic_to(cx - k, cy + r, cx - r, cy + k, cx - r, cy);
     pb.cubic_to(cx - r, cy - k, cx - k, cy - r, cx, cy - r);
     pb.close();
-    pb.finish().unwrap_or_else(|| PathBuilder::new().finish().unwrap())
+    pb.finish()
+        .unwrap_or_else(|| PathBuilder::new().finish().unwrap())
 }
 
 fn build_rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32) -> Path {
@@ -304,7 +393,8 @@ fn build_rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32) -> Path {
     pb.cubic_to(x, y + r - k, x + r - k, y, x + r, y);
     pb.close();
 
-    pb.finish().unwrap_or_else(|| PathBuilder::from_rect(Rect::from_xywh(x, y, w, h).unwrap()).into())
+    pb.finish()
+        .unwrap_or_else(|| PathBuilder::from_rect(Rect::from_xywh(x, y, w, h).unwrap()).into())
 }
 
 /// Minimal SVG `d` attribute parser → tiny-skia PathBuilder.
@@ -324,14 +414,16 @@ fn svgpath_to_tiny_skia(d: &str) -> Option<Path> {
                 let x = parse_f32(&tokens, &mut pos)?;
                 let y = parse_f32(&tokens, &mut pos)?;
                 pb.move_to(x, y);
-                cx = x; cy = y;
+                cx = x;
+                cy = y;
             }
             "L" => {
                 pos += 1;
                 let x = parse_f32(&tokens, &mut pos)?;
                 let y = parse_f32(&tokens, &mut pos)?;
                 pb.line_to(x, y);
-                cx = x; cy = y;
+                cx = x;
+                cy = y;
             }
             "H" => {
                 pos += 1;
@@ -351,25 +443,29 @@ fn svgpath_to_tiny_skia(d: &str) -> Option<Path> {
                 let y1 = parse_f32(&tokens, &mut pos)?;
                 let x2 = parse_f32(&tokens, &mut pos)?;
                 let y2 = parse_f32(&tokens, &mut pos)?;
-                let x  = parse_f32(&tokens, &mut pos)?;
-                let y  = parse_f32(&tokens, &mut pos)?;
+                let x = parse_f32(&tokens, &mut pos)?;
+                let y = parse_f32(&tokens, &mut pos)?;
                 pb.cubic_to(x1, y1, x2, y2, x, y);
-                cx = x; cy = y;
+                cx = x;
+                cy = y;
             }
             "Q" => {
                 pos += 1;
                 let x1 = parse_f32(&tokens, &mut pos)?;
                 let y1 = parse_f32(&tokens, &mut pos)?;
-                let x  = parse_f32(&tokens, &mut pos)?;
-                let y  = parse_f32(&tokens, &mut pos)?;
+                let x = parse_f32(&tokens, &mut pos)?;
+                let y = parse_f32(&tokens, &mut pos)?;
                 pb.quad_to(x1, y1, x, y);
-                cx = x; cy = y;
+                cx = x;
+                cy = y;
             }
             "Z" | "z" => {
                 pb.close();
                 pos += 1;
             }
-            _ => { pos += 1; }
+            _ => {
+                pos += 1;
+            }
         }
     }
 
@@ -402,7 +498,9 @@ fn tokenize_path(d: &str) -> Vec<String> {
 }
 
 fn parse_f32(tokens: &[String], pos: &mut usize) -> Option<f32> {
-    if *pos >= tokens.len() { return None; }
+    if *pos >= tokens.len() {
+        return None;
+    }
     let v = tokens[*pos].parse::<f32>().ok()?;
     *pos += 1;
     Some(v)
@@ -424,25 +522,33 @@ mod tests {
     fn test_solid_red_rect() {
         let mut scene = Scene::new();
         scene.push(SceneNode::Rect {
-            x: 0.0, y: 0.0, w: 100.0, h: 100.0,
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
             fill: Color::rgb(255, 0, 0),
-            stroke: None, stroke_width: 0.0, corner_radius: 0.0,
+            stroke: None,
+            stroke_width: 0.0,
+            corner_radius: 0.0,
         });
 
         let img = render(&scene, 100, 100);
         let px = img.get_pixel(50, 50);
         assert_eq!(px[0], 255, "Red channel should be 255");
-        assert_eq!(px[1], 0,   "Green channel should be 0");
-        assert_eq!(px[2], 0,   "Blue channel should be 0");
+        assert_eq!(px[1], 0, "Green channel should be 0");
+        assert_eq!(px[2], 0, "Blue channel should be 0");
     }
 
     #[test]
     fn test_circle_center_pixel() {
         let mut scene = Scene::new();
         scene.push(SceneNode::Circle {
-            cx: 100.0, cy: 100.0, r: 80.0,
+            cx: 100.0,
+            cy: 100.0,
+            r: 80.0,
             fill: Color::rgb(0, 0, 255),
-            stroke: None, stroke_width: 0.0,
+            stroke: None,
+            stroke_width: 0.0,
         });
 
         let img = render(&scene, 200, 200);
@@ -463,11 +569,20 @@ mod tests {
         use crate::scene::GradientStop;
         let mut scene = Scene::new();
         scene.push(SceneNode::LinearGradient {
-            x: 0.0, y: 0.0, w: 200.0, h: 100.0,
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 100.0,
             angle_deg: 90.0,
             stops: vec![
-                GradientStop { position: 0.0, color: Color::rgb(255, 0, 0) },
-                GradientStop { position: 1.0, color: Color::rgb(0, 0, 255) },
+                GradientStop {
+                    position: 0.0,
+                    color: Color::rgb(255, 0, 0),
+                },
+                GradientStop {
+                    position: 1.0,
+                    color: Color::rgb(0, 0, 255),
+                },
             ],
         });
 
@@ -476,7 +591,10 @@ mod tests {
         let left = img.get_pixel(5, 50);
         let right = img.get_pixel(195, 50);
         assert!(left[0] > left[2], "Left side of gradient should be redder");
-        assert!(right[2] > right[0], "Right side of gradient should be bluer");
+        assert!(
+            right[2] > right[0],
+            "Right side of gradient should be bluer"
+        );
     }
 
     #[test]
@@ -485,18 +603,24 @@ mod tests {
         scene.push(SceneNode::Group {
             transform: Default::default(),
             opacity: 0.5,
-            children: vec![
-                SceneNode::Rect {
-                    x: 10.0, y: 10.0, w: 80.0, h: 80.0,
-                    fill: Color::rgb(255, 255, 255),
-                    stroke: None, stroke_width: 0.0, corner_radius: 0.0,
-                },
-            ],
+            children: vec![SceneNode::Rect {
+                x: 10.0,
+                y: 10.0,
+                w: 80.0,
+                h: 80.0,
+                fill: Color::rgb(255, 255, 255),
+                stroke: None,
+                stroke_width: 0.0,
+                corner_radius: 0.0,
+            }],
         });
 
         let img = render(&scene, 100, 100);
         let px = img.get_pixel(50, 50);
         // At 50% opacity over transparent, alpha should be ~127
-        assert!(px[3] > 50 && px[3] < 200, "Group opacity should reduce alpha");
+        assert!(
+            px[3] > 50 && px[3] < 200,
+            "Group opacity should reduce alpha"
+        );
     }
 }

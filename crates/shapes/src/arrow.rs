@@ -1,7 +1,7 @@
 //! `<Arrow>` shape component.
 
-use dioxus::prelude::*;
 use crate::render_svg::RenderSvg;
+use dioxus::prelude::*;
 
 /// Props for the `<Arrow>` shape component.
 #[derive(Props, Clone, PartialEq)]

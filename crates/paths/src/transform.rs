@@ -20,7 +20,14 @@ pub fn translate_path(path: &str, dx: f64, dy: f64) -> String {
                 *x += dx;
                 *y += dy;
             }
-            Instruction::CubicCurveTo { x1, y1, x2, y2, x, y } => {
+            Instruction::CubicCurveTo {
+                x1,
+                y1,
+                x2,
+                y2,
+                x,
+                y,
+            } => {
                 *x1 += dx;
                 *y1 += dy;
                 *x2 += dx;
@@ -58,7 +65,14 @@ pub fn scale_path(path: &str, sx: f64, sy: f64) -> String {
                 *x *= sx;
                 *y *= sy;
             }
-            Instruction::CubicCurveTo { x1, y1, x2, y2, x, y } => {
+            Instruction::CubicCurveTo {
+                x1,
+                y1,
+                x2,
+                y2,
+                x,
+                y,
+            } => {
                 *x1 *= sx;
                 *y1 *= sy;
                 *x2 *= sx;

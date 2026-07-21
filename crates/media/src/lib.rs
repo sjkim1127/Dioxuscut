@@ -10,5 +10,5 @@ pub mod img;
 pub mod video;
 
 pub use audio::{Audio, AudioProps};
-pub use img::{Img, ImgProps, ImageFit};
+pub use img::{ImageFit, Img, ImgProps};
 pub use video::{Video, VideoProps};

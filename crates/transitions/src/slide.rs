@@ -50,10 +50,10 @@ pub fn Slide(props: SlideProps) -> Element {
 
     // Translate by 100% in the enter direction, lerp to 0%
     let translate_style = match props.direction {
-        SlideDirection::FromRight  => format!("translateX({:.2}%)", (1.0 - t) * 100.0),
-        SlideDirection::FromLeft   => format!("translateX({:.2}%)", (t - 1.0) * 100.0),
+        SlideDirection::FromRight => format!("translateX({:.2}%)", (1.0 - t) * 100.0),
+        SlideDirection::FromLeft => format!("translateX({:.2}%)", (t - 1.0) * 100.0),
         SlideDirection::FromBottom => format!("translateY({:.2}%)", (1.0 - t) * 100.0),
-        SlideDirection::FromTop    => format!("translateY({:.2}%)", (t - 1.0) * 100.0),
+        SlideDirection::FromTop => format!("translateY({:.2}%)", (t - 1.0) * 100.0),
     };
 
     rsx! {

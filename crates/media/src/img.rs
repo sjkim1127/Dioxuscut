@@ -23,10 +23,10 @@ pub enum ImageFit {
 impl ImageFit {
     pub fn as_css(&self) -> &'static str {
         match self {
-            ImageFit::Cover    => "cover",
-            ImageFit::Contain  => "contain",
-            ImageFit::Fill     => "fill",
-            ImageFit::None     => "none",
+            ImageFit::Cover => "cover",
+            ImageFit::Contain => "contain",
+            ImageFit::Fill => "fill",
+            ImageFit::None => "none",
             ImageFit::ScaleDown => "scale-down",
         }
     }

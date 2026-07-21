@@ -28,7 +28,12 @@ pub struct FrameConfig {
 
 impl FrameConfig {
     pub fn new(width: u32, height: u32, frame: u32, fps: f64) -> Self {
-        Self { width, height, frame, fps }
+        Self {
+            width,
+            height,
+            frame,
+            fps,
+        }
     }
 
     /// Current playback time in seconds.

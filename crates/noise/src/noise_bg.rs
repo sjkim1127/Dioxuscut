@@ -1,8 +1,8 @@
 //! Dioxus component for dynamic organic noise background rendering.
 
+use crate::simplex::noise_3d;
 use dioxus::prelude::*;
 use dioxuscut_core::hooks::use_current_frame;
-use crate::simplex::noise_3d;
 
 /// Props for the `<NoiseBackground>` component.
 #[derive(Props, Clone, PartialEq)]

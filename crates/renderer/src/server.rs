@@ -102,7 +102,10 @@ impl ServerConfig {
 
     /// Set the working directory for command mode.
     pub fn with_cwd(mut self, cwd: impl Into<PathBuf>) -> Self {
-        if let ServeMode::Command { cwd: ref mut slot, .. } = self.mode {
+        if let ServeMode::Command {
+            cwd: ref mut slot, ..
+        } = self.mode
+        {
             *slot = Some(cwd.into());
         }
 
@@ -194,7 +197,10 @@ pub fn find_available_port() -> std::io::Result<u16> {
 }
 
 /// Spawn an embedded static web server serving `root_dir` on `port` (or dynamic port if 0).
-pub async fn spawn_server(port: u16, root_dir: impl AsRef<Path>) -> Result<ServerHandle, ServerError> {
+pub async fn spawn_server(
+    port: u16,
+    root_dir: impl AsRef<Path>,
+) -> Result<ServerHandle, ServerError> {
     let config = ServerConfig::static_dir(root_dir.as_ref().to_path_buf()).with_port(port);
     spawn_server_with_config(config).await
 }
@@ -203,11 +209,18 @@ pub async fn spawn_server(port: u16, root_dir: impl AsRef<Path>) -> Result<Serve
 pub async fn spawn_server_with_config(config: ServerConfig) -> Result<ServerHandle, ServerError> {
     match config.mode {
         ServeMode::Static { ref root_dir } => spawn_static_server(&config, root_dir).await,
-        ServeMode::Command { ref cmd, ref args, ref cwd } => spawn_command_server(&config, cmd, args, cwd.as_deref()).await,
+        ServeMode::Command {
+            ref cmd,
+            ref args,
+            ref cwd,
+        } => spawn_command_server(&config, cmd, args, cwd.as_deref()).await,
     }
 }
 
-async fn spawn_static_server(config: &ServerConfig, root_dir: &Path) -> Result<ServerHandle, ServerError> {
+async fn spawn_static_server(
+    config: &ServerConfig,
+    root_dir: &Path,
+) -> Result<ServerHandle, ServerError> {
     // Ensure root directory exists or create it
     if !root_dir.exists() {
         std::fs::create_dir_all(root_dir)?;
@@ -222,7 +235,11 @@ async fn spawn_static_server(config: &ServerConfig, root_dir: &Path) -> Result<S
     let actual_port = bound_addr.port();
     let url = format!("http://{}:{}", config.host, actual_port);
 
-    info!("Starting static web server for {} at {}", root_dir.display(), url);
+    info!(
+        "Starting static web server for {} at {}",
+        root_dir.display(),
+        url
+    );
 
     let serve_dir = ServeDir::new(root_dir).append_index_html_on_directories(true);
     let app = Router::new()
@@ -244,7 +261,12 @@ async fn spawn_static_server(config: &ServerConfig, root_dir: &Path) -> Result<S
     });
 
     // Poll health check until ready
-    poll_health_check(&url, config.health_check_timeout, config.health_check_interval).await?;
+    poll_health_check(
+        &url,
+        config.health_check_timeout,
+        config.health_check_interval,
+    )
+    .await?;
 
     Ok(ServerHandle {
         port: actual_port,
@@ -269,7 +291,12 @@ async fn spawn_command_server(
 
     let url = format!("http://{}:{}", config.host, port);
 
-    info!("Spawning child process server: {} {} at {}", cmd, args.join(" "), url);
+    info!(
+        "Spawning child process server: {} {} at {}",
+        cmd,
+        args.join(" "),
+        url
+    );
 
     let mut command = tokio::process::Command::new(cmd);
     command.args(args);
@@ -282,7 +309,12 @@ async fn spawn_command_server(
     let child_arc = Arc::new(Mutex::new(child));
 
     // Poll health check
-    let health_res = poll_health_check(&url, config.health_check_timeout, config.health_check_interval).await;
+    let health_res = poll_health_check(
+        &url,
+        config.health_check_timeout,
+        config.health_check_interval,
+    )
+    .await;
 
     if let Err(e) = health_res {
         let mut c = child_arc.lock().await;
@@ -300,7 +332,11 @@ async fn spawn_command_server(
 }
 
 /// Poll server URL until responding or timeout.
-async fn poll_health_check(url: &str, timeout: Duration, interval: Duration) -> Result<(), ServerError> {
+async fn poll_health_check(
+    url: &str,
+    timeout: Duration,
+    interval: Duration,
+) -> Result<(), ServerError> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(2))
         .build()?;
@@ -340,7 +376,14 @@ mod tests {
     use std::fs;
 
     fn create_temp_test_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("dioxuscut_server_test_{}_{}", name, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let dir = std::env::temp_dir().join(format!(
+            "dioxuscut_server_test_{}_{}",
+            name,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         let _ = fs::create_dir_all(&dir);
         dir
     }
@@ -351,13 +394,17 @@ mod tests {
         let index_path = temp_dir.join("index.html");
         fs::write(&index_path, "<h1>Test Dioxus App</h1>").unwrap();
 
-        let handle = spawn_server(0, &temp_dir).await.expect("Failed to spawn server");
+        let handle = spawn_server(0, &temp_dir)
+            .await
+            .expect("Failed to spawn server");
 
         assert!(handle.port() > 0);
         assert!(handle.url().starts_with("http://127.0.0.1:"));
 
         // Health check endpoint
-        let health_res = reqwest::get(format!("{}/health", handle.url())).await.unwrap();
+        let health_res = reqwest::get(format!("{}/health", handle.url()))
+            .await
+            .unwrap();
         assert_eq!(health_res.status(), 200);
         let health_text = health_res.text().await.unwrap();
         assert_eq!(health_text, "OK");
@@ -397,17 +444,20 @@ mod tests {
         let temp_dir = create_temp_test_dir("explicit_port");
         let available_port = find_available_port().expect("Failed to find port");
 
-        let handle = spawn_server(available_port, &temp_dir).await.expect("Failed to spawn server");
+        let handle = spawn_server(available_port, &temp_dir)
+            .await
+            .expect("Failed to spawn server");
         assert_eq!(handle.port(), available_port);
         assert_eq!(handle.url(), format!("http://127.0.0.1:{}", available_port));
 
-        let res = reqwest::get(format!("{}/health", handle.url())).await.unwrap();
+        let res = reqwest::get(format!("{}/health", handle.url()))
+            .await
+            .unwrap();
         assert_eq!(res.status(), 200);
 
         handle.stop().await.unwrap();
         let _ = fs::remove_dir_all(&temp_dir);
     }
-
 
     #[tokio::test]
     async fn test_server_config_builder() {
@@ -421,12 +471,14 @@ mod tests {
         handle.stop().await.unwrap();
         let _ = fs::remove_dir_all(&temp_dir);
 
-        let cmd_config = ServerConfig::command("echo", vec!["hello".to_string()])
-            .with_cwd(&temp_dir);
-        if let ServeMode::Command { ref cmd, ref cwd, .. } = cmd_config.mode {
+        let cmd_config =
+            ServerConfig::command("echo", vec!["hello".to_string()]).with_cwd(&temp_dir);
+        if let ServeMode::Command {
+            ref cmd, ref cwd, ..
+        } = cmd_config.mode
+        {
             assert_eq!(cmd, "echo");
             assert_eq!(cwd.as_ref().unwrap(), &temp_dir);
         }
     }
 }
-

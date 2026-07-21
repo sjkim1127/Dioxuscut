@@ -49,9 +49,11 @@ mod tests {
 
     #[test]
     fn test_ensure_max_characters_per_line() {
-        let tokens = vec![
-            CaptionToken::new("Supercalifragilisticexpialidocious", 0, 1000),
-        ];
+        let tokens = vec![CaptionToken::new(
+            "Supercalifragilisticexpialidocious",
+            0,
+            1000,
+        )];
 
         let wrapped = ensure_max_characters_per_line(&tokens, 10);
         assert!(wrapped.len() > 1);

@@ -148,7 +148,13 @@ pub struct Transform2D {
 
 impl Default for Transform2D {
     fn default() -> Self {
-        Self { tx: 0.0, ty: 0.0, scale_x: 1.0, scale_y: 1.0, rotate_deg: 0.0 }
+        Self {
+            tx: 0.0,
+            ty: 0.0,
+            scale_x: 1.0,
+            scale_y: 1.0,
+            rotate_deg: 0.0,
+        }
     }
 }
 
@@ -192,9 +198,14 @@ mod tests {
     fn test_scene_push() {
         let mut scene = Scene::new();
         scene.push(SceneNode::Rect {
-            x: 0.0, y: 0.0, w: 100.0, h: 100.0,
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
             fill: Color::rgb(255, 0, 0),
-            stroke: None, stroke_width: 0.0, corner_radius: 0.0,
+            stroke: None,
+            stroke_width: 0.0,
+            corner_radius: 0.0,
         });
         assert_eq!(scene.nodes.len(), 1);
     }

@@ -2,9 +2,9 @@
 //!
 //! Equivalent to Remotion's `<Video>`.
 
+use dioxus::prelude::*;
 use dioxuscut_core::hooks::use_current_frame;
 use dioxuscut_core::hooks::use_video_config;
-use dioxus::prelude::*;
 
 /// Props for `<Video>`.
 #[derive(Props, Clone, PartialEq)]

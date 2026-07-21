@@ -10,7 +10,10 @@ use std::fs;
 async fn test_tier4_real_world_acceptance_scenario() {
     let temp_dir = std::env::temp_dir().join(format!(
         "dioxuscut_tier4_acceptance_{}",
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
     ));
     fs::create_dir_all(&temp_dir).unwrap();
 
@@ -37,16 +40,23 @@ async fn test_tier4_real_world_acceptance_scenario() {
         30.0,
         60, // 60 frames = 2 seconds @ 30 fps
         RenderBackend::Native,
-        0,  // dynamic server port
+        0, // dynamic server port
         None,
         None,
     )
     .await;
 
-    assert!(result.is_ok(), "Acceptance render failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Acceptance render failed: {:?}",
+        result.err()
+    );
 
     // 1. Verify output file exists
-    assert!(output_mp4.exists(), "Target output.mp4 file was not created");
+    assert!(
+        output_mp4.exists(),
+        "Target output.mp4 file was not created"
+    );
 
     // 2. Verify non-zero file size
     let metadata = fs::metadata(&output_mp4).unwrap();
@@ -56,7 +66,10 @@ async fn test_tier4_real_world_acceptance_scenario() {
     let bytes = fs::read(&output_mp4).unwrap();
     assert!(bytes.len() > 12);
     let ftyp_slice = &bytes[4..8];
-    assert_eq!(ftyp_slice, b"ftyp", "Produced MP4 file missing 'ftyp' container signature");
+    assert_eq!(
+        ftyp_slice, b"ftyp",
+        "Produced MP4 file missing 'ftyp' container signature"
+    );
 
     let _ = fs::remove_dir_all(&temp_dir);
 }

@@ -8,4 +8,4 @@ pub mod fade;
 pub mod slide;
 
 pub use fade::{Fade, FadeProps};
-pub use slide::{Slide, SlideProps, SlideDirection};
+pub use slide::{Slide, SlideDirection, SlideProps};

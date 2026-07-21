@@ -86,16 +86,14 @@ pub fn Sequence(props: SequenceProps) -> Element {
     let is_active = absolute_frame >= from && absolute_frame < end_frame;
 
     if props.hidden || !is_active {
-        return rsx! { };
+        return rsx! {};
     }
 
     // Provide a child context with the local frame offset applied
     let child_ctx = TimelineContext::with_offset(absolute_frame, from);
 
     let style = match props.layout {
-        SequenceLayout::AbsoluteFill => {
-            "position: absolute; top: 0; left: 0; right: 0; bottom: 0;"
-        }
+        SequenceLayout::AbsoluteFill => "position: absolute; top: 0; left: 0; right: 0; bottom: 0;",
         SequenceLayout::None => "",
     };
 

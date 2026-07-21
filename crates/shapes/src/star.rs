@@ -1,7 +1,7 @@
 //! `<Star>` shape component.
 
-use dioxus::prelude::*;
 use crate::render_svg::RenderSvg;
+use dioxus::prelude::*;
 use std::f64::consts::PI;
 
 /// Props for the `<Star>` shape component.
@@ -44,7 +44,11 @@ pub fn make_star(points: usize, inner_radius: f64, outer_radius: f64) -> (String
     let mut path_cmd = String::new();
 
     for i in 0..(pts * 2) {
-        let r = if i % 2 == 0 { outer_radius } else { inner_radius };
+        let r = if i % 2 == 0 {
+            outer_radius
+        } else {
+            inner_radius
+        };
         let angle = degree_increment * (i as f64) - PI / 2.0;
         let x = center_x + r * angle.cos();
         let y = center_y + r * angle.sin();

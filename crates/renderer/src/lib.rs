@@ -14,6 +14,8 @@ pub mod encode;
 pub mod render_frames;
 pub mod server;
 
-pub use encode::{EncodeConfig, build_ffmpeg_args, cleanup_frames, encode_frames, encode_mp4};
+pub use encode::{build_ffmpeg_args, cleanup_frames, encode_frames, encode_mp4, EncodeConfig};
 pub use render_frames::{RenderConfig, RenderError};
-pub use server::{ServeMode, ServerConfig, ServerError, ServerHandle, spawn_server, spawn_server_with_config};
+pub use server::{
+    spawn_server, spawn_server_with_config, ServeMode, ServerConfig, ServerError, ServerHandle,
+};

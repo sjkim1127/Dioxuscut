@@ -27,20 +27,19 @@
 
 pub mod backend;
 pub mod font;
-pub mod scene;
 pub mod render;
+pub mod scene;
 pub mod tiny_skia_backend;
 #[cfg(feature = "gpu")]
 pub mod wgpu_backend;
 
 pub use backend::{FrameConfig, RasterError, RasterizerBackend};
 pub use font::FontCache;
+pub use render::{
+    build_pipe_ffmpeg_args, render_all_frames, render_frame_timed, render_parallel,
+    render_to_ffmpeg_pipe, save_frame, NativeRenderConfig, PipeConfig,
+};
 pub use scene::{Color, GradientStop, Scene, SceneNode, Transform2D};
 pub use tiny_skia_backend::TinySkiaBackend;
-pub use render::{
-    NativeRenderConfig, PipeConfig,
-    render_all_frames, render_parallel, render_to_ffmpeg_pipe,
-    build_pipe_ffmpeg_args, save_frame, render_frame_timed,
-};
 #[cfg(feature = "gpu")]
 pub use wgpu_backend::WgpuBackend;

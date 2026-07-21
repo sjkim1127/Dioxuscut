@@ -1,7 +1,7 @@
 //! `<Polygon>` shape component (regular N-sided polygons).
 
-use dioxus::prelude::*;
 use crate::render_svg::RenderSvg;
+use dioxus::prelude::*;
 use std::f64::consts::PI;
 
 /// Props for the `<Polygon>` shape component.

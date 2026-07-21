@@ -1,8 +1,8 @@
 //! TikTok / Short-form kinetic caption pagination and Dioxus component.
 
+use crate::types::{CaptionPage, CaptionToken};
 use dioxus::prelude::*;
 use dioxuscut_core::hooks::{use_current_frame, use_video_config};
-use crate::types::{CaptionPage, CaptionToken};
 
 /// Groups a flat list of [`CaptionToken`]s into pages containing at most `max_words_per_page` tokens.
 pub fn create_tiktok_style_captions(
@@ -73,7 +73,9 @@ pub fn TikTokCaptions(props: TikTokCaptionsProps) -> Element {
     let pages = create_tiktok_style_captions(&props.tokens, props.max_words_per_page);
 
     // Find page active at current playback timestamp
-    let current_page = pages.iter().find(|p| current_ms >= p.start_ms && current_ms <= p.end_ms);
+    let current_page = pages
+        .iter()
+        .find(|p| current_ms >= p.start_ms && current_ms <= p.end_ms);
 
     let container_style = format!(
         "display: flex; align-items: center; justify-content: center; gap: 14px; \

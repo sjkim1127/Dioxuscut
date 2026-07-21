@@ -8,5 +8,5 @@
 pub mod controls;
 pub mod player;
 
-pub use player::{Player, PlayerProps};
 pub use controls::Controls;
+pub use player::{Player, PlayerProps};

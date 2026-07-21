@@ -7,10 +7,10 @@
 //! - [`hash_seed`]
 //! - [`NoiseBackground`]
 
+pub mod noise_bg;
 pub mod seed;
 pub mod simplex;
-pub mod noise_bg;
 
+pub use noise_bg::{NoiseBackground, NoiseBackgroundProps};
 pub use seed::{hash_seed, seed_to_float};
 pub use simplex::{noise_2d, noise_3d, noise_4d};
-pub use noise_bg::{NoiseBackground, NoiseBackgroundProps};

@@ -174,7 +174,12 @@ mod tests {
     #[test]
     fn multi_segment() {
         // Maps 0..30..60 → 0..1..0  (triangle)
-        let v = interpolate(45.0, &[0.0, 30.0, 60.0], &[0.0, 1.0, 0.0], Default::default());
+        let v = interpolate(
+            45.0,
+            &[0.0, 30.0, 60.0],
+            &[0.0, 1.0, 0.0],
+            Default::default(),
+        );
         assert!((v - 0.5).abs() < 1e-10, "got {v}");
     }
 
