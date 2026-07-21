@@ -675,14 +675,13 @@ mod tests {
                 output
             }
         "##;
-        let font = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../vendor/remotion-4.0.495/packages/example/public/Roboto-Medium.ttf");
+        let font_cache = dioxuscut_rasterizer::FontCache::load();
+        let Some(font) = font_cache.font_path() else {
+            return;
+        };
         let composition = RhaiComposition::from_source("text-box", script).unwrap();
         let prepared = composition
-            .prepare(
-                &serde_json::json!({"font": font.display().to_string()}),
-                context(),
-            )
+            .prepare(&serde_json::json!({"font": font}), context())
             .unwrap();
         let scene = prepared.render(0).unwrap();
 

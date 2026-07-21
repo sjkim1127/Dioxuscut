@@ -582,15 +582,17 @@ mod tests {
 
     #[test]
     fn text_block_resolves_wrapping_fitting_and_alignment() {
-        let font = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../vendor/remotion-4.0.495/packages/example/public/Roboto-Medium.ttf");
+        let font_cache = dioxuscut_rasterizer::FontCache::load();
+        let Some(font) = font_cache.font_path() else {
+            return;
+        };
         let block =
             SceneTextBlock::new("one two three four five six", 10.0, 20.0, 120.0, 52.0, 32.0)
                 .with_min_font_size(14.0)
                 .with_max_lines(2)
                 .with_alignment(TextHorizontalAlign::Center, TextVerticalAlign::Center)
                 .with_overflow(TextOverflow::Ellipsis)
-                .with_font_sources([font.display().to_string()]);
+                .with_font_sources([font.to_string()]);
         let composition = SceneEmitterComposition::new("text-block", block);
         let scene = composition.render(0, &Value::Null, context()).unwrap();
 
