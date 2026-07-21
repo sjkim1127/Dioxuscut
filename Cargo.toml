@@ -11,6 +11,8 @@ members = [
     "crates/shapes",
     "crates/paths",
     "crates/captions",
+    "crates/noise",
+    "crates/rasterizer",
     "apps/studio",
     "apps/example",
 ]
@@ -44,6 +46,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ordered-float     = "4"
 num-traits        = "0.2"
 
+# Image / rasterizer
+image             = "0.25"
+tiny-skia         = "0.11"
+ab_glyph          = "0.2"
+
 # Error handling
 anyhow            = "1"
 thiserror         = "1"
@@ -63,6 +70,9 @@ dioxuscut-transitions = { path = "crates/transitions" }
 dioxuscut-shapes      = { path = "crates/shapes" }
 dioxuscut-paths       = { path = "crates/paths" }
 dioxuscut-captions    = { path = "crates/captions" }
+dioxuscut-noise       = { path = "crates/noise" }
+dioxuscut-rasterizer  = { path = "crates/rasterizer" }
+
 
 
 

@@ -4,7 +4,7 @@ use dioxuscut_cli::{execute_render_command, Cli, Commands};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter("info,dioxuscut_renderer=debug")
+        .with_env_filter("info,dioxuscut_renderer=debug,dioxuscut_rasterizer=debug")
         .init();
 
     let cli = Cli::parse();
@@ -18,6 +18,7 @@ async fn main() -> anyhow::Result<()> {
             height,
             fps,
             duration,
+            backend,
             port,
             web_dir,
             server_url,
@@ -30,6 +31,7 @@ async fn main() -> anyhow::Result<()> {
                 *height,
                 *fps,
                 *duration,
+                *backend,
                 *port,
                 web_dir.as_ref(),
                 server_url.clone(),
