@@ -178,11 +178,21 @@ pub async fn execute_render_command(
                 .and_then(Color::from_hex)
                 .unwrap_or(Color::rgb(30, 27, 75));     // #1e1b4b
 
-            let title = prop_value
+            let raw_title = prop_value
                 .get("title")
                 .and_then(|v| v.as_str())
-                .unwrap_or(composition)
+                .unwrap_or(composition);
+
+            // Filter out emojis/unsupported glyphs to prevent TTF font tofu boxes
+            let title: String = raw_title
+                .chars()
+                .filter(|c| c.is_ascii())
+                .collect::<String>()
+                .trim()
                 .to_string();
+
+            let title = if title.is_empty() { "Dioxuscut".to_string() } else { title };
+
 
             let accent = prop_value
                 .get("accent_color")
