@@ -167,7 +167,7 @@ impl Transform2D {
 }
 
 /// The root container for a single video frame's scene.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Scene {
     pub nodes: Vec<SceneNode>,
 }

@@ -3,15 +3,15 @@
 //! Desktop video editor application — Remotion Studio equivalent.
 //!
 //! Provides:
-//! - Composition preview with the `<Player>` component
+//! - Shared native composition preview with the `<Player>` component
 //! - Timeline panel (planned)
 //! - Render queue (planned)
 //! - Properties panel (planned)
 
 use dioxus::prelude::*;
 use dioxus_desktop::{Config, LogicalSize, WindowBuilder};
-use dioxuscut_core::AbsoluteFill;
-use dioxuscut_player::Player;
+use dioxuscut_composition::HelloWorldComposition;
+use dioxuscut_player::{CompositionHandle, NativeCompositionPreview, Player};
 
 // ─── Window config ────────────────────────────────────────────────────────────
 const WINDOW_WIDTH: u32 = 1600;
@@ -92,8 +92,6 @@ fn StudioApp() -> Element {
                     "Compositions"
                 }
                 CompositionListItem { name: "HelloWorld", selected: true }
-                CompositionListItem { name: "TitleCard", selected: false }
-                CompositionListItem { name: "Outro", selected: false }
             }
 
             // ── Centre: Preview ────────────────────────────────────────────
@@ -263,28 +261,27 @@ fn TimelinePanel() -> Element {
     }
 }
 
-// ─── Preview composition (placeholder) ────────────────────────────────────────
+// ─── Shared native composition preview ────────────────────────────────────────
 
 #[component]
 fn PreviewComposition() -> Element {
-    use dioxuscut_core::hooks::use_current_frame;
-    let frame = use_current_frame();
+    let composition = use_hook(|| CompositionHandle::new(HelloWorldComposition));
+    let input_props = serde_json::json!({
+        "title": "Dioxuscut",
+        "subtitle": "One scene contract for preview and export",
+        "background_start": "#1a0533",
+        "background_end": "#001a33",
+        "accent_color": "#6c63ff"
+    });
 
     rsx! {
-        AbsoluteFill {
-            style: "background: linear-gradient(135deg, #1a0533 0%, #0d1b4b 50%, #001a33 100%); display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px;",
-            div {
-                style: "font-size: 56px; font-weight: 800; color: white; letter-spacing: -0.04em;",
-                "🦀 Dioxuscut"
-            }
-            div {
-                style: "color: rgba(200, 180, 255, 0.8); font-size: 20px;",
-                "Frame {frame} / 179"
-            }
-            div {
-                style: "color: rgba(255,255,255,0.3); font-size: 13px; font-family: monospace;",
-                "Open apps/example/src/main.rs to load your composition"
-            }
+        NativeCompositionPreview {
+            composition,
+            input_props,
+            width: 960,
+            height: 540,
+            fps: 30.0,
+            duration_in_frames: 180,
         }
     }
 }

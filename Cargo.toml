@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/animation",
+    "crates/composition",
     "crates/core",
     "crates/media",
     "crates/player",
@@ -67,6 +68,7 @@ reqwest           = { version = "0.12", features = ["json"] }
 
 # Internal crates
 dioxuscut-animation   = { version = "0.1.2", path = "crates/animation" }
+dioxuscut-composition = { version = "0.1.2", path = "crates/composition" }
 dioxuscut-core        = { version = "0.1.2", path = "crates/core" }
 dioxuscut-media       = { version = "0.1.2", path = "crates/media" }
 dioxuscut-player      = { version = "0.1.2", path = "crates/player" }

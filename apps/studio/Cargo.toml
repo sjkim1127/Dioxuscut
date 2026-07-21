@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 dioxus              = { workspace = true }
 dioxus-desktop      = { workspace = true }
+dioxuscut-composition = { workspace = true }
 dioxuscut-core      = { workspace = true }
 dioxuscut-animation = { workspace = true }
 dioxuscut-player    = { workspace = true }

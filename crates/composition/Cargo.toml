@@ -1,0 +1,14 @@
+[package]
+name        = "dioxuscut-composition"
+description = "Shared native composition contract and registry for Dioxuscut preview and export"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+readme.workspace      = true
+
+[dependencies]
+dioxuscut-rasterizer = { workspace = true }
+serde_json           = { workspace = true }
+thiserror            = { workspace = true }

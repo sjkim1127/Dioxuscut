@@ -17,6 +17,7 @@ name = "dioxuscut"
 path = "src/main.rs"
 
 [dependencies]
+dioxuscut-composition = { workspace = true }
 dioxuscut-rasterizer = { workspace = true }
 clap               = { version = "4.4", features = ["derive"] }
 tokio              = { workspace = true }

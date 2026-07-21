@@ -1629,6 +1629,7 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "clap",
+ "dioxuscut-composition",
  "dioxuscut-rasterizer",
  "dioxuscut-renderer",
  "reqwest",
@@ -1638,6 +1639,15 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "dioxuscut-composition"
+version = "0.1.2"
+dependencies = [
+ "dioxuscut-rasterizer",
+ "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1686,8 +1696,11 @@ version = "0.1.2"
 dependencies = [
  "dioxus",
  "dioxuscut-animation",
+ "dioxuscut-composition",
  "dioxuscut-core",
+ "dioxuscut-rasterizer",
  "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]
@@ -5637,6 +5650,7 @@ dependencies = [
  "dioxus",
  "dioxus-desktop",
  "dioxuscut-animation",
+ "dioxuscut-composition",
  "dioxuscut-core",
  "dioxuscut-player",
  "dioxuscut-renderer",

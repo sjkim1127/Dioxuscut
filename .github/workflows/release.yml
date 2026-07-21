@@ -80,6 +80,7 @@ jobs:
             dioxuscut-animation
             dioxuscut-paths
             dioxuscut-rasterizer
+            dioxuscut-composition
             dioxuscut-renderer
             dioxuscut-core
             dioxuscut-media
@@ -169,6 +170,7 @@ jobs:
             dioxuscut-animation
             dioxuscut-paths
             dioxuscut-rasterizer
+            dioxuscut-composition
             dioxuscut-renderer
             dioxuscut-core
             dioxuscut-media

@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/status-early%20development-f59e0b?style=flat-square" alt="Early development" />
 </p>
 
-Dioxuscut is an early-stage programmatic video toolkit written in Rust. Its native export path renders a registered `NativeComposition` into a small scene graph, rasterizes frames with `tiny-skia` or `wgpu`, and sends bounded batches of raw RGBA frames to FFmpeg.
+Dioxuscut is an early-stage programmatic video toolkit written in Rust. Its native export path renders a registered `NativeComposition` into a small scene graph, rasterizes frames with `tiny-skia` or `wgpu`, and sends bounded batches of raw RGBA frames to FFmpeg. The same native scene can now be displayed in the Dioxus Player through `NativeCompositionPreview`.
 
 The repository also contains Dioxus timeline, media, shape, transition, player, and Studio-preview components. These components currently form the interactive preview layer; arbitrary Dioxus VDOM is **not yet automatically translated** into the native scene graph.
 
@@ -24,6 +24,7 @@ The repository also contains Dioxus timeline, media, shape, transition, player, 
 - Experimental GPU rendering through `wgpu`; unsupported scene features fall back to the CPU renderer for correctness.
 - Bounded-memory parallel frame rendering into an FFmpeg stdin pipe.
 - Registry-based Rust compositions and optional sandboxed Rhai compositions, both with JSON props.
+- Shared native composition contract for CLI export and Dioxus Player/Studio preview.
 - Animation, shape, path, caption, noise, timeline, player, server, encoder, and CLI test coverage.
 - Dioxus web example and desktop Studio preview shell.
 
@@ -41,22 +42,30 @@ Native export
       -> FFmpeg
       -> MP4
 
-Dioxus preview
+Dioxus native-scene preview
+  CompositionHandle
+      -> Composition::prepare(props, context)
+      -> PreparedComposition::render(frame)
+      -> SceneView (SVG)
+      -> Player / Studio
+
+General Dioxus preview
   Composition / Sequence / Freeze / media / shapes
       -> Player
       -> Dioxus web or desktop UI
 ```
 
-The two paths intentionally have an explicit boundary. A shared declarative adapter between Dioxus components and native `Scene` output remains roadmap work.
+Native compositions now share one `Scene` contract between preview and export. General Dioxus VDOM components still have an explicit boundary because arbitrary Dioxus elements are not compiled into native `Scene` nodes.
 
 ## Workspace
 
 | Package | Purpose |
 |---|---|
 | `dioxuscut-animation` | Interpolation, easing, springs, and color interpolation |
+| `dioxuscut-composition` | Shared native composition contract, registry, and built-in composition |
 | `dioxuscut-core` | Dioxus composition timeline, sequence, freeze, and hooks |
 | `dioxuscut-media` | Dioxus image, video, and audio elements for preview |
-| `dioxuscut-player` | Interactive Dioxus player and controls |
+| `dioxuscut-player` | Interactive player, controls, and native Scene preview adapter |
 | `dioxuscut-shapes` | Procedural SVG shapes |
 | `dioxuscut-paths` | SVG path parsing, metrics, and transforms |
 | `dioxuscut-captions` | SRT parsing and kinetic caption helpers |
@@ -64,7 +73,7 @@ The two paths intentionally have an explicit boundary. A shared declarative adap
 | `dioxuscut-transitions` | Dioxus fade and slide transitions |
 | `dioxuscut-rasterizer` | Scene IR, CPU renderer, experimental GPU renderer, FFmpeg pipe |
 | `dioxuscut-renderer` | Static server and PNG-sequence encoding utilities |
-| `dioxuscut-cli` | Composition registry and `dioxuscut render` command |
+| `dioxuscut-cli` | Render command and Rhai composition runtime |
 | `apps/example` | Dioxus web composition preview |
 | `apps/studio` | Desktop preview shell; editing and render queue are planned |
 
@@ -136,12 +145,12 @@ for every frame so parallel rendering does not share mutable script state.
 
 ## Registering a native composition
 
-Applications can use `dioxuscut-cli` as a library and provide their own registry:
+Applications can implement the shared composition contract and pass the same composition to CLI export or `NativeCompositionPreview`:
 
 ```rust,ignore
-use dioxuscut_cli::{
-    execute_render_command_with_registry, CompositionError, CompositionRegistry,
-    NativeComposition, NativeCompositionContext, RenderRequest,
+use dioxuscut_cli::{execute_render_command_with_registry, RenderRequest};
+use dioxuscut_composition::{
+    CompositionError, CompositionRegistry, NativeComposition, NativeCompositionContext,
 };
 use dioxuscut_rasterizer::{Color, Scene, SceneNode};
 use serde_json::Value;
@@ -229,7 +238,7 @@ written into workflow files.
 
 ## Current limitations
 
-- Dioxus VDOM compositions and native `Scene` compositions are not yet one representation.
+- General Dioxus VDOM compositions are not automatically translated into native `Scene` nodes; native compositions use the shared preview adapter.
 - Native video/audio decoding and audio muxing are not implemented.
 - GPU acceleration covers a subset of scene primitives and uses whole-frame CPU fallback otherwise.
 - Font discovery uses platform fonts, so pixel-identical cross-platform text output is not guaranteed.
@@ -237,7 +246,7 @@ written into workflow files.
 
 ## Roadmap
 
-1. Shared composition representation for Dioxus preview and native export.
+1. Migrate reusable Dioxus media, shape, caption, and transition components onto the shared Scene contract.
 2. Explicit font assets and fallback chains for reproducible text.
 3. Native image/video decoding and FFmpeg audio muxing.
 4. Full GPU parity for paths, text, groups, strokes, and multi-stop gradients.
