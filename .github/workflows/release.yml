@@ -147,21 +147,21 @@ jobs:
           publish_package() {
             local package="$1"
 
-            for attempt in $(seq 1 18); do
+            for attempt in $(seq 1 40); do
               if crate_is_published "$package"; then
                 echo "${package}@${version} is already published; skipping"
                 return 0
               fi
 
-              echo "Publishing ${package}@${version} (attempt ${attempt}/18)"
+              echo "Publishing ${package}@${version} (attempt ${attempt}/40)"
               if cargo publish --locked -p "$package"; then
                 return 0
               fi
-              if [[ "$attempt" -eq 18 ]]; then
+              if [[ "$attempt" -eq 40 ]]; then
                 echo "::error::Failed to publish ${package}@${version}"
                 return 1
               fi
-              sleep 10
+              sleep 30
             done
           }
 
