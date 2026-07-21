@@ -138,13 +138,14 @@ cargo run -p dioxuscut-cli --features rhai -- render \
 
 Each script defines `fn render(ctx, props)`. The context contains `frame`,
 `width`, `height`, `fps`, `duration`, and normalized `progress`. The initial API
-exposes `scene()`, `rect`, `round_rect`, `circle`, `text`, `text_bold`, `image`,
+exposes `scene()`, `rect`, `round_rect`, `circle`, `text`, `text_bold`, `text_font`, `image`,
 `video`, `audio`, `group`, and `interpolate`. Image and video nodes accept local
 paths or `file://` URIs and the fit values `cover`, `contain`, `fill`, `none`, and
 `scale-down`:
 
 ```rhai
 output.image(x, y, width, height, "card.png", "contain", 1.0);
+output.text_font(x, y, "Pinned font", 48.0, "#ffffff", "assets/Inter-Regular.ttf");
 output.video(x, y, width, height, "clip.mp4", source_time, "cover", 1.0);
 output.video(x, y, width, height, "clip.mp4", source_time, "cover", 1.0, true); // loop
 output.audio("clip.mp4", source_offset, timeline_offset, duration, volume, playback_rate, looped);
@@ -263,13 +264,13 @@ written into workflow files.
 - Audio declarations are taken from frame zero and must be static for the render.
 - `SceneLayer` supports rectangular or SVG-path clips, alpha or luminance masks, twelve blend modes, ordered blur/brightness/grayscale/opacity filters, and drop shadows. These effects use CPU offscreen surfaces for export and SVG/CSS equivalents for Player preview.
 - GPU acceleration covers a subset of scene primitives and uses whole-frame CPU fallback for composited layers and other unsupported nodes.
-- Font discovery uses platform fonts, so pixel-identical cross-platform text output is not guaranteed.
+- Text nodes accept ordered local TTF/OTF `font_sources`; native rendering caches those files and falls through per glyph. Text without explicit sources still uses platform font discovery and is not pixel-identical across platforms.
 - Studio is a preview shell, not yet a full editor.
 
 ## Roadmap
 
 1. Expand `SceneEmitter` layout and style parity beyond the current explicit adapters.
-2. Explicit font assets and fallback chains for reproducible text.
+2. Metric-based multiline text wrapping, fitting, and layout constraints.
 3. Full GPU parity for paths, text, media, groups, composited layers, strokes, and multi-stop gradients.
 4. Additional color, distortion, and convolution filter primitives.
 5. Studio project loading, media editing, and render queue integration.

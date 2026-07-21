@@ -4,6 +4,10 @@
 //! Falls back gracefully if no font is found.
 
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+const MAX_FONT_BYTES: u64 = 32 * 1024 * 1024;
 
 /// Platform-specific font search paths, in preference order.
 #[cfg(target_os = "macos")]
@@ -34,8 +38,15 @@ const FONT_SEARCH_PATHS: &[&str] = &[];
 
 /// A loaded, ready-to-use font.
 pub struct FontCache {
-    font: Option<FontVec>,
+    font: Option<Arc<FontVec>>,
     path: Option<String>,
+    assets: Mutex<HashMap<String, Arc<FontVec>>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct FontLoadError {
+    pub path: String,
+    pub reason: String,
 }
 
 impl FontCache {
@@ -45,8 +56,9 @@ impl FontCache {
             if let Ok(bytes) = std::fs::read(path) {
                 if let Ok(font) = FontVec::try_from_vec(bytes) {
                     return Self {
-                        font: Some(font),
+                        font: Some(Arc::new(font)),
                         path: Some(path.to_string()),
+                        assets: Mutex::new(HashMap::new()),
                     };
                 }
             }
@@ -55,6 +67,7 @@ impl FontCache {
         Self {
             font: None,
             path: None,
+            assets: Mutex::new(HashMap::new()),
         }
     }
 
@@ -63,6 +76,7 @@ impl FontCache {
         Self {
             font: None,
             path: None,
+            assets: Mutex::new(HashMap::new()),
         }
     }
 
@@ -74,47 +88,67 @@ impl FontCache {
         self.path.as_deref()
     }
 
-    /// Rasterize a string into a list of `(x_offset, y_offset, coverage)` pixel contributions.
-    ///
-    /// Returns `None` if no font is loaded.
-    pub fn rasterize(&self, text: &str, font_size: f32) -> Option<RenderedText> {
-        let font = self.font.as_ref()?;
+    /// Rasterize text with ordered explicit local fonts followed by the system fallback.
+    pub(crate) fn rasterize(
+        &self,
+        text: &str,
+        font_size: f32,
+        sources: &[String],
+    ) -> Result<Option<RenderedText>, FontLoadError> {
+        let fonts = self.font_chain(sources)?;
+        if fonts.is_empty() {
+            return Ok(None);
+        }
         let scale = PxScale::from(font_size);
-        let scaled = font.as_scaled(scale);
+        let ascent = fonts
+            .iter()
+            .map(|font| font.as_scaled(scale).ascent())
+            .fold(0.0_f32, f32::max)
+            .ceil() as u32;
+        let descent = fonts
+            .iter()
+            .map(|font| -font.as_scaled(scale).descent())
+            .fold(0.0_f32, f32::max)
+            .ceil() as u32;
 
-        let mut glyphs: Vec<ab_glyph::Glyph> = Vec::new();
+        let mut glyphs: Vec<(Arc<FontVec>, ab_glyph::Glyph)> = Vec::new();
         let mut cursor_x = 0.0f32;
-        let mut prev_glyph_id = None;
+        let mut previous: Option<(Arc<FontVec>, ab_glyph::GlyphId)> = None;
 
         for ch in text.chars() {
+            let font = fonts
+                .iter()
+                .find(|font| font.glyph_id(ch).0 != 0)
+                .unwrap_or(&fonts[0])
+                .clone();
             let glyph_id = font.glyph_id(ch);
-            // Apply kerning
-            if let Some(prev) = prev_glyph_id {
-                cursor_x += scaled.kern(prev, glyph_id);
+            let scaled = font.as_scaled(scale);
+            if let Some((previous_font, previous_id)) = &previous {
+                if Arc::ptr_eq(previous_font, &font) {
+                    cursor_x += scaled.kern(*previous_id, glyph_id);
+                }
             }
             let glyph = glyph_id.with_scale_and_position(scale, ab_glyph::point(cursor_x, 0.0));
             cursor_x += scaled.h_advance(glyph_id);
-            glyphs.push(glyph);
-            prev_glyph_id = Some(glyph_id);
+            glyphs.push((font.clone(), glyph));
+            previous = Some((font, glyph_id));
         }
 
         let total_width = cursor_x.ceil() as u32;
-        let ascent = scaled.ascent().ceil() as u32;
-        let descent = (-scaled.descent()).ceil() as u32;
         let total_height = ascent + descent;
 
         if total_width == 0 || total_height == 0 {
-            return Some(RenderedText {
+            return Ok(Some(RenderedText {
                 pixels: vec![],
                 width: 0,
                 height: 0,
                 baseline: ascent,
-            });
+            }));
         }
 
         let mut pixels = vec![0u8; (total_width * total_height) as usize];
 
-        for glyph in &glyphs {
+        for (font, glyph) in &glyphs {
             if let Some(outlined) = font.outline_glyph(glyph.clone()) {
                 let bounds = outlined.px_bounds();
                 let gx = bounds.min.x.floor() as i32;
@@ -138,16 +172,89 @@ impl FontCache {
             }
         }
 
-        Some(RenderedText {
+        Ok(Some(RenderedText {
             pixels,
             width: total_width,
             height: total_height,
             baseline: ascent,
-        })
+        }))
+    }
+
+    fn font_chain(&self, sources: &[String]) -> Result<Vec<Arc<FontVec>>, FontLoadError> {
+        let mut fonts = Vec::with_capacity(sources.len() + usize::from(self.font.is_some()));
+        for source in sources {
+            fonts.push(self.load_asset(source)?);
+        }
+        if let Some(font) = &self.font {
+            fonts.push(font.clone());
+        }
+        Ok(fonts)
+    }
+
+    fn load_asset(&self, source: &str) -> Result<Arc<FontVec>, FontLoadError> {
+        let source = source.trim();
+        let path = source.strip_prefix("file://").unwrap_or(source);
+        if path.is_empty() {
+            return Err(FontLoadError {
+                path: source.into(),
+                reason: "font source path must not be empty".into(),
+            });
+        }
+        if source.contains("://") && !source.starts_with("file://") {
+            return Err(FontLoadError {
+                path: source.into(),
+                reason: "remote font sources are not supported by native rendering".into(),
+            });
+        }
+        if let Some(font) = self
+            .assets
+            .lock()
+            .expect("font cache lock poisoned")
+            .get(path)
+            .cloned()
+        {
+            return Ok(font);
+        }
+
+        let metadata = std::fs::metadata(path).map_err(|error| FontLoadError {
+            path: source.into(),
+            reason: error.to_string(),
+        })?;
+        if !metadata.is_file() {
+            return Err(FontLoadError {
+                path: source.into(),
+                reason: "font source is not a regular file".into(),
+            });
+        }
+        if metadata.len() > MAX_FONT_BYTES {
+            return Err(FontLoadError {
+                path: source.into(),
+                reason: format!("font exceeds the {MAX_FONT_BYTES} byte safety limit"),
+            });
+        }
+        let bytes = std::fs::read(path).map_err(|error| FontLoadError {
+            path: source.into(),
+            reason: error.to_string(),
+        })?;
+        let font = Arc::new(FontVec::try_from_vec(bytes).map_err(|error| FontLoadError {
+            path: source.into(),
+            reason: format!("unsupported or invalid font data: {error:?}"),
+        })?);
+        self.assets
+            .lock()
+            .expect("font cache lock poisoned")
+            .insert(path.into(), font.clone());
+        Ok(font)
+    }
+
+    #[cfg(test)]
+    fn asset_count(&self) -> usize {
+        self.assets.lock().expect("font cache lock poisoned").len()
     }
 }
 
 /// Rasterized text as a greyscale coverage map.
+#[derive(Debug)]
 pub struct RenderedText {
     /// Single-channel (alpha coverage) pixel data, row-major.
     pub pixels: Vec<u8>,
@@ -178,7 +285,10 @@ mod tests {
         if !cache.is_loaded() {
             return; // skip if no font available
         }
-        let rendered = cache.rasterize("Hello", 32.0).expect("rasterize failed");
+        let rendered = cache
+            .rasterize("Hello", 32.0, &[])
+            .expect("font load failed")
+            .expect("rasterize failed");
         assert!(rendered.width > 0, "Width should be > 0");
         assert!(rendered.height > 0, "Height should be > 0");
         // At least some pixels should have coverage
@@ -192,7 +302,37 @@ mod tests {
         if !cache.is_loaded() {
             return;
         }
-        let rendered = cache.rasterize("", 24.0).expect("rasterize failed");
+        let rendered = cache
+            .rasterize("", 24.0, &[])
+            .expect("font load failed")
+            .expect("rasterize failed");
         assert_eq!(rendered.width, 0, "Empty string should have 0 width");
+    }
+
+    #[test]
+    fn explicit_font_sources_are_cached() {
+        let Some(path) = FONT_SEARCH_PATHS
+            .iter()
+            .find(|path| std::path::Path::new(path).is_file())
+        else {
+            return;
+        };
+        let cache = FontCache::headless();
+        let sources = vec![path.to_string()];
+        let first = cache.rasterize("Explicit", 24.0, &sources).unwrap();
+        let second = cache.rasterize("Explicit", 24.0, &sources).unwrap();
+
+        assert!(first.is_some());
+        assert!(second.is_some());
+        assert_eq!(cache.asset_count(), 1);
+    }
+
+    #[test]
+    fn missing_explicit_font_is_an_error() {
+        let cache = FontCache::headless();
+        let sources = vec!["/dioxuscut/does-not-exist.ttf".to_string()];
+        let error = cache.rasterize("Missing", 24.0, &sources).unwrap_err();
+
+        assert!(error.path.ends_with("does-not-exist.ttf"));
     }
 }

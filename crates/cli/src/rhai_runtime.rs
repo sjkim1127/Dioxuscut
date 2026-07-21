@@ -108,6 +108,32 @@ impl SceneBuilder {
     }
 
     #[allow(clippy::too_many_arguments)]
+    fn text_font(
+        &mut self,
+        x: FLOAT,
+        y: FLOAT,
+        content: ImmutableString,
+        font_size: FLOAT,
+        color: &str,
+        font_source: ImmutableString,
+    ) -> RhaiResult<()> {
+        let font_source = font_source.trim();
+        if font_source.is_empty() {
+            return Err(runtime_error("font source path must not be empty".into()));
+        }
+        self.scene.push(SceneNode::Text {
+            x: finite_f32("x", x)?,
+            y: finite_f32("y", y)?,
+            content: content.into_owned(),
+            font_size: non_negative_f32("font size", font_size)?,
+            color: parse_color(color)?,
+            font_weight: 400,
+            font_sources: vec![font_source.to_string()],
+        });
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn image(
         &mut self,
         x: FLOAT,
@@ -280,6 +306,7 @@ impl SceneBuilder {
             font_size: non_negative_f32("font size", font_size)?,
             color: parse_color(color)?,
             font_weight,
+            font_sources: Vec::new(),
         });
         Ok(())
     }
@@ -392,6 +419,7 @@ fn register_scene_api(engine: &mut Engine) {
     engine.register_fn("circle", SceneBuilder::circle);
     engine.register_fn("text", SceneBuilder::text);
     engine.register_fn("text_bold", SceneBuilder::text_bold);
+    engine.register_fn("text_font", SceneBuilder::text_font);
     engine.register_fn("image", SceneBuilder::image);
     engine.register_fn("video", SceneBuilder::video);
     engine.register_fn("video", SceneBuilder::video_looped);
@@ -541,6 +569,27 @@ mod tests {
             &first.nodes[1],
             SceneNode::Text { x, content, .. }
                 if (*x - 30.0).abs() < f32::EPSILON && content == "Hello Rhai"
+        ));
+    }
+
+    #[test]
+    fn script_declares_an_explicit_font_source() {
+        let script = r##"
+            fn render(ctx, props) {
+                let output = scene();
+                output.text_font(10.0, 30.0, "Pinned", 20.0, "#ffffff", props.font);
+                output
+            }
+        "##;
+        let composition = RhaiComposition::from_source("font", script).unwrap();
+        let prepared = composition
+            .prepare(&serde_json::json!({"font": "assets/Inter.ttf"}), context())
+            .unwrap();
+        let scene = prepared.render(0).unwrap();
+
+        assert!(matches!(
+            &scene.nodes[0],
+            SceneNode::Text { font_sources, .. } if font_sources == &["assets/Inter.ttf"]
         ));
     }
 

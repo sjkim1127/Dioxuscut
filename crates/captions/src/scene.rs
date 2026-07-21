@@ -14,6 +14,8 @@ pub struct SceneCaptions {
     pub baseline_y: f32,
     pub font_size: f32,
     pub font_weight: u16,
+    /// Ordered local TTF/OTF sources used by native export and Player preview.
+    pub font_sources: Vec<String>,
     pub active_color: String,
     pub inactive_color: String,
     pub active_scale: f32,
@@ -29,6 +31,7 @@ impl SceneCaptions {
             baseline_y,
             font_size: 48.0,
             font_weight: 800,
+            font_sources: Vec::new(),
             active_color: "#ffe600".into(),
             inactive_color: "#ffffff".into(),
             active_scale: 1.15,
@@ -80,6 +83,7 @@ impl SceneEmitter for SceneCaptions {
                 font_size: size,
                 color: if active { active_color } else { inactive_color },
                 font_weight: self.font_weight,
+                font_sources: self.font_sources.clone(),
             });
             x += width + self.word_gap.max(0.0);
         }

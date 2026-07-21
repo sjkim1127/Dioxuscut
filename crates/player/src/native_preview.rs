@@ -260,15 +260,22 @@ fn SceneNodeView(props: SceneNodeViewProps) -> Element {
             font_size,
             color,
             font_weight,
+            font_sources,
         } => {
             let fill = color_css(color);
+            let (font_face_css, font_family) =
+                text_font_css(&props.node_path, &font_sources, font_weight);
             rsx! {
+                if !font_face_css.is_empty() {
+                    defs { style { "{font_face_css}" } }
+                }
                 text {
                     x,
                     y,
                     fill,
                     font_size,
                     font_weight,
+                    font_family,
                     dominant_baseline: "alphabetic",
                     "{content}"
                 }
@@ -594,6 +601,39 @@ fn color_css(color: Color) -> String {
     )
 }
 
+fn text_font_css(node_path: &str, sources: &[String], font_weight: u16) -> (String, String) {
+    if sources.is_empty() {
+        return (String::new(), "sans-serif".into());
+    }
+    let mut declarations = String::new();
+    let mut families = Vec::with_capacity(sources.len() + 1);
+    for (index, source) in sources.iter().enumerate() {
+        let family = format!("dioxuscut-font-{node_path}-{index}");
+        let url = browser_font_url(source)
+            .replace('\\', "\\\\")
+            .replace('\'', "\\'")
+            .replace(['\r', '\n'], "");
+        declarations.push_str(&format!(
+            "@font-face{{font-family:'{family}';src:url('{url}');font-weight:{font_weight};}}"
+        ));
+        families.push(format!("'{family}'"));
+    }
+    families.push("sans-serif".into());
+    (declarations, families.join(", "))
+}
+
+fn browser_font_url(source: &str) -> String {
+    if source.contains("://") {
+        source.into()
+    } else if source.starts_with('/') {
+        format!("file://{source}")
+    } else if source.as_bytes().get(1) == Some(&b':') {
+        format!("file:///{}", source.replace('\\', "/"))
+    } else {
+        source.into()
+    }
+}
+
 fn blend_mode_css(mode: BlendMode) -> &'static str {
     match mode {
         BlendMode::Normal => "normal",
@@ -884,6 +924,23 @@ mod tests {
         assert!(filter.contains("blur(2.5px)"));
         assert!(filter.contains("grayscale(0.75)"));
         assert!(filter.contains("drop-shadow(4px 5px 6px rgba(10, 20, 30,"));
+    }
+
+    #[test]
+    fn explicit_fonts_map_to_ordered_font_faces() {
+        let (declarations, family) = text_font_css(
+            "node-2",
+            &["/assets/Primary.ttf".into(), "fonts/Fallback.otf".into()],
+            700,
+        );
+
+        assert!(declarations.contains("file:///assets/Primary.ttf"));
+        assert!(declarations.contains("url('fonts/Fallback.otf')"));
+        assert!(declarations.contains("font-weight:700"));
+        assert_eq!(
+            family,
+            "'dioxuscut-font-node-2-0', 'dioxuscut-font-node-2-1', sans-serif"
+        );
     }
 
     #[test]

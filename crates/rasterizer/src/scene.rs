@@ -277,6 +277,10 @@ pub enum SceneNode {
         font_size: f32,
         color: Color,
         font_weight: u16, // 400 = normal, 700 = bold
+        /// Ordered local TTF/OTF sources. Missing glyphs fall through to the
+        /// next source and finally the renderer's system fallback.
+        #[serde(default)]
+        font_sources: Vec<String>,
     },
 
     /// Local raster image asset. `src` may be a filesystem path or `file://` URI.
@@ -497,6 +501,20 @@ mod tests {
         }"#;
         let node = serde_json::from_str::<SceneNode>(json).unwrap();
         assert!(matches!(node, SceneNode::Video { looped: false, .. }));
+    }
+
+    #[test]
+    fn text_font_sources_default_for_existing_scene_json() {
+        let json = r##"{
+            "Text": {
+                "x": 0.0, "y": 20.0, "content": "legacy",
+                "font_size": 18.0, "color": {"r":255,"g":255,"b":255,"a":255},
+                "font_weight": 400
+            }
+        }"##;
+        let node = serde_json::from_str::<SceneNode>(json).unwrap();
+
+        assert!(matches!(node, SceneNode::Text { font_sources, .. } if font_sources.is_empty()));
     }
 
     #[test]

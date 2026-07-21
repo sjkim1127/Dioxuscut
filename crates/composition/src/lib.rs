@@ -285,6 +285,7 @@ impl NativeComposition for HelloWorldComposition {
             font_size,
             color: Color::WHITE,
             font_weight: 700,
+            font_sources: Vec::new(),
         });
         scene.push(SceneNode::Text {
             x: text_x,
@@ -293,6 +294,7 @@ impl NativeComposition for HelloWorldComposition {
             font_size: font_size * 0.45,
             color: Color::rgb(0, 242, 254),
             font_weight: 400,
+            font_sources: Vec::new(),
         });
         Ok(scene)
     }

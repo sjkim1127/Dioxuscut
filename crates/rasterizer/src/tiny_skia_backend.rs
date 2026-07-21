@@ -435,11 +435,19 @@ fn render_node(
             content,
             font_size,
             color,
+            font_sources,
             ..
         } => {
             let text_color = apply_opacity(*color, opacity);
 
-            if let Some(rendered) = resources.font.rasterize(content, *font_size) {
+            if let Some(rendered) = resources
+                .font
+                .rasterize(content, *font_size, font_sources)
+                .map_err(|error| RasterError::FontAsset {
+                    path: error.path,
+                    reason: error.reason,
+                })?
+            {
                 // Blit the glyph coverage map onto the pixmap at (x, y - baseline)
                 let origin_x = x.floor() as i32;
                 let origin_y = (*y - rendered.baseline as f32).floor() as i32;
@@ -1491,6 +1499,27 @@ mod tests {
 
         assert!(error.to_string().contains("Scene compositing error"));
         assert!(error.to_string().contains("blur sigma"));
+    }
+
+    #[test]
+    fn missing_explicit_font_returns_asset_error() {
+        let scene = Scene {
+            nodes: vec![SceneNode::Text {
+                x: 0.0,
+                y: 16.0,
+                content: "missing".into(),
+                font_size: 16.0,
+                color: Color::WHITE,
+                font_weight: 400,
+                font_sources: vec!["/dioxuscut/does-not-exist.ttf".into()],
+            }],
+        };
+        let error = TinySkiaBackend::headless()
+            .render_frame(&scene, &FrameConfig::new(64, 32, 0, 30.0))
+            .unwrap_err();
+
+        assert!(error.to_string().contains("Font asset error"));
+        assert!(error.to_string().contains("does-not-exist.ttf"));
     }
 
     #[test]

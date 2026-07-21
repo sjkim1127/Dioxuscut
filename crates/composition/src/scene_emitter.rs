@@ -385,6 +385,7 @@ mod tests {
                 font_size: 20.0,
                 color: Color::WHITE,
                 font_weight: 400,
+                font_sources: Vec::new(),
             });
             Ok(())
         }

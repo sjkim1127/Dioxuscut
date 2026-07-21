@@ -600,6 +600,7 @@ mod support_tests {
             font_size: 20.0,
             color: Color::WHITE,
             font_weight: 400,
+            font_sources: Vec::new(),
         });
         assert!(!gpu_supports_scene(&scene));
 

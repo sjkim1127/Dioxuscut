@@ -17,6 +17,8 @@ pub enum RasterError {
     ImageAsset { path: String, reason: String },
     #[error("Media asset error for {path}: {reason}")]
     MediaAsset { path: String, reason: String },
+    #[error("Font asset error for {path}: {reason}")]
+    FontAsset { path: String, reason: String },
     #[error("Scene compositing error: {0}")]
     Scene(String),
     #[error("IO error: {0}")]
