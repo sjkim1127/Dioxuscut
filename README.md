@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="Dioxuscut" width="100%" />
+  <img src="https://raw.githubusercontent.com/sjkim1127/Dioxuscut/main/assets/logo.svg" alt="Dioxuscut" width="100%" />
 </p>
 
 <p align="center">
@@ -11,10 +11,6 @@
   <a href="#license"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-4ec9b0?style=flat-square" alt="License" /></a>
   <a href="https://dioxuslabs.com/"><img src="https://img.shields.io/badge/Dioxus-0.6-e05c4b?style=flat-square&logo=rust&logoColor=white" alt="Dioxus 0.6" /></a>
   <img src="https://img.shields.io/badge/status-early%20development-f59e0b?style=flat-square" alt="Early development" />
-</p>
-
-<p align="center">
-  <img src="assets/showcase.gif" alt="Dioxuscut rendered demo" width="100%" />
 </p>
 
 Dioxuscut is an early-stage programmatic video toolkit written in Rust. Its native export path renders a registered `NativeComposition` into a small scene graph, rasterizes frames with `tiny-skia` or `wgpu`, and sends bounded batches of raw RGBA frames to FFmpeg.
@@ -218,6 +214,18 @@ cargo test --locked --workspace --all-features
 ```
 
 The acceptance test requires FFmpeg and produces a real MP4 before checking its container signature.
+
+## Releasing
+
+Releases are driven by a version tag such as `v0.1.0`. The release workflow
+validates the tag against the Cargo workspace version, tests the complete
+workspace, publishes all public `dioxuscut-*` packages to crates.io in dependency
+order, builds Rhai-enabled CLI archives for Linux, macOS, and Windows, and then
+creates one GitHub Release with SHA-256 checksums.
+
+Repository maintainers must configure a crates.io API token as the GitHub Actions
+secret `CRATES_IO_TOKEN`. Tokens must never be committed, placed in a tag, or
+written into workflow files.
 
 ## Current limitations
 

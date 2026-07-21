@@ -23,6 +23,7 @@ edition      = "2021"
 authors      = ["Dioxuscut Contributors"]
 license      = "MIT OR Apache-2.0"
 repository   = "https://github.com/sjkim1127/Dioxuscut"
+readme       = "README.md"
 
 [workspace.dependencies]
 # UI framework
