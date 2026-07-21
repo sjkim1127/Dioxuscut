@@ -4,16 +4,23 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to retry
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   validate:
@@ -22,6 +29,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -48,9 +57,9 @@ jobs:
           set -euo pipefail
           package_version=$(cargo metadata --no-deps --format-version 1 \
             | jq -r '.packages[] | select(.name == "dioxuscut-cli") | .version')
-          tag_version="${GITHUB_REF_NAME#v}"
+          tag_version="${RELEASE_TAG#v}"
           if [[ "$tag_version" != "$package_version" ]]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match workspace version $package_version"
+            echo "::error::Tag $RELEASE_TAG does not match workspace version $package_version"
             exit 1
           fi
 
@@ -94,9 +103,21 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Dioxus desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
 
       - name: Publish packages in dependency order
         shell: bash
@@ -108,7 +129,7 @@ jobs:
             exit 1
           fi
 
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_TAG#v}"
 
           crate_is_published() {
             local package="$1"
@@ -194,6 +215,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -250,6 +273,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: dist/*
           fail_on_unmatched_files: true
           generate_release_notes: true
