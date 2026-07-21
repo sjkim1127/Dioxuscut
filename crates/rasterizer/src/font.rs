@@ -113,12 +113,8 @@ impl FontCache {
         let mut pixels = vec![0u8; (total_width * total_height) as usize];
 
         for glyph in &glyphs {
-            // Skip missing glyph (GlyphId(0) / .notdef) to prevent drawing tofu boxes
-            if glyph.id == ab_glyph::GlyphId(0) {
-                continue;
-            }
-
             if let Some(outlined) = font.outline_glyph(glyph.clone()) {
+
 
                 let bounds = outlined.px_bounds();
                 let gx = bounds.min.x.floor() as i32;
