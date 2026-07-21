@@ -17,7 +17,10 @@
 
 <p align="center">
   <img src="assets/showcase.gif" alt="Dioxuscut Live Rendered Demo" width="100%" />
+  <br />
+  <a href="https://github.com/sjkim1127/Dioxuscut/releases/download/v0.1.0/showcase.mp4">🎬 <b>Watch Original 1080p @ 60fps MP4 Video</b></a>
 </p>
+
 
 
 
