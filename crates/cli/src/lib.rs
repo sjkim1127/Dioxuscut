@@ -192,35 +192,87 @@ pub async fn execute_render_command(
 
             render_to_ffmpeg_pipe(&rasterizer, &pipe_config, |frame| {
                 let mut scene = Scene::new();
+                let t = frame as f32 / duration as f32;
+                let angle = 135.0 + t * 90.0;
 
-                // Background gradient
+                // 1. Dynamic background gradient
                 scene.push(SceneNode::LinearGradient {
                     x: 0.0, y: 0.0,
                     w: width as f32,
                     h: height as f32,
-                    angle_deg: 135.0,
+                    angle_deg: angle,
                     stops: vec![
                         GradientStop { position: 0.0, color: bg_start },
                         GradientStop { position: 1.0, color: bg_end },
                     ],
                 });
 
-                // Animated accent circle (grows with frame)
-                let t = frame as f32 / duration as f32;
-                let r = (width.min(height) as f32 * 0.15) + t * (width.min(height) as f32 * 0.1);
+                // 2. Animated background accent circles
+                let center_x = width as f32 * 0.5;
+                let center_y = height as f32 * 0.5;
+
+                let r1 = (width.min(height) as f32 * 0.2) + (t * 6.28).sin() * 20.0;
                 scene.push(SceneNode::Circle {
-                    cx: width as f32 * 0.5,
-                    cy: height as f32 * 0.5,
-                    r,
-                    fill: accent.with_opacity(0.15 + t * 0.15),
+                    cx: center_x,
+                    cy: center_y,
+                    r: r1,
+                    fill: accent.with_opacity(0.12),
                     stroke: Some(accent),
-                    stroke_width: 3.0,
+                    stroke_width: 2.0,
                 });
 
-                // Title text
-                let font_size = (width as f32 * 0.04).max(24.0);
-                let text_x = width as f32 * 0.1;
-                let text_y = height as f32 * 0.5 + font_size / 2.0;
+                let r2 = (width.min(height) as f32 * 0.3) + (t * 3.14).cos() * 30.0;
+                scene.push(SceneNode::Circle {
+                    cx: center_x,
+                    cy: center_y,
+                    r: r2,
+                    fill: Color::TRANSPARENT,
+                    stroke: Some(Color::rgba(0, 242, 254, 180)),
+                    stroke_width: 1.5,
+                });
+
+                // 3. Motion graphics accent rects
+                let rect_size = 80.0 + (t * 6.28).sin() * 15.0;
+                scene.push(SceneNode::Rect {
+                    x: width as f32 * 0.15,
+                    y: height as f32 * 0.2,
+                    w: rect_size,
+                    h: rect_size,
+                    fill: Color::rgba(0, 242, 254, 40),
+                    stroke: Some(Color::rgb(0, 242, 254)),
+                    stroke_width: 2.0,
+                    corner_radius: 12.0,
+                });
+
+                scene.push(SceneNode::Rect {
+                    x: width as f32 * 0.78,
+                    y: height as f32 * 0.65,
+                    w: rect_size * 1.2,
+                    h: rect_size * 1.2,
+                    fill: Color::rgba(255, 230, 0, 30),
+                    stroke: Some(Color::rgb(255, 230, 0)),
+                    stroke_width: 2.0,
+                    corner_radius: 16.0,
+                });
+
+                // 4. Progress indicator ring (growing bottom bar)
+                let bar_h = 6.0;
+                let bar_w = width as f32 * t;
+                scene.push(SceneNode::Rect {
+                    x: 0.0,
+                    y: height as f32 - bar_h,
+                    w: bar_w,
+                    h: bar_h,
+                    fill: Color::rgb(0, 242, 254),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                });
+
+                // 5. Main Title & Subtitle
+                let font_size = (width as f32 * 0.045).max(28.0);
+                let text_x = width as f32 * 0.12;
+                let text_y = height as f32 * 0.45;
                 scene.push(SceneNode::Text {
                     x: text_x,
                     y: text_y,
@@ -230,8 +282,19 @@ pub async fn execute_render_command(
                     font_weight: 700,
                 });
 
+                let sub_size = font_size * 0.45;
+                scene.push(SceneNode::Text {
+                    x: text_x,
+                    y: text_y + font_size * 0.8,
+                    content: "Declarative Programmatic Video in Pure Rust".to_string(),
+                    font_size: sub_size,
+                    color: Color::rgb(0, 242, 254),
+                    font_weight: 400,
+                });
+
                 scene
             })?;
+
 
             tracing::info!("Native rasterizer: {} frames rendered directly to {}", duration, output.display());
         }

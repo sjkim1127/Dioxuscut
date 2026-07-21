@@ -15,13 +15,16 @@
   <img src="https://img.shields.io/badge/browser-free%20native-06b6d4?style=flat-square" alt="Browser Free Native" />
 </p>
 
+<p align="center">
+  <img src="assets/showcase.gif" alt="Dioxuscut Rendered Showcase Video" width="100%" style="border-radius: 8px;" />
+</p>
+
 ---
 
 **Dioxuscut** is a declarative, code-first video creation framework written entirely in Rust. You define video compositions as Dioxus components, and the engine renders them directly to MP4 files via a **pure-Rust native CPU (`tiny-skia`) / GPU (`wgpu`) rasterizer** and zero-copy FFmpeg stdin pipe — **no Chrome browser required**.
 
-It is a complete port of [Remotion](https://www.remotion.dev/) (React/TypeScript) to [Dioxus](https://dioxuslabs.com/) (Rust), covering the same primitive APIs, same math utilities, and same package scope — but with zero garbage collection, deterministic rendering, Rayon multi-threaded parallelism, and zero-copy piping.
+*(The video banner above was generated programmatically in 2.6 seconds using `dioxuscut render`!)*
 
----
 
 ## Table of Contents
 
