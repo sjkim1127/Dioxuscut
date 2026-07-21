@@ -18,7 +18,7 @@ members = [
 ]
 
 [workspace.package]
-version      = "0.1.0"
+version      = "0.1.1"
 edition      = "2021"
 authors      = ["Dioxuscut Contributors"]
 license      = "MIT OR Apache-2.0"
@@ -66,17 +66,17 @@ tower-http        = { version = "0.5", features = ["fs", "trace", "cors"] }
 reqwest           = { version = "0.12", features = ["json"] }
 
 # Internal crates
-dioxuscut-animation   = { version = "0.1.0", path = "crates/animation" }
-dioxuscut-core        = { version = "0.1.0", path = "crates/core" }
-dioxuscut-media       = { version = "0.1.0", path = "crates/media" }
-dioxuscut-player      = { version = "0.1.0", path = "crates/player" }
-dioxuscut-renderer    = { version = "0.1.0", path = "crates/renderer" }
-dioxuscut-transitions = { version = "0.1.0", path = "crates/transitions" }
-dioxuscut-shapes      = { version = "0.1.0", path = "crates/shapes" }
-dioxuscut-paths       = { version = "0.1.0", path = "crates/paths" }
-dioxuscut-captions    = { version = "0.1.0", path = "crates/captions" }
-dioxuscut-noise       = { version = "0.1.0", path = "crates/noise" }
-dioxuscut-rasterizer  = { version = "0.1.0", path = "crates/rasterizer" }
+dioxuscut-animation   = { version = "0.1.1", path = "crates/animation" }
+dioxuscut-core        = { version = "0.1.1", path = "crates/core" }
+dioxuscut-media       = { version = "0.1.1", path = "crates/media" }
+dioxuscut-player      = { version = "0.1.1", path = "crates/player" }
+dioxuscut-renderer    = { version = "0.1.1", path = "crates/renderer" }
+dioxuscut-transitions = { version = "0.1.1", path = "crates/transitions" }
+dioxuscut-shapes      = { version = "0.1.1", path = "crates/shapes" }
+dioxuscut-paths       = { version = "0.1.1", path = "crates/paths" }
+dioxuscut-captions    = { version = "0.1.1", path = "crates/captions" }
+dioxuscut-noise       = { version = "0.1.1", path = "crates/noise" }
+dioxuscut-rasterizer  = { version = "0.1.1", path = "crates/rasterizer" }
 
 
 
