@@ -8,6 +8,9 @@ members = [
     "crates/renderer",
     "crates/transitions",
     "crates/cli",
+    "crates/shapes",
+    "crates/paths",
+    "crates/captions",
     "apps/studio",
     "apps/example",
 ]
@@ -57,6 +60,12 @@ dioxuscut-media       = { path = "crates/media" }
 dioxuscut-player      = { path = "crates/player" }
 dioxuscut-renderer    = { path = "crates/renderer" }
 dioxuscut-transitions = { path = "crates/transitions" }
+dioxuscut-shapes      = { path = "crates/shapes" }
+dioxuscut-paths       = { path = "crates/paths" }
+dioxuscut-captions    = { path = "crates/captions" }
+
+
+
 
 [profile.release]
 opt-level  = 3

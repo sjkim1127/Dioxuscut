@@ -1,0 +1,14 @@
+[package]
+name        = "dioxuscut-captions"
+description = "Subtitle parsing (SRT), word timing, and kinetic captions for Dioxuscut"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+
+[dependencies]
+dioxus              = { workspace = true }
+dioxuscut-core      = { workspace = true }
+serde               = { workspace = true }
+thiserror           = { workspace = true }

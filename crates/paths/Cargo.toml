@@ -1,0 +1,12 @@
+[package]
+name        = "dioxuscut-paths"
+description = "SVG path parsing, metrics, and stroke evolution animations for Dioxuscut"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+
+[dependencies]
+serde     = { workspace = true }
+thiserror = { workspace = true }
