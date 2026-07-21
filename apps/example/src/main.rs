@@ -156,7 +156,7 @@ fn TitleScene() -> Element {
         },
     );
 
-    let props = use_input_props::<ExampleProps>(|| ExampleProps::default());
+    let props = use_input_props::<ExampleProps>(ExampleProps::default);
 
     rsx! {
         AbsoluteFill {

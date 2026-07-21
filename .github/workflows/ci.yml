@@ -31,7 +31,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run Clippy Lints
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
   # ── 2. Cross-Platform Unit & Integration Tests ──────────────────────────────
   test:
@@ -55,7 +55,7 @@ jobs:
       - name: Install FFmpeg (Linux)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-update || true
+          sudo apt-get update
           sudo apt-get install -y ffmpeg
 
       - name: Install FFmpeg (macOS)
@@ -67,7 +67,7 @@ jobs:
         run: choco install ffmpeg -y
 
       - name: Cargo Check Workspace
-        run: cargo check --workspace --all-targets
+        run: cargo check --locked --workspace --all-targets --all-features
 
       - name: Run All Workspace Tests
-        run: cargo test --workspace
+        run: cargo test --locked --workspace --all-features

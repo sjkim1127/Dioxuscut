@@ -65,8 +65,15 @@ pub fn Composition(props: CompositionProps) -> Element {
     // Clamp the current frame to valid range
     let frame = props.frame.min(props.duration_in_frames.saturating_sub(1));
 
-    use_context_provider(|| TimelineContext::new(frame));
-    use_context_provider(|| VideoConfigContext(config));
+    let mut timeline = use_context_provider(|| Signal::new(TimelineContext::new(frame)));
+    if timeline.peek().frame != frame {
+        timeline.set(TimelineContext::new(frame));
+    }
+
+    let mut video_config = use_context_provider(|| Signal::new(VideoConfigContext(config.clone())));
+    if video_config.peek().0 != config {
+        video_config.set(VideoConfigContext(config));
+    }
 
     rsx! {
         div {

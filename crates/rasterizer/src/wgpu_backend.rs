@@ -33,7 +33,8 @@
 #![cfg(feature = "gpu")]
 
 use crate::backend::{FrameConfig, RasterError, RasterizerBackend};
-use crate::scene::{Color, GradientStop, Scene, SceneNode};
+use crate::scene::{Color, Scene, SceneNode};
+use crate::tiny_skia_backend::TinySkiaBackend;
 use image::RgbaImage;
 use wgpu::util::DeviceExt;
 
@@ -67,19 +68,8 @@ struct VertexOutput {
     @location(0) uv: vec2<f32>,
 };
 
-// Full-screen quad vertices (NDC)
-var<private> POSITIONS: array<vec2<f32>, 6> = array<vec2<f32>, 6>(
-    vec2<f32>(-1.0, -1.0),
-    vec2<f32>( 1.0, -1.0),
-    vec2<f32>(-1.0,  1.0),
-    vec2<f32>(-1.0,  1.0),
-    vec2<f32>( 1.0, -1.0),
-    vec2<f32>( 1.0,  1.0),
-);
-
 @vertex
 fn vs_main(@builtin(vertex_index) vid: u32) -> VertexOutput {
-    let pos_ndc = POSITIONS[vid];
     // Map the instance bounding box to NDC
     let res = globals.resolution;
     let x = instance.bounds.x;
@@ -87,17 +77,17 @@ fn vs_main(@builtin(vertex_index) vid: u32) -> VertexOutput {
     let w = instance.bounds.z;
     let h = instance.bounds.w;
 
-    // Corner positions in pixel space
-    let corners = array<vec2<f32>, 6>(
-        vec2<f32>(x,     y + h),
-        vec2<f32>(x + w, y + h),
-        vec2<f32>(x,     y    ),
-        vec2<f32>(x,     y    ),
-        vec2<f32>(x + w, y + h),
-        vec2<f32>(x + w, y    ),
-    );
-
-    let pixel_pos = corners[vid];
+    // Avoid dynamically indexing a local array: some native shader backends
+    // only permit constant indexes for this expression class.
+    var pixel_pos: vec2<f32>;
+    switch vid {
+        case 0u: { pixel_pos = vec2<f32>(x,     y + h); }
+        case 1u: { pixel_pos = vec2<f32>(x + w, y + h); }
+        case 2u: { pixel_pos = vec2<f32>(x,     y    ); }
+        case 3u: { pixel_pos = vec2<f32>(x,     y    ); }
+        case 4u: { pixel_pos = vec2<f32>(x + w, y + h); }
+        default: { pixel_pos = vec2<f32>(x + w, y    ); }
+    }
     // Convert pixel position to NDC (Y flipped)
     let ndc = vec2<f32>(
          pixel_pos.x / res.x * 2.0 - 1.0,
@@ -180,7 +170,7 @@ impl GpuContext {
     }
 
     async fn new_async() -> Result<Self, RasterError> {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             ..Default::default()
         });
@@ -256,13 +246,13 @@ impl GpuContext {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: Some("vs_main"),
+                entry_point: "vs_main",
                 buffers: &[],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fs_main"),
+                entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: wgpu::TextureFormat::Rgba8UnormSrgb,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -300,18 +290,28 @@ impl GpuContext {
 /// Use `TinySkiaBackend` if GPU access is unavailable (e.g. Docker/CI).
 pub struct WgpuBackend {
     ctx: GpuContext,
+    fallback: TinySkiaBackend,
 }
 
 impl WgpuBackend {
     /// Create a new GPU backend. Initialises the device and pipeline.
     pub fn new() -> Result<Self, RasterError> {
         let ctx = GpuContext::new()?;
-        Ok(Self { ctx })
+        Ok(Self {
+            ctx,
+            fallback: TinySkiaBackend::new(),
+        })
     }
 }
 
 impl RasterizerBackend for WgpuBackend {
     fn render_frame(&self, scene: &Scene, config: &FrameConfig) -> Result<RgbaImage, RasterError> {
+        // Preserve output semantics until every SceneNode has a native GPU
+        // implementation. A whole-frame fallback also preserves node ordering.
+        if !gpu_supports_scene(scene) {
+            return self.fallback.render_frame(scene, config);
+        }
+
         let width = config.width;
         let height = config.height;
         let device = &self.ctx.device;
@@ -376,7 +376,7 @@ impl RasterizerBackend for WgpuBackend {
             if let Some(instance_data) = node_to_instance(node, width, height) {
                 let instance_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("instance_buf"),
-                    contents: bytemuck_cast(&instance_data),
+                    contents: bytemuck_cast(std::slice::from_ref(&instance_data)),
                     usage: wgpu::BufferUsages::UNIFORM,
                 });
                 let instance_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -479,7 +479,7 @@ impl RasterizerBackend for WgpuBackend {
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct GpuInstance {
-    shape_type: [f32; 4], // [type, 0, 0, 0]
+    shape_type: [u32; 4], // [type, 0, 0, 0]
     bounds: [f32; 4],     // [x, y, w, h]
     color: [f32; 4],      // [r, g, b, a]
     color2: [f32; 4],     // [r, g, b, a]
@@ -497,7 +497,7 @@ fn node_to_instance(node: &SceneNode, _w: u32, _h: u32) -> Option<GpuInstance> {
             corner_radius,
             ..
         } => Some(GpuInstance {
-            shape_type: [0.0, 0.0, 0.0, 0.0],
+            shape_type: [0, 0, 0, 0],
             bounds: [*x, *y, *w, *h],
             color: color_to_f32(*fill),
             color2: [0.0; 4],
@@ -507,7 +507,7 @@ fn node_to_instance(node: &SceneNode, _w: u32, _h: u32) -> Option<GpuInstance> {
         SceneNode::Circle {
             cx, cy, r, fill, ..
         } => Some(GpuInstance {
-            shape_type: [1.0, 0.0, 0.0, 0.0],
+            shape_type: [1, 0, 0, 0],
             bounds: [cx - r, cy - r, r * 2.0, r * 2.0],
             color: color_to_f32(*fill),
             color2: [0.0; 4],
@@ -522,7 +522,7 @@ fn node_to_instance(node: &SceneNode, _w: u32, _h: u32) -> Option<GpuInstance> {
             angle_deg,
             stops,
         } if stops.len() >= 2 => Some(GpuInstance {
-            shape_type: [2.0, 0.0, 0.0, 0.0],
+            shape_type: [2, 0, 0, 0],
             bounds: [*x, *y, *w, *h],
             color: color_to_f32(stops[0].color),
             color2: color_to_f32(stops[stops.len() - 1].color),
@@ -530,7 +530,7 @@ fn node_to_instance(node: &SceneNode, _w: u32, _h: u32) -> Option<GpuInstance> {
         }),
 
         SceneNode::RadialGradient { cx, cy, r, stops } if stops.len() >= 2 => Some(GpuInstance {
-            shape_type: [3.0, 0.0, 0.0, 0.0],
+            shape_type: [3, 0, 0, 0],
             bounds: [cx - r, cy - r, r * 2.0, r * 2.0],
             color: color_to_f32(stops[0].color),
             color2: color_to_f32(stops[stops.len() - 1].color),
@@ -540,6 +540,25 @@ fn node_to_instance(node: &SceneNode, _w: u32, _h: u32) -> Option<GpuInstance> {
         // Group and Text are not yet GPU-accelerated — skip for now.
         _ => None,
     }
+}
+
+fn gpu_supports_scene(scene: &Scene) -> bool {
+    scene.nodes.iter().all(|node| match node {
+        SceneNode::Rect {
+            stroke,
+            stroke_width,
+            ..
+        }
+        | SceneNode::Circle {
+            stroke,
+            stroke_width,
+            ..
+        } => stroke.is_none() || *stroke_width <= 0.0,
+        SceneNode::LinearGradient { stops, .. } | SceneNode::RadialGradient { stops, .. } => {
+            stops.len() == 2
+        }
+        SceneNode::Path { .. } | SceneNode::Text { .. } | SceneNode::Group { .. } => false,
+    })
 }
 
 fn color_to_f32(c: Color) -> [f32; 4] {
@@ -557,8 +576,27 @@ fn align_to_256(n: u32) -> u32 {
 
 /// Zero-copy reinterpret of a `&[T]` as `&[u8]`.
 fn bytemuck_cast<T: Copy>(data: &[T]) -> &[u8] {
-    let len = data.len() * std::mem::size_of::<T>();
+    let len = std::mem::size_of_val(data);
     unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, len) }
+}
+
+#[cfg(test)]
+mod support_tests {
+    use super::*;
+
+    #[test]
+    fn unsupported_nodes_trigger_cpu_fallback() {
+        let mut scene = Scene::new();
+        scene.push(SceneNode::Text {
+            x: 0.0,
+            y: 20.0,
+            content: "text".into(),
+            font_size: 20.0,
+            color: Color::WHITE,
+            font_weight: 400,
+        });
+        assert!(!gpu_supports_scene(&scene));
+    }
 }
 
 #[cfg(test)]

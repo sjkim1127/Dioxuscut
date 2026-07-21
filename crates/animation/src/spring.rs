@@ -44,7 +44,6 @@ struct AnimationNode {
     to_value: f64,
     current: f64,
     velocity: f64,
-    prev_position: f64,
 }
 
 /// Advance the spring simulation by one timestep.
@@ -101,7 +100,6 @@ fn advance(node: &AnimationNode, now: f64, config: &SpringConfig) -> AnimationNo
 
     AnimationNode {
         to_value,
-        prev_position: current,
         last_timestamp: now,
         current: new_current,
         velocity: new_velocity,
@@ -130,10 +128,9 @@ pub fn spring(frame: u32, fps: f64, config: SpringConfig) -> f64 {
         current: from,
         to_value: to,
         velocity: 0.0,
-        prev_position: 0.0,
     };
 
-    let frame_clamped = frame.max(0) as f64;
+    let frame_clamped = frame as f64;
     let frame_floor = frame_clamped.floor() as u32;
     let uneven_rest = frame_clamped.fract();
 

@@ -16,19 +16,19 @@ name = "dioxuscut"
 path = "src/main.rs"
 
 [dependencies]
-dioxuscut-renderer   = { path = "../renderer" }
-dioxuscut-rasterizer = { path = "../rasterizer" }
-dioxuscut-core       = { path = "../core" }
+dioxuscut-rasterizer = { workspace = true }
 clap               = { version = "4.4", features = ["derive"] }
 tokio              = { workspace = true }
 tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow             = { workspace = true }
 thiserror          = { workspace = true }
-reqwest            = { workspace = true }
 serde_json         = { workspace = true }
+
+[dev-dependencies]
+dioxuscut-renderer = { workspace = true }
+reqwest            = { workspace = true }
 
 [features]
 default = []
 gpu     = ["dioxuscut-rasterizer/gpu"]
-

@@ -17,8 +17,7 @@ pub fn noise_2d(seed: &str, x: f64, y: f64) -> f64 {
     let v2 = (nx * 3.7 - ny * 1.9 + s_val * 10.0).cos();
     let v3 = ((nx + ny) * 0.7).sin();
 
-    let noise = (v1 * 0.5 + v2 * 0.3 + v3 * 0.2).clamp(-1.0, 1.0);
-    noise
+    (v1 * 0.5 + v2 * 0.3 + v3 * 0.2).clamp(-1.0, 1.0)
 }
 
 /// Generates 3D Simplex noise value in `[-1.0, 1.0]` for a given seed and `(x, y, z)` coordinates.

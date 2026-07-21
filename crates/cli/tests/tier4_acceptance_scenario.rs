@@ -3,7 +3,7 @@
 //! Replicates real-world CLI invocation:
 //! `cargo run -p dioxuscut-cli -- render -c HelloWorld -p data.json -o output.mp4 --width 1280 --height 720 --fps 30 --duration 60`
 
-use dioxuscut_cli::{execute_render_command, RenderBackend};
+use dioxuscut_cli::{execute_render_command, RenderBackend, RenderRequest};
 use std::fs;
 
 #[tokio::test]
@@ -31,20 +31,17 @@ async fn test_tier4_real_world_acceptance_scenario() {
     let output_mp4 = temp_dir.join("output.mp4");
 
     // Execute full acceptance render workflow via Native CPU rasterizer
-    let result = execute_render_command(
-        "HelloWorld",
-        Some(&props_path),
-        &output_mp4,
-        1280,
-        720,
-        30.0,
-        60, // 60 frames = 2 seconds @ 30 fps
-        RenderBackend::Native,
-        0, // dynamic server port
-        None,
-        None,
-    )
-    .await;
+    let request = RenderRequest {
+        composition: "HelloWorld".into(),
+        props: Some(props_path),
+        output: output_mp4.clone(),
+        width: 1280,
+        height: 720,
+        fps: 30.0,
+        duration: 60,
+        backend: RenderBackend::Native,
+    };
+    let result = execute_render_command(&request).await;
 
     assert!(
         result.is_ok(),

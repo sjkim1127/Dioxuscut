@@ -52,7 +52,7 @@ pub fn get_instructions_length(instructions: &[Instruction]) -> f64 {
                 y,
             } => {
                 total_length +=
-                    cubic_bezier_length(current_x, current_y, *x1, *y1, *x2, *y2, *x, *y);
+                    cubic_bezier_length((current_x, current_y), (*x1, *y1), (*x2, *y2), (*x, *y));
                 current_x = *x;
                 current_y = *y;
             }
@@ -68,14 +68,10 @@ pub fn get_instructions_length(instructions: &[Instruction]) -> f64 {
 }
 
 fn cubic_bezier_length(
-    x0: f64,
-    y0: f64,
-    x1: f64,
-    y1: f64,
-    x2: f64,
-    y2: f64,
-    x3: f64,
-    y3: f64,
+    (x0, y0): (f64, f64),
+    (x1, y1): (f64, f64),
+    (x2, y2): (f64, f64),
+    (x3, y3): (f64, f64),
 ) -> f64 {
     let steps = 16;
     let mut length = 0.0;

@@ -26,13 +26,32 @@ impl TimelineContext {
         }
     }
 
-    /// Create a child context offset by `from_frame` (for `Sequence`).
-    pub fn with_offset(absolute_frame: u32, offset: u32) -> Self {
-        let frame = absolute_frame.saturating_sub(offset);
+    /// Create a child context offset from its parent's local timeline.
+    ///
+    /// The root absolute frame is preserved so nested sequences do not
+    /// accidentally reinterpret a relative `from` value as a root offset.
+    pub fn offset_from(parent: &Self, offset: u32) -> Self {
+        let frame = parent.frame.saturating_sub(offset);
         Self {
             frame,
-            absolute_frame,
+            absolute_frame: parent.absolute_frame,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nested_offsets_use_the_parent_local_frame() {
+        let root = TimelineContext::new(45);
+        let parent = TimelineContext::offset_from(&root, 30);
+        let child = TimelineContext::offset_from(&parent, 10);
+
+        assert_eq!(parent.frame, 15);
+        assert_eq!(child.frame, 5);
+        assert_eq!(child.absolute_frame, 45);
     }
 }
 

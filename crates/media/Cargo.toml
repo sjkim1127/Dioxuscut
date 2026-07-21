@@ -9,6 +9,6 @@ repository.workspace  = true
 
 [dependencies]
 dioxus             = { workspace = true }
-dioxuscut-core     = { path = "../core" }
+dioxuscut-core     = { workspace = true }
 serde              = { workspace = true }
 tracing            = { workspace = true }

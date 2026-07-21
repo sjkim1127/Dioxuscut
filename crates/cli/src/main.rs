@@ -1,5 +1,5 @@
 use clap::Parser;
-use dioxuscut_cli::{execute_render_command, Cli, Commands};
+use dioxuscut_cli::{execute_render_command, Cli, Commands, RenderRequest};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -19,24 +19,18 @@ async fn main() -> anyhow::Result<()> {
             fps,
             duration,
             backend,
-            port,
-            web_dir,
-            server_url,
         } => {
-            execute_render_command(
-                composition,
-                props.as_ref(),
-                output,
-                *width,
-                *height,
-                *fps,
-                *duration,
-                *backend,
-                *port,
-                web_dir.as_ref(),
-                server_url.clone(),
-            )
-            .await?;
+            let request = RenderRequest {
+                composition: composition.clone(),
+                props: props.clone(),
+                output: output.clone(),
+                width: *width,
+                height: *height,
+                fps: *fps,
+                duration: *duration,
+                backend: *backend,
+            };
+            execute_render_command(&request).await?;
         }
     }
 

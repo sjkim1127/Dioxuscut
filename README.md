@@ -3,203 +3,207 @@
 </p>
 
 <p align="center">
-  <b>Code-driven programmatic video for Rust. Pure-native, browser-free Remotion port to Dioxus.</b>
+  <b>Browser-free, code-driven video rendering in Rust, with Dioxus preview components.</b>
 </p>
 
 <p align="center">
-  <a href="https://crates.io/crates/dioxuscut-core"><img src="https://img.shields.io/badge/crates.io-v0.1.0-fc8d62?style=flat-square&logo=rust" alt="crates.io" /></a>
-  <a href="#-license"><img src="https://img.shields.io/badge/license-MIT%20%7C%20Apache--2.0-4ec9b0?style=flat-square" alt="License" /></a>
+  <a href="https://github.com/sjkim1127/Dioxuscut/actions/workflows/ci.yml"><img src="https://github.com/sjkim1127/Dioxuscut/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="#license"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-4ec9b0?style=flat-square" alt="License" /></a>
   <a href="https://dioxuslabs.com/"><img src="https://img.shields.io/badge/Dioxus-0.6-e05c4b?style=flat-square&logo=rust&logoColor=white" alt="Dioxus 0.6" /></a>
-  <a href="https://www.remotion.dev/"><img src="https://img.shields.io/badge/Remotion-4.0%20port-6c63ff?style=flat-square" alt="Remotion 4.0 Port" /></a>
-  <img src="https://img.shields.io/badge/build-passing-4ade80?style=flat-square" alt="Build" />
-  <img src="https://img.shields.io/badge/browser-free%20native-06b6d4?style=flat-square" alt="Browser Free Native" />
+  <img src="https://img.shields.io/badge/status-early%20development-f59e0b?style=flat-square" alt="Early development" />
 </p>
 
 <p align="center">
-  <img src="assets/showcase.gif" alt="Dioxuscut Live Rendered Demo" width="100%" />
-  <br />
-  <a href="https://github.com/sjkim1127/Dioxuscut/releases/download/v0.1.0/showcase.mp4">🎬 <b>Watch Original 1080p @ 60fps MP4 Video</b></a>
+  <img src="assets/showcase.gif" alt="Dioxuscut rendered demo" width="100%" />
 </p>
 
+Dioxuscut is an early-stage programmatic video toolkit written in Rust. Its native export path renders a registered `NativeComposition` into a small scene graph, rasterizes frames with `tiny-skia` or `wgpu`, and sends bounded batches of raw RGBA frames to FFmpeg.
 
+The repository also contains Dioxus timeline, media, shape, transition, player, and Studio-preview components. These components currently form the interactive preview layer; arbitrary Dioxus VDOM is **not yet automatically translated** into the native scene graph.
 
+## What works today
 
----
+- Native scene graph with rectangles, circles, paths, text, gradients, and transformed groups.
+- CPU rendering through `tiny-skia`.
+- Experimental GPU rendering through `wgpu`; unsupported scene features fall back to the CPU renderer for correctness.
+- Bounded-memory parallel frame rendering into an FFmpeg stdin pipe.
+- Registry-based composition selection with JSON props.
+- Animation, shape, path, caption, noise, timeline, player, server, encoder, and CLI test coverage.
+- Dioxus web example and desktop Studio preview shell.
 
-**Dioxuscut** is a declarative, code-first video creation framework written entirely in Rust. You define video compositions as Dioxus components, and the engine renders them directly to MP4 files via a **pure-Rust native CPU (`tiny-skia`) / GPU (`wgpu`) rasterizer** and zero-copy FFmpeg stdin pipe — **no Chrome browser required**.
+## Architecture
 
-*(The video banner above was generated programmatically in 2.6 seconds using `dioxuscut render`!)*
+```text
+Native export
+  RenderRequest
+      -> CompositionRegistry
+      -> NativeComposition::render(frame, props, context)
+      -> Scene
+      -> TinySkiaBackend / WgpuBackend with CPU fallback
+      -> bounded ordered RGBA batches
+      -> FFmpeg
+      -> MP4
 
-
-## Table of Contents
-
-- [Why Dioxuscut?](#why-dioxuscut)
-- [Workspace Overview](#workspace-overview)
-- [Crates](#crates)
-- [Remotion API Parity](#remotion-api-parity)
-- [Quickstart](#quickstart)
-- [Tutorial: Your First Video](#tutorial-your-first-video)
-- [AI Agent Integration](#ai-agent-integration)
-- [CLI Reference](#cli-reference)
-- [Testing](#testing)
-- [Roadmap](#roadmap)
-- [License](#license)
-
----
-
-## Why Dioxuscut?
-
-Traditional video editing tools are GUI-first. Remotion introduced code-driven video in React, but requires a full Node.js runtime and Headless Chrome.
-
-Dioxuscut eliminates the browser runtime entirely:
-
-- **100% Browser-Free** — Native Rust CPU (`tiny-skia`) & GPU (`wgpu`) rasterizers. No Chrome installation or CDP overhead.
-- **Zero-Copy Stdin Pipe** — Multi-threaded Rayon workers stream raw RGBA bytes directly into FFmpeg stdin. Zero intermediate PNG disk I/O.
-- **Rayon Multi-Threading** — Parallel frame rendering across all available CPU cores.
-- **Reproducibility & Determinism** — Zero garbage collection pauses. Identical input guarantees identical output.
-- **AI Agent Native** — Single binary deployment with zero-dependency execution.
-
----
-
-## Workspace Overview
-
-```
-Dioxuscut/
-├── Cargo.toml            # Workspace root
-├── assets/
-│   └── logo.svg
-│
-├── crates/
-│   ├── animation/        # spring(), interpolate(), easing, color interpolation
-│   ├── core/             # Composition, Sequence, AbsoluteFill, Freeze, hooks
-│   ├── shapes/           # SVG shape primitives: Circle, Rect, Star, Pie, Arrow …
-│   ├── paths/            # SVG path parsing, evolve_path, get_length, get_point_at_length
-│   ├── captions/         # SRT parser, line wrapper, TikTok-style kinetic captions
-│   ├── noise/            # Simplex noise 2D/3D/4D, seed hashing, NoiseBackground
-│   ├── rasterizer/       # Pure-Rust CPU (tiny-skia) & GPU (wgpu) rasterizer + ab_glyph text
-│   ├── transitions/      # Fade, Slide scene transitions
-│   ├── media/            # <Video>, <Audio>, <Img> asset components
-│   ├── player/           # Interactive <Player> UI for web and desktop
-│   ├── renderer/         # Embedded Axum web server + FFmpeg MP4 compiler
-│   └── cli/              # `dioxuscut render` terminal command
-│
-└── apps/
-    ├── studio/           # Dioxus Desktop editing studio
-    └── example/          # Web-based composition preview
+Dioxus preview
+  Composition / Sequence / Freeze / media / shapes
+      -> Player
+      -> Dioxus web or desktop UI
 ```
 
----
+The two paths intentionally have an explicit boundary. A shared declarative adapter between Dioxus components and native `Scene` output remains roadmap work.
 
-## Crates
+## Workspace
 
-### `dioxuscut-rasterizer`
-The pure-Rust native rendering engine. Replaces Headless Chrome:
-- **Scene Graph IR**: `Rect`, `Circle`, `Path`, `Text`, `LinearGradient`, `RadialGradient`, `Group`
-- **`TinySkiaBackend`**: Multi-core CPU rasterizer using `tiny-skia`. Works everywhere without GPU or browser drivers.
-- **`WgpuBackend`**: GPU-accelerated offscreen shader renderer (`--features gpu`).
-- **`FontCache`**: TTF font discovery and glyph layout via `ab_glyph`.
-- **`render_to_ffmpeg_pipe`**: Zero-copy Rayon multi-threaded pipeline streaming raw RGBA bytes directly to FFmpeg stdin.
+| Package | Purpose |
+|---|---|
+| `dioxuscut-animation` | Interpolation, easing, springs, and color interpolation |
+| `dioxuscut-core` | Dioxus composition timeline, sequence, freeze, and hooks |
+| `dioxuscut-media` | Dioxus image, video, and audio elements for preview |
+| `dioxuscut-player` | Interactive Dioxus player and controls |
+| `dioxuscut-shapes` | Procedural SVG shapes |
+| `dioxuscut-paths` | SVG path parsing, metrics, and transforms |
+| `dioxuscut-captions` | SRT parsing and kinetic caption helpers |
+| `dioxuscut-noise` | Deterministic simplex noise helpers |
+| `dioxuscut-transitions` | Dioxus fade and slide transitions |
+| `dioxuscut-rasterizer` | Scene IR, CPU renderer, experimental GPU renderer, FFmpeg pipe |
+| `dioxuscut-renderer` | Static server and PNG-sequence encoding utilities |
+| `dioxuscut-cli` | Composition registry and `dioxuscut render` command |
+| `apps/example` | Dioxus web composition preview |
+| `apps/studio` | Desktop preview shell; editing and render queue are planned |
 
-### `dioxuscut-animation`
-Physics and math engine. Provides `spring()`, `interpolate()`, `interpolate_colors()`, and Bezier easing.
+## Prerequisites
 
-### `dioxuscut-core`
-Timeline primitives and context hooks. Provides `<Composition>`, `<Sequence>`, `<AbsoluteFill>`, `<Freeze>`, `use_current_frame()`, `use_video_config()`, and `use_input_props::<T>()`.
+- A current stable Rust toolchain.
+- FFmpeg available on `PATH` for MP4 output.
+- A supported native GPU only when using `--backend gpu`.
 
-### `dioxuscut-shapes`
-Procedural SVG motion graphics primitives. Ported from `@remotion/shapes`.
+Install FFmpeg on common platforms:
 
-### `dioxuscut-paths`
-SVG path utilities: `parse_path`, `evolve_path`, `get_length`, `get_point_at_length`, `translate_path`, `scale_path`. Ported from `@remotion/paths`.
-
-### `dioxuscut-captions`
-Subtitle parsing and rendering: SRT parser, `create_tiktok_style_captions`, `<TikTokCaptions>` component. Ported from `@remotion/captions`.
-
-### `dioxuscut-noise`
-Deterministic Simplex noise (2D/3D/4D) + `<NoiseBackground>`. Ported from `@remotion/noise`.
-
-### `dioxuscut-cli`
-The `dioxuscut render` CLI tool. Drives native multi-core rasterization and FFmpeg pipe encoding.
-
----
+```bash
+brew install ffmpeg                 # macOS
+sudo apt-get install -y ffmpeg      # Debian / Ubuntu
+choco install ffmpeg -y             # Windows
+```
 
 ## Quickstart
 
-### Prerequisites
+The standalone CLI ships with the `HelloWorld` native composition:
 
 ```bash
-# Rust toolchain (1.75+)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+printf '%s\n' '{
+  "title": "Hello Dioxuscut",
+  "subtitle": "Bounded native rendering",
+  "background_start": "#0f172a",
+  "background_end": "#1e1b4b",
+  "accent_color": "#6c63ff"
+}' > props.json
 
-# FFmpeg
-brew install ffmpeg        # macOS
-sudo apt install ffmpeg    # Debian/Ubuntu
-```
-
-*(No Chrome or browser installation required!)*
-
-### Headless CLI render
-
-```bash
-# Create a props file
-echo '{"title":"Hello Dioxuscut","subtitle":"Pure Rust Native Render"}' > props.json
-
-# Render to MP4 via Native CPU rasterizer
 cargo run -p dioxuscut-cli -- render \
   --composition HelloWorld \
   --props props.json \
   --output output.mp4 \
-  --width 1920 \
-  --height 1080 \
+  --width 1280 \
+  --height 720 \
   --fps 30 \
   --duration 150
 ```
 
----
+An unknown composition ID or malformed props file fails before FFmpeg starts.
 
-## AI Agent Integration
+## Registering a native composition
 
-Dioxuscut is designed for zero-dependency AI agent video generation pipelines.
+Applications can use `dioxuscut-cli` as a library and provide their own registry:
 
+```rust,ignore
+use dioxuscut_cli::{
+    execute_render_command_with_registry, CompositionRegistry,
+    NativeComposition, NativeCompositionContext, RenderRequest,
+};
+use dioxuscut_rasterizer::{Color, Scene, SceneNode};
+use serde_json::Value;
+
+struct TitleCard;
+
+impl NativeComposition for TitleCard {
+    fn id(&self) -> &'static str {
+        "TitleCard"
+    }
+
+    fn render(
+        &self,
+        frame: u32,
+        _props: &Value,
+        context: NativeCompositionContext,
+    ) -> Scene {
+        let mut scene = Scene::new();
+        scene.push(SceneNode::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: context.width as f32,
+            h: context.height as f32,
+            fill: Color::rgb(frame as u8, 24, 48),
+            stroke: None,
+            stroke_width: 0.0,
+            corner_radius: 0.0,
+        });
+        scene
+    }
+}
+
+// Register TitleCard, construct a RenderRequest, then call:
+// execute_render_command_with_registry(&request, &registry).await?;
 ```
-LLM Agent
-  │
-  ├─ writes ──→ props.json        (parametric content)
-  │
-  └─ runs ───→ dioxuscut render   (CLI)
-                    │
-                    ├─ Rayon Parallel Workers (CPU / GPU)
-                    ├─ Zero-copy stdin pipe
-                    └─ encodes ─→ output.mp4  (FFmpeg H.264)
+
+## CLI reference
+
+```text
+dioxuscut render [OPTIONS] --composition <ID>
+
+  -c, --composition <ID>       Registered composition ID
+  -p, --props <PATH>           JSON props file
+  -o, --output <PATH>          Output path [default: out.mp4]
+      --width <PX>             Even output width [default: 1920]
+      --height <PX>            Even output height [default: 1080]
+      --fps <FPS>              Finite positive FPS [default: 30]
+      --duration <FRAMES>      Positive frame count [default: 150]
+      --backend <BACKEND>      native or gpu [default: native]
 ```
 
----
+Build GPU support explicitly:
 
-## CLI Reference
-
-```
-dioxuscut render [OPTIONS]
+```bash
+cargo build -p dioxuscut-cli --features gpu
 ```
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--composition <NAME>` | `-c` | *(required)* | Composition ID to render |
-| `--props <PATH>` | `-p` | — | JSON file path for input props |
-| `--output <PATH>` | `-o` | `out.mp4` | Output file path |
-| `--width <PX>` | | `1920` | Canvas width (must be even) |
-| `--height <PX>` | | `1080` | Canvas height (must be even) |
-| `--fps <FLOAT>` | | `30.0` | Frames per second |
-| `--duration <FRAMES>` | | `150` | Total frame count |
-| `--backend <TYPE>` | | `native` | `native` (CPU tiny-skia) or `gpu` (wgpu) |
+## Testing
 
----
+The project treats default and optional-feature builds as required quality gates:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo check --locked --workspace --all-targets --all-features
+cargo test --locked --workspace --all-features
+```
+
+The acceptance test requires FFmpeg and produces a real MP4 before checking its container signature.
+
+## Current limitations
+
+- Dioxus VDOM compositions and native `Scene` compositions are not yet one representation.
+- Native video/audio decoding and audio muxing are not implemented.
+- GPU acceleration covers a subset of scene primitives and uses whole-frame CPU fallback otherwise.
+- Font discovery uses platform fonts, so pixel-identical cross-platform text output is not guaranteed.
+- Studio is a preview shell, not yet a full editor.
+
+## Roadmap
+
+1. Shared composition representation for Dioxus preview and native export.
+2. Explicit font assets and fallback chains for reproducible text.
+3. Native image/video decoding and FFmpeg audio muxing.
+4. Full GPU parity for paths, text, groups, strokes, and multi-stop gradients.
+5. Studio project loading, editing, and render queue integration.
 
 ## License
 
-Dual-licensed under [MIT](LICENSE-MIT) or [Apache 2.0](LICENSE-APACHE) at your option.
-
----
-
-<p align="center">
-  Built with 🦀 Rust &nbsp;·&nbsp; Powered by <a href="https://dioxuslabs.com/">Dioxus</a> &nbsp;·&nbsp; Inspired by <a href="https://www.remotion.dev/">Remotion</a>
-</p>
+Licensed under either [Apache License 2.0](LICENSE) or [MIT License](LICENSE-MIT), at your option.

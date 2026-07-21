@@ -73,24 +73,25 @@ pub struct SequenceProps {
 #[component]
 pub fn Sequence(props: SequenceProps) -> Element {
     // Read the parent timeline context
-    let parent_ctx = use_context::<TimelineContext>();
-    let absolute_frame = parent_ctx.absolute_frame;
+    let parent_signal = use_context::<Signal<TimelineContext>>();
+    let parent_ctx = parent_signal.read().clone();
+    let parent_frame = parent_ctx.frame;
 
     let from = props.from;
     let end_frame = props
         .duration_in_frames
-        .map(|d| from + d)
+        .map(|d| from.saturating_add(d))
         .unwrap_or(u32::MAX);
 
     // Only render children within the active window
-    let is_active = absolute_frame >= from && absolute_frame < end_frame;
+    let is_active = parent_frame >= from && parent_frame < end_frame;
 
     if props.hidden || !is_active {
         return rsx! {};
     }
 
     // Provide a child context with the local frame offset applied
-    let child_ctx = TimelineContext::with_offset(absolute_frame, from);
+    let child_ctx = TimelineContext::offset_from(&parent_ctx, from);
 
     let style = match props.layout {
         SequenceLayout::AbsoluteFill => "position: absolute; top: 0; left: 0; right: 0; bottom: 0;",
@@ -121,6 +122,9 @@ struct SequenceInnerProps {
 
 #[component]
 fn SequenceInner(props: SequenceInnerProps) -> Element {
-    use_context_provider(|| props.ctx.clone());
+    let mut timeline = use_context_provider(|| Signal::new(props.ctx.clone()));
+    if *timeline.peek() != props.ctx {
+        timeline.set(props.ctx);
+    }
     rsx! { {props.children} }
 }

@@ -1,7 +1,7 @@
 //! Tier 1: Feature Coverage E2E Tests
 //!
 //! Tests CLI argument parsing for `--composition`, `--props`, `--output`,
-//! `--width`, `--height`, `--fps`, `--duration`, `--backend`, `--port`, `--web-dir`, and `--server-url`.
+//! `--width`, `--height`, `--fps`, `--duration`, and `--backend`.
 
 use clap::Parser;
 use dioxuscut_cli::{Cli, Commands, RenderBackend};
@@ -22,9 +22,6 @@ fn test_cli_flag_defaults() {
             fps,
             duration,
             backend,
-            port,
-            web_dir,
-            server_url,
         } => {
             assert_eq!(composition, "HelloWorld");
             assert_eq!(props, None);
@@ -34,9 +31,6 @@ fn test_cli_flag_defaults() {
             assert!((fps - 30.0).abs() < f64::EPSILON);
             assert_eq!(duration, 150);
             assert_eq!(backend, RenderBackend::Native);
-            assert_eq!(port, 0);
-            assert_eq!(web_dir, None);
-            assert_eq!(server_url, None);
         }
     }
 }
@@ -60,12 +54,6 @@ fn test_cli_flag_custom_values() {
         "60.0",
         "--duration",
         "300",
-        "--port",
-        "9000",
-        "--web-dir",
-        "build",
-        "--server-url",
-        "http://127.0.0.1:9000",
     ];
 
     let cli = Cli::try_parse_from(args).expect("Failed to parse custom CLI args");
@@ -80,9 +68,6 @@ fn test_cli_flag_custom_values() {
             fps,
             duration,
             backend,
-            port,
-            web_dir,
-            server_url,
         } => {
             assert_eq!(composition, "CustomComposition");
             assert_eq!(props, Some(PathBuf::from("input_data.json")));
@@ -92,9 +77,6 @@ fn test_cli_flag_custom_values() {
             assert!((fps - 60.0).abs() < f64::EPSILON);
             assert_eq!(duration, 300);
             assert_eq!(backend, RenderBackend::Native);
-            assert_eq!(port, 9000);
-            assert_eq!(web_dir, Some(PathBuf::from("build")));
-            assert_eq!(server_url, Some("http://127.0.0.1:9000".to_string()));
         }
     }
 }

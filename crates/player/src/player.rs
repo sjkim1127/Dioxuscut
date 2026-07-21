@@ -65,6 +65,8 @@ struct PlayerState {
 pub fn Player(props: PlayerProps) -> Element {
     let duration = props.duration_in_frames;
     let fps = props.fps;
+    let loop_playback = props.loop_playback;
+    let tick_duration = frame_duration(fps);
 
     let mut state = use_signal(|| PlayerState {
         frame: props.initial_frame,
@@ -75,18 +77,14 @@ pub fn Player(props: PlayerProps) -> Element {
     // Advance frame on each animation tick when playing
     use_future(move || async move {
         loop {
-            // ~16ms per tick (≈60Hz polling)
-            tokio::time::sleep(tokio::time::Duration::from_millis(16)).await;
+            tokio::time::sleep(tick_duration).await;
             let s = state.read();
             if s.playing {
-                let next_frame = s.frame + 1;
-                let looped = if next_frame >= s.duration {
-                    0
-                } else {
-                    next_frame
-                };
+                let (next_frame, keep_playing) = advance_frame(s.frame, s.duration, loop_playback);
                 drop(s);
-                state.write().frame = looped;
+                let mut next_state = state.write();
+                next_state.frame = next_frame;
+                next_state.playing = keep_playing;
             }
         }
     });
@@ -140,5 +138,54 @@ pub fn Player(props: PlayerProps) -> Element {
                 }
             }
         }
+    }
+}
+
+fn frame_duration(fps: f64) -> tokio::time::Duration {
+    let safe_fps = if fps.is_finite() && fps > 0.0 {
+        fps
+    } else {
+        30.0
+    };
+    tokio::time::Duration::from_secs_f64(1.0 / safe_fps)
+}
+
+fn advance_frame(frame: u32, duration: u32, loop_playback: bool) -> (u32, bool) {
+    if duration == 0 {
+        return (0, false);
+    }
+
+    let next = frame.saturating_add(1);
+    if next < duration {
+        (next, true)
+    } else if loop_playback {
+        (0, true)
+    } else {
+        (duration - 1, false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frame_duration_respects_fps() {
+        assert_eq!(frame_duration(25.0), tokio::time::Duration::from_millis(40));
+        assert_eq!(
+            frame_duration(0.0),
+            tokio::time::Duration::from_secs_f64(1.0 / 30.0)
+        );
+    }
+
+    #[test]
+    fn playback_stops_on_the_last_frame_when_looping_is_disabled() {
+        assert_eq!(advance_frame(8, 10, false), (9, true));
+        assert_eq!(advance_frame(9, 10, false), (9, false));
+    }
+
+    #[test]
+    fn playback_wraps_when_looping_is_enabled() {
+        assert_eq!(advance_frame(9, 10, true), (0, true));
     }
 }

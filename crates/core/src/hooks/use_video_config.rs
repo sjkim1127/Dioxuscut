@@ -21,6 +21,7 @@ use dioxus::prelude::*;
 /// # Panics
 /// Panics in debug mode if called outside a `<Composition>`.
 pub fn use_video_config() -> VideoConfig {
-    let ctx = use_context::<VideoConfigContext>();
-    ctx.0.clone()
+    let config = use_context::<Signal<VideoConfigContext>>();
+    let snapshot = config.read();
+    snapshot.0.clone()
 }

@@ -228,9 +228,11 @@ fn render_node(
                 tiny_skia::SpreadMode::Pad,
                 Transform::identity(),
             ) {
-                let mut paint = Paint::default();
-                paint.shader = shader;
-                paint.anti_alias = true;
+                let paint = Paint {
+                    shader,
+                    anti_alias: true,
+                    ..Default::default()
+                };
                 pixmap.fill_path(&path, &paint, FillRule::Winding, transform, None);
             }
         }
@@ -255,9 +257,11 @@ fn render_node(
                 tiny_skia::SpreadMode::Pad,
                 Transform::identity(),
             ) {
-                let mut paint = Paint::default();
-                paint.shader = shader;
-                paint.anti_alias = true;
+                let paint = Paint {
+                    shader,
+                    anti_alias: true,
+                    ..Default::default()
+                };
                 pixmap.fill_path(&path, &paint, FillRule::Winding, transform, None);
             }
         }
@@ -308,7 +312,7 @@ fn render_node(
 
                         let idx = (py as u32 * pixmap_width + px as u32) as usize;
                         // Alpha-composite glyph pixel over existing pixel
-                        let src_a = (coverage as f32 / 255.0) * (text_color.alpha() as f32 / 255.0);
+                        let src_a = (coverage as f32 / 255.0) * (text_color.alpha() / 255.0);
                         let dst = pixels_rgba[idx];
                         let dst_a = dst.alpha() as f32 / 255.0;
                         let out_a = src_a + dst_a * (1.0 - src_a);
@@ -317,9 +321,9 @@ fn render_node(
                                 ((src_c * src_a + dst_c * dst_a * (1.0 - src_a)) / out_a * 255.0)
                                     .clamp(0.0, 255.0) as u8
                             };
-                            let r = blend(text_color.red() as f32, dst.red() as f32);
-                            let g = blend(text_color.green() as f32, dst.green() as f32);
-                            let b = blend(text_color.blue() as f32, dst.blue() as f32);
+                            let r = blend(text_color.red(), dst.red() as f32);
+                            let g = blend(text_color.green(), dst.green() as f32);
+                            let b = blend(text_color.blue(), dst.blue() as f32);
                             let a = (out_a * 255.0).clamp(0.0, 255.0) as u8;
                             pixels_rgba[idx] =
                                 tiny_skia::PremultipliedColorU8::from_rgba(r, g, b, a)
@@ -366,7 +370,7 @@ fn apply_opacity(color: Color, opacity: f32) -> tiny_skia::Color {
 fn build_circle(cx: f32, cy: f32, r: f32) -> Path {
     let mut pb = PathBuilder::new();
     // Approximate circle with 4 cubic bezier curves (standard approximation)
-    let k = 0.5522847498 * r;
+    let k = 0.552_284_8 * r;
     pb.move_to(cx, cy - r);
     pb.cubic_to(cx + k, cy - r, cx + r, cy - k, cx + r, cy);
     pb.cubic_to(cx + r, cy + k, cx + k, cy + r, cx, cy + r);
@@ -379,7 +383,7 @@ fn build_circle(cx: f32, cy: f32, r: f32) -> Path {
 
 fn build_rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32) -> Path {
     let r = r.min(w / 2.0).min(h / 2.0);
-    let k = 0.5522847498 * r;
+    let k = 0.552_284_8 * r;
     let mut pb = PathBuilder::new();
 
     pb.move_to(x + r, y);
@@ -394,7 +398,7 @@ fn build_rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32) -> Path {
     pb.close();
 
     pb.finish()
-        .unwrap_or_else(|| PathBuilder::from_rect(Rect::from_xywh(x, y, w, h).unwrap()).into())
+        .unwrap_or_else(|| PathBuilder::from_rect(Rect::from_xywh(x, y, w, h).unwrap()))
 }
 
 /// Minimal SVG `d` attribute parser → tiny-skia PathBuilder.

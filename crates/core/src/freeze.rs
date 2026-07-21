@@ -33,6 +33,10 @@ pub struct FreezeProps {
 /// Freezes all descendant components at the given `frame`.
 #[component]
 pub fn Freeze(props: FreezeProps) -> Element {
-    use_context_provider(|| TimelineContext::new(props.frame));
+    let frozen = TimelineContext::new(props.frame);
+    let mut timeline = use_context_provider(|| Signal::new(frozen.clone()));
+    if *timeline.peek() != frozen {
+        timeline.set(frozen);
+    }
     rsx! { {props.children} }
 }

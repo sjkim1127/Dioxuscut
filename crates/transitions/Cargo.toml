@@ -9,5 +9,5 @@ repository.workspace  = true
 
 [dependencies]
 dioxus              = { workspace = true }
-dioxuscut-core      = { path = "../core" }
-dioxuscut-animation = { path = "../animation" }
+dioxuscut-core      = { workspace = true }
+dioxuscut-animation = { workspace = true }

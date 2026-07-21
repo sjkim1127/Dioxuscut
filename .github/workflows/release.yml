@@ -49,7 +49,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build Release Binary
-        run: cargo build -p dioxuscut-cli --release --target ${{ matrix.target }}
+        run: cargo build --locked -p dioxuscut-cli --release --target ${{ matrix.target }}
 
       - name: Package Asset (Unix)
         if: runner.os != 'Windows'

@@ -16,7 +16,7 @@
 //!                   [frame 1]  (all at once, Rayon)
 //!                   [frame 2] → disk → FFmpeg
 //!
-//! Pipe (fastest):   Rayon renders → sorted RGBA chunks → FFmpeg stdin → MP4
+//! Pipe (fastest):   bounded Rayon batch → ordered RGBA frames → FFmpeg → MP4
 //!                   Zero disk I/O, zero PNG compression overhead
 //! ```
 
@@ -27,7 +27,6 @@ use rayon::prelude::*;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -219,7 +218,7 @@ where
 
 // ── Mode 3: FFmpeg stdin pipe (fastest) ──────────────────────────────────────
 
-/// Render frames in parallel and stream raw RGBA directly to FFmpeg stdin.
+/// Render frames in bounded parallel batches and stream raw RGBA to FFmpeg stdin.
 ///
 /// **This is the fastest rendering mode.** It eliminates:
 /// - PNG compression overhead
@@ -228,7 +227,7 @@ where
 ///
 /// # Pipeline
 /// ```text
-/// Rayon workers → sorted RGBA chunks → FFmpeg stdin → MP4
+/// bounded Rayon batch → ordered RGBA frames → FFmpeg stdin → MP4
 /// ```
 ///
 /// # FFmpeg invocation
@@ -257,7 +256,7 @@ where
         .args(&ffmpeg_args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| {
             RasterError::Init(format!("Failed to spawn FFmpeg: {e}\nIs ffmpeg installed?"))
@@ -269,53 +268,73 @@ where
             .map(|n| n.get())
             .unwrap_or(4)
     });
+    if concurrency == 0 {
+        let _ = ffmpeg.kill();
+        let _ = ffmpeg.wait();
+        return Err(RasterError::Init(
+            "Render concurrency must be greater than zero".into(),
+        ));
+    }
 
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(concurrency)
         .build()
         .map_err(|e| RasterError::Init(format!("Rayon pool error: {e}")))?;
 
-    // Render all frames → collect Vec<(frame, raw_rgba)>
-    let rendered: Result<Vec<(u32, Vec<u8>)>, RasterError> = pool.install(|| {
-        (0..total)
-            .into_par_iter()
-            .map(|frame| {
-                let scene = scene_fn(frame);
-                let frame_cfg = FrameConfig::new(width, height, frame, fps);
-                let img = backend.render_frame(&scene, &frame_cfg)?;
-                Ok((frame, img.into_raw()))
-            })
-            .collect()
-    });
+    // ── 3. Render and stream bounded batches in frame order ───────────────────
+    // At most `concurrency` raw frames are retained at once. This keeps memory
+    // proportional to the worker count instead of the video duration.
+    let mut stdin = ffmpeg
+        .stdin
+        .take()
+        .ok_or_else(|| RasterError::Init("Failed to open FFmpeg stdin".into()))?;
 
-    let mut pairs = rendered?;
-    // Sort to ensure frame order before piping
-    pairs.sort_by_key(|(f, _)| *f);
+    let render_result = (0..total).step_by(concurrency).try_for_each(|batch_start| {
+        let batch_end = total.min(batch_start.saturating_add(concurrency as u32));
+        let rendered: Result<Vec<(u32, Vec<u8>)>, RasterError> = pool.install(|| {
+            (batch_start..batch_end)
+                .into_par_iter()
+                .map(|frame| {
+                    let scene = scene_fn(frame);
+                    let frame_cfg = FrameConfig::new(width, height, frame, fps);
+                    let img = backend.render_frame(&scene, &frame_cfg)?;
+                    Ok((frame, img.into_raw()))
+                })
+                .collect()
+        });
 
-    // ── 3. Stream sorted RGBA bytes to FFmpeg stdin ───────────────────────────
-    {
-        let mut stdin = ffmpeg
-            .stdin
-            .take()
-            .ok_or_else(|| RasterError::Init("Failed to open FFmpeg stdin".into()))?;
-
-        for (_, rgba) in &pairs {
+        let mut frames = rendered?;
+        frames.sort_by_key(|(frame, _)| *frame);
+        for (_, rgba) in frames {
             stdin
-                .write_all(rgba)
+                .write_all(&rgba)
                 .map_err(|e| RasterError::ImageEncode(format!("FFmpeg pipe write error: {e}")))?;
         }
-        stdin.flush().ok();
-    } // `stdin` drops here -> EOF sent to FFmpeg pipe
+        Ok::<(), RasterError>(())
+    });
+
+    if render_result.is_ok() {
+        let _ = stdin.flush();
+    }
+    drop(stdin); // EOF for FFmpeg
+
+    if let Err(error) = render_result {
+        let _ = ffmpeg.kill();
+        let _ = ffmpeg.wait();
+        return Err(error);
+    }
 
     // ── 4. Wait for FFmpeg to finish ─────────────────────────────────────────
-    let status = ffmpeg
-        .wait()
+    let output = ffmpeg
+        .wait_with_output()
         .map_err(|e| RasterError::ImageEncode(format!("FFmpeg wait error: {e}")))?;
 
-    if !status.success() {
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(RasterError::ImageEncode(format!(
-            "FFmpeg exited with non-zero status: {:?}",
-            status.code()
+            "FFmpeg exited with non-zero status {:?}: {}",
+            output.status.code(),
+            stderr.trim()
         )));
     }
 
@@ -326,6 +345,8 @@ where
 pub fn build_pipe_ffmpeg_args(config: &PipeConfig) -> Vec<String> {
     let args = vec![
         "-y".into(), // overwrite output
+        "-loglevel".into(),
+        "error".into(),
         "-f".into(),
         "rawvideo".into(), // input format
         "-pix_fmt".into(),

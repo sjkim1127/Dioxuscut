@@ -3,7 +3,9 @@
 //! Tests edge cases: empty composition name, missing props file, zero/odd resolutions,
 //! zero FPS/duration, and malformed props JSON.
 
-use dioxuscut_cli::{validate_render_params, ValidationError};
+use dioxuscut_cli::{
+    execute_render_command, validate_render_params, RenderBackend, RenderRequest, ValidationError,
+};
 use std::fs;
 use std::path::PathBuf;
 
@@ -66,6 +68,9 @@ fn test_boundary_zero_fps() {
         res_neg_fps,
         Err(ValidationError::InvalidFps("-10".to_string()))
     );
+
+    let res_nan_fps = validate_render_params("HelloWorld", None, 1920, 1080, f64::NAN, 150);
+    assert!(matches!(res_nan_fps, Err(ValidationError::InvalidFps(_))));
 }
 
 #[test]
@@ -90,5 +95,35 @@ async fn test_boundary_valid_props_file_check() {
     let res = validate_render_params("HelloWorld", Some(&props_path), 1920, 1080, 30.0, 150);
     assert!(res.is_ok());
 
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[tokio::test]
+async fn test_boundary_malformed_props_fail_before_rendering() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "dioxuscut_test_malformed_props_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&temp_dir).unwrap();
+    let props_path = temp_dir.join("invalid.json");
+    fs::write(&props_path, "{not valid json").unwrap();
+    let output = temp_dir.join("must-not-exist.mp4");
+    let request = RenderRequest {
+        composition: "HelloWorld".into(),
+        props: Some(props_path),
+        output: output.clone(),
+        width: 64,
+        height: 64,
+        fps: 30.0,
+        duration: 1,
+        backend: RenderBackend::Native,
+    };
+
+    let error = execute_render_command(&request).await.unwrap_err();
+    assert!(error.to_string().contains("Invalid props JSON"));
+    assert!(!output.exists());
     let _ = fs::remove_dir_all(&temp_dir);
 }

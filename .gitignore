@@ -15,8 +15,6 @@ target
 
 # Rust
 target/
-Cargo.lock
-
 # Vendor (참고용 소스 — 커밋하지 않음)
 vendor/
 

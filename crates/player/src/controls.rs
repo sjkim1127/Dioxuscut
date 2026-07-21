@@ -28,7 +28,7 @@ pub fn Controls(props: ControlsProps) -> Element {
     };
 
     let duration = props.duration;
-    let on_seek = props.on_seek.clone();
+    let on_seek = props.on_seek;
 
     rsx! {
         div {

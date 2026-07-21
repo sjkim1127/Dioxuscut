@@ -20,8 +20,11 @@ use dioxus::prelude::*;
 /// The frame is relative to the component's position in the timeline
 /// (i.e., already offset by any enclosing `<Sequence>`).
 ///
-/// Returns `0` if called outside a `<Composition>` context.
+/// # Panics
+///
+/// Panics if called outside a `<Composition>` context.
 pub fn use_current_frame() -> u32 {
-    let ctx = use_context::<TimelineContext>();
-    ctx.frame
+    let timeline = use_context::<Signal<TimelineContext>>();
+    let snapshot = timeline.read();
+    snapshot.frame
 }
