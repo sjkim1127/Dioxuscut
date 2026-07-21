@@ -10,11 +10,14 @@ use thiserror::Error;
 pub enum RenderError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("Server error: {0}")]
+    Server(#[from] crate::server::ServerError),
     #[error("Encode error: {0}")]
     Encode(String),
     #[error("Frame {0} failed: {1}")]
     FrameFailed(u32, String),
 }
+
 
 /// Configuration for a render job.
 #[derive(Debug, Clone)]
@@ -66,65 +69,10 @@ fn num_cpus() -> usize {
         .unwrap_or(4)
 }
 
-/// Render all frames of a composition to PNG files.
-///
-/// Currently a placeholder — full implementation requires a headless
-/// rendering backend (e.g., headless Chromium or native Skia).
-///
-/// Each frame is written to `{output_dir}/frame-{:06}.png`.
+/// Render all frames of a composition to PNG files via Headless Chrome.
 pub async fn render_frames(config: &RenderConfig) -> Result<Vec<std::path::PathBuf>, RenderError> {
-    use std::fs;
-    use headless_chrome::{Browser, LaunchOptions};
-
-    fs::create_dir_all(&config.output_dir)?;
-
-    let range = config.effective_range();
-    let mut paths = Vec::new();
-
-    tracing::info!(
-        "Rendering frames {}..={} at {}x{} @ {} fps",
-        range.start(),
-        range.end(),
-        config.width,
-        config.height,
-        config.fps,
-    );
-
-    let browser = Browser::new(
-        LaunchOptions::default_builder()
-            .window_size(Some((config.width, config.height)))
-            .build()
-            .map_err(|e| RenderError::Encode(e.to_string()))?
-    ).map_err(|e| RenderError::Encode(e.to_string()))?;
-
-    let tab = browser.new_tab().map_err(|e| RenderError::Encode(e.to_string()))?;
-
-    tracing::info!("Navigating to {}", config.url);
-    tab.navigate_to(&config.url).map_err(|e| RenderError::Encode(e.to_string()))?;
-    tab.wait_until_navigated().map_err(|e| RenderError::Encode(e.to_string()))?;
-
-    // Optionally wait for the Dioxus web app to initialize
-    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-
-    for frame in range {
-        let path = config.output_dir.join(format!("frame-{frame:06}.png"));
-
-        let js = format!("window.DIOXUSCUT_FRAME = {};", frame);
-        tab.evaluate(&js, false).map_err(|e| RenderError::Encode(e.to_string()))?;
-
-        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-
-        let png_data = tab.capture_screenshot(
-            headless_chrome::protocol::cdp::Page::CaptureScreenshotFormatOption::Png,
-            None,
-            None,
-            true
-        ).map_err(|e| RenderError::Encode(e.to_string()))?;
-        
-        fs::write(&path, png_data)?;
-        tracing::debug!("Rendered frame {frame} → {}", path.display());
-        paths.push(path);
-    }
-
-    Ok(paths)
+    crate::browser::capture_frames(&config.url, &config.output_dir, config)
+        .await
+        .map_err(|e| RenderError::FrameFailed(0, e.to_string()))
 }
+

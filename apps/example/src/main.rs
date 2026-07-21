@@ -15,7 +15,7 @@ use dioxuscut_animation::{
     spring::{spring, SpringConfig},
 };
 use dioxuscut_core::{
-    AbsoluteFill, Composition, Sequence,
+    AbsoluteFill, Sequence,
     hooks::{use_current_frame, use_video_config, use_input_props},
 };
 use dioxuscut_player::Player;

@@ -45,6 +45,11 @@ num-traits        = "0.2"
 anyhow            = "1"
 thiserror         = "1"
 
+# Web server & HTTP
+axum              = "0.7"
+tower-http        = { version = "0.5", features = ["fs", "trace", "cors"] }
+reqwest           = { version = "0.12", features = ["json"] }
+
 # Internal crates
 dioxuscut-animation   = { path = "crates/animation" }
 dioxuscut-core        = { path = "crates/core" }

@@ -7,6 +7,10 @@ authors.workspace     = true
 license.workspace     = true
 repository.workspace  = true
 
+[lib]
+name = "dioxuscut_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "dioxuscut"
 path = "src/main.rs"
@@ -19,3 +23,5 @@ tokio              = { workspace = true }
 tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow             = { workspace = true }
+thiserror          = { workspace = true }
+reqwest            = { workspace = true }
