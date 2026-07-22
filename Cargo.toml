@@ -59,6 +59,7 @@ rustybuzz         = "0.20.1"
 unicode-linebreak = "0.1.5"
 unicode-segmentation = "1.13.3"
 taffy             = "0.12.2"
+lyon_tessellation = "1.0.20"
 
 # Error handling
 anyhow            = "1"

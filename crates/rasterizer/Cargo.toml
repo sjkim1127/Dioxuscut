@@ -21,8 +21,9 @@ serde_json = { workspace = true }
 rayon      = { workspace = true }
 wgpu       = { version = "22", optional = true }
 pollster   = { version = "0.4", optional = true }
+lyon_tessellation = { workspace = true, optional = true }
 
 [features]
 default = []
 # Enable wgpu GPU-accelerated offscreen rendering
-gpu = ["wgpu", "pollster"]
+gpu = ["wgpu", "pollster", "lyon_tessellation"]

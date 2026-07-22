@@ -21,7 +21,7 @@ The repository also contains Dioxus timeline, media, shape, transition, player, 
 
 - Native scene graph with rectangles, circles, paths, shaped text, local raster images, decoded video frames, audio tracks, gradients, and transformed groups.
 - CPU rendering through `tiny-skia`.
-- Experimental GPU rendering through `wgpu`; unsupported scene features fall back to the CPU renderer for correctness.
+- Experimental GPU rendering through `wgpu` for rectangles, circles, tessellated paths, strokes, transformed groups, and gradients with up to 16 stops; text, media, and composited layers retain whole-frame CPU fallback for correctness.
 - Bounded-memory parallel frame rendering into an FFmpeg stdin pipe.
 - Cached FFprobe metadata and persistent, bounded FFmpeg rawvideo decoder sessions.
 - Registry-based Rust compositions and optional sandboxed Rhai compositions, both with JSON props.
@@ -339,7 +339,7 @@ written into workflow files.
 - Video frames use cached FFprobe stream metadata, up to four persistent FFmpeg decoder sources, fixed-output-FPS sampling for VFR input, and a 128 MiB frame LRU. Backward or large forward seeks restart only the affected decoder.
 - Audio declarations are taken from frame zero and must be static for the render.
 - `SceneLayer` supports rectangular or SVG-path clips, alpha or luminance masks, twelve blend modes, ordered blur/brightness/grayscale/opacity filters, and drop shadows. These effects use CPU offscreen surfaces for export and SVG/CSS equivalents for Player preview.
-- GPU acceleration covers a subset of scene primitives and uses whole-frame CPU fallback for composited layers and other unsupported nodes.
+- GPU acceleration covers rectangles, circles, tessellated path fills and strokes, nested group transforms and opacity, and gradients with up to 16 stops. Text, image, video, composited layers, and gradients beyond the stop limit use whole-frame CPU fallback.
 - Text nodes accept ordered local TTF/OTF `font_sources`; native rendering caches those files, shapes glyph runs with Rustybuzz, and falls through per grapheme. `SceneTextBlock` and Rhai `text_box` add Unicode line breaking, fitting, alignment, line limits, and ellipsis. Text without explicit sources still uses platform font discovery and is not pixel-identical across platforms; full mixed-direction paragraph layout remains incomplete.
 - Studio is a preview shell, not yet a full editor.
 
@@ -347,7 +347,7 @@ written into workflow files.
 
 1. Expand VDOM/CSS conversion beyond the current simple-selector and native-paint subset.
 2. Full bidirectional paragraph layout, variable-font axes, and advanced typography controls.
-3. Full GPU parity for paths, text, media, groups, composited layers, strokes, and multi-stop gradients.
+3. Complete GPU parity for text, media, composited layers, masks, blend modes, and filters.
 4. Additional color, distortion, and convolution filter primitives.
 5. Studio project loading, media editing, and render queue integration.
 

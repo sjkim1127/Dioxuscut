@@ -905,7 +905,7 @@ fn build_rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32) -> Path {
 /// Minimal SVG `d` attribute parser → tiny-skia PathBuilder.
 /// Supports M, L, H, V, C, Q, A, Z commands. Shape emitters currently use
 /// absolute commands; relative elliptical arcs are accepted as well.
-fn svgpath_to_tiny_skia(d: &str) -> Option<Path> {
+pub(crate) fn svgpath_to_tiny_skia(d: &str) -> Option<Path> {
     let mut pb = PathBuilder::new();
     let tokens = tokenize_path(d);
     let mut pos = 0usize;
