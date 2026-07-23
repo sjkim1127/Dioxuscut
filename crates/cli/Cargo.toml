@@ -31,6 +31,11 @@ rhai               = { workspace = true, optional = true }
 [dev-dependencies]
 dioxuscut-renderer = { workspace = true }
 reqwest            = { workspace = true }
+serde_json         = { workspace = true }
+
+[[test]]
+name    = "e2e_cli_subprocess"
+harness = true
 
 [features]
 default = []
