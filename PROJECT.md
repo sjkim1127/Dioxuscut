@@ -43,7 +43,7 @@ The general Dioxus preview tree is not currently compiled into native `Scene` no
 | P0 | Default and GPU-feature quality gates | Done |
 | P1 | Shared native composition contract and preview adapter | Done |
 | P1 | Native local raster image nodes and decoded asset cache | Done |
-| P1 | Migrate general Dioxus primitives to shared Scene output | Planned |
+| P1 | Migrate general Dioxus primitives to shared Scene output | Done |
 | P1 | Native video decoding and audio muxing | Done |
 | P1 | Full GPU scene parity | Planned |
 | P2 | Reproducible bundled font configuration | Planned |

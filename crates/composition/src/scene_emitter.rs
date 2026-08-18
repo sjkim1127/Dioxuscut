@@ -2,8 +2,9 @@
 
 use crate::{CompositionError, NativeComposition, NativeCompositionContext};
 use dioxuscut_rasterizer::{
-    layout_text_box, BlendMode, ClipRegion, Color, MaskMode, Scene, SceneFilter, SceneNode,
-    SceneShadow, TextBox, TextHorizontalAlign, TextOverflow, TextVerticalAlign, Transform2D,
+    layout_text_box, BlendMode, ClipRegion, Color, GradientStop, MaskMode, Scene, SceneFilter,
+    SceneNode, SceneShadow, TextBox, TextHorizontalAlign, TextOverflow, TextVerticalAlign,
+    Transform2D,
 };
 use serde_json::Value;
 
@@ -464,6 +465,186 @@ impl<E: SceneEmitter> NativeComposition for SceneEmitterComposition<E> {
     }
 }
 
+// ── Primitive emitters ────────────────────────────────────────────────────────
+
+/// Solid-colour rectangle placed directly on the scene.
+///
+/// Equivalent to emitting a [`SceneNode::Rect`] without having to construct it manually.
+/// Use [`SceneTextBlock`] for multi-line text layout.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SceneRect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub fill: Color,
+    pub stroke: Option<Color>,
+    pub stroke_width: f32,
+    pub corner_radius: f32,
+}
+
+impl SceneRect {
+    pub fn new(x: f32, y: f32, w: f32, h: f32, fill: Color) -> Self {
+        Self {
+            x,
+            y,
+            w: w.max(0.0),
+            h: h.max(0.0),
+            fill,
+            stroke: None,
+            stroke_width: 0.0,
+            corner_radius: 0.0,
+        }
+    }
+
+    pub fn with_stroke(mut self, color: Color, width: f32) -> Self {
+        self.stroke = Some(color);
+        self.stroke_width = width.max(0.0);
+        self
+    }
+
+    pub fn with_corner_radius(mut self, radius: f32) -> Self {
+        self.corner_radius = radius.max(0.0);
+        self
+    }
+}
+
+impl SceneEmitter for SceneRect {
+    fn emit(
+        &self,
+        _context: SceneFrameContext,
+        _props: &Value,
+        scene: &mut Scene,
+    ) -> Result<(), CompositionError> {
+        scene.push(SceneNode::Rect {
+            x: self.x,
+            y: self.y,
+            w: self.w,
+            h: self.h,
+            fill: self.fill,
+            stroke: self.stroke,
+            stroke_width: self.stroke_width,
+            corner_radius: self.corner_radius,
+        });
+        Ok(())
+    }
+}
+
+/// Single-line text placed directly on the scene.
+///
+/// Use [`SceneTextBlock`] when you need word-wrapping, multi-line layout, or
+/// alignment/overflow control. `SceneText` is a zero-cost shortcut for placing
+/// a pre-positioned single text run.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SceneText {
+    pub x: f32,
+    pub y: f32,
+    pub content: String,
+    pub font_size: f32,
+    pub color: Color,
+    pub font_weight: u16,
+    pub font_sources: Vec<String>,
+}
+
+impl SceneText {
+    pub fn new(content: impl Into<String>, x: f32, y: f32, font_size: f32, color: Color) -> Self {
+        Self {
+            x,
+            y,
+            content: content.into(),
+            font_size: font_size.max(0.0),
+            color,
+            font_weight: 400,
+            font_sources: Vec::new(),
+        }
+    }
+
+    pub fn with_font_weight(mut self, weight: u16) -> Self {
+        self.font_weight = weight;
+        self
+    }
+
+    pub fn with_font_sources(mut self, sources: impl IntoIterator<Item = String>) -> Self {
+        self.font_sources = sources.into_iter().collect();
+        self
+    }
+}
+
+impl SceneEmitter for SceneText {
+    fn emit(
+        &self,
+        _context: SceneFrameContext,
+        _props: &Value,
+        scene: &mut Scene,
+    ) -> Result<(), CompositionError> {
+        if self.content.is_empty() {
+            return Ok(());
+        }
+        scene.push(SceneNode::Text {
+            x: self.x,
+            y: self.y,
+            content: self.content.clone(),
+            font_size: self.font_size,
+            color: self.color,
+            font_weight: self.font_weight,
+            font_sources: self.font_sources.clone(),
+        });
+        Ok(())
+    }
+}
+
+/// Linear gradient rectangle placed directly on the scene.
+///
+/// A convenience wrapper around [`SceneNode::LinearGradient`] for use inside
+/// emitter trees.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SceneLinearGradient {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub angle_deg: f32,
+    pub stops: Vec<GradientStop>,
+}
+
+impl SceneLinearGradient {
+    /// Horizontal left-to-right gradient (0°) spanning the given rectangle.
+    pub fn new(x: f32, y: f32, w: f32, h: f32, stops: Vec<GradientStop>) -> Self {
+        Self {
+            x,
+            y,
+            w: w.max(0.0),
+            h: h.max(0.0),
+            angle_deg: 0.0,
+            stops,
+        }
+    }
+
+    pub fn with_angle(mut self, angle_deg: f32) -> Self {
+        self.angle_deg = angle_deg;
+        self
+    }
+}
+
+impl SceneEmitter for SceneLinearGradient {
+    fn emit(
+        &self,
+        _context: SceneFrameContext,
+        _props: &Value,
+        scene: &mut Scene,
+    ) -> Result<(), CompositionError> {
+        scene.push(SceneNode::LinearGradient {
+            x: self.x,
+            y: self.y,
+            w: self.w,
+            h: self.h,
+            angle_deg: self.angle_deg,
+            stops: self.stops.clone(),
+        });
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -602,5 +783,98 @@ mod tests {
             node,
             SceneNode::Text { x, font_size, .. } if *x >= 10.0 && *font_size <= 32.0
         )));
+    }
+
+    #[test]
+    fn scene_rect_emits_correct_rect_node() {
+        let rect = SceneRect::new(10.0, 20.0, 100.0, 50.0, Color::rgb(255, 0, 0))
+            .with_stroke(Color::WHITE, 2.0)
+            .with_corner_radius(8.0);
+        let composition = SceneEmitterComposition::new("rect", rect);
+        let scene = composition.render(0, &Value::Null, context()).unwrap();
+
+        assert_eq!(scene.nodes.len(), 1);
+        assert!(matches!(
+            &scene.nodes[0],
+            SceneNode::Rect { x, y, w, h, fill, stroke: Some(_), corner_radius, .. }
+                if (*x - 10.0).abs() < f32::EPSILON
+                    && (*y - 20.0).abs() < f32::EPSILON
+                    && (*w - 100.0).abs() < f32::EPSILON
+                    && (*h - 50.0).abs() < f32::EPSILON
+                    && *fill == Color::rgb(255, 0, 0)
+                    && (*corner_radius - 8.0).abs() < f32::EPSILON
+        ));
+    }
+
+    #[test]
+    fn scene_rect_clamps_negative_dimensions_to_zero() {
+        let rect = SceneRect::new(0.0, 0.0, -10.0, -5.0, Color::BLACK);
+        let composition = SceneEmitterComposition::new("rect-clamp", rect);
+        let scene = composition.render(0, &Value::Null, context()).unwrap();
+
+        assert!(matches!(
+            &scene.nodes[0],
+            SceneNode::Rect { w, h, .. } if *w == 0.0 && *h == 0.0
+        ));
+    }
+
+    #[test]
+    fn scene_text_emits_correct_text_node() {
+        let text = SceneText::new("Hello", 5.0, 30.0, 24.0, Color::WHITE).with_font_weight(700);
+        let composition = SceneEmitterComposition::new("text", text);
+        let scene = composition.render(0, &Value::Null, context()).unwrap();
+
+        assert_eq!(scene.nodes.len(), 1);
+        assert!(matches!(
+            &scene.nodes[0],
+            SceneNode::Text { x, y, content, font_size, font_weight, .. }
+                if (*x - 5.0).abs() < f32::EPSILON
+                    && (*y - 30.0).abs() < f32::EPSILON
+                    && content == "Hello"
+                    && (*font_size - 24.0).abs() < f32::EPSILON
+                    && *font_weight == 700
+        ));
+    }
+
+    #[test]
+    fn scene_text_emits_nothing_for_empty_content() {
+        let text = SceneText::new("", 0.0, 0.0, 16.0, Color::WHITE);
+        let composition = SceneEmitterComposition::new("text-empty", text);
+        let scene = composition.render(0, &Value::Null, context()).unwrap();
+        assert!(scene.nodes.is_empty());
+    }
+
+    #[test]
+    fn scene_linear_gradient_emits_correct_gradient_node() {
+        use dioxuscut_rasterizer::GradientStop;
+        let gradient = SceneLinearGradient::new(
+            0.0,
+            0.0,
+            320.0,
+            180.0,
+            vec![
+                GradientStop {
+                    position: 0.0,
+                    color: Color::BLACK,
+                },
+                GradientStop {
+                    position: 1.0,
+                    color: Color::WHITE,
+                },
+            ],
+        )
+        .with_angle(135.0);
+        let composition = SceneEmitterComposition::new("grad", gradient);
+        let scene = composition.render(0, &Value::Null, context()).unwrap();
+
+        assert_eq!(scene.nodes.len(), 1);
+        assert!(matches!(
+            &scene.nodes[0],
+            SceneNode::LinearGradient { w, h, angle_deg, stops, .. }
+                if (*w - 320.0).abs() < f32::EPSILON
+                    && (*h - 180.0).abs() < f32::EPSILON
+                    && (*angle_deg - 135.0).abs() < f32::EPSILON
+                    && stops.len() == 2
+        ));
     }
 }
