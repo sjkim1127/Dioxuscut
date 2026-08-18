@@ -76,6 +76,7 @@ reqwest           = { version = "0.12", features = ["json"] }
 
 # Internal crates
 dioxuscut-animation   = { version = "0.1.2", path = "crates/animation" }
+dioxuscut-cli         = { version = "0.1.2", path = "crates/cli" }
 dioxuscut-composition = { version = "0.1.2", path = "crates/composition" }
 dioxuscut-core        = { version = "0.1.2", path = "crates/core" }
 dioxuscut-media       = { version = "0.1.2", path = "crates/media" }

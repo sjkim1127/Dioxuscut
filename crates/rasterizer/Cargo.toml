@@ -19,6 +19,7 @@ unicode-segmentation = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
 rayon      = { workspace = true }
+tracing    = { workspace = true }
 wgpu       = { version = "22", optional = true }
 pollster   = { version = "0.4", optional = true }
 lyon_tessellation = { workspace = true, optional = true }

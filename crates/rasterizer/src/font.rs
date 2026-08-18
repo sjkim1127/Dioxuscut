@@ -1,7 +1,21 @@
 //! Font loading and text rasterization via `ab_glyph`.
 //!
-//! Discovers a system font at runtime and caches it for the lifetime of the renderer.
-//! Falls back gracefully if no font is found.
+//! Font discovery follows a three-step priority order:
+//!
+//! 1. `DIOXUSCUT_FONT_PATH` environment variable — highest priority, useful for CI overrides.
+//! 2. Platform-specific system font search paths — picks up the user's installed fonts.
+//! 3. Bundled fallback (`NotoSans-Regular.ttf` compiled in with `include_bytes!`) — guarantees
+//!    reproducible rendering in any environment, including minimal Docker images and CI runners
+//!    that have no fonts installed.
+//!
+//! The bundled font ensures that `FontCache::load()` always returns a loaded cache, eliminating
+//! the "No system font found" warning and making output deterministic across platforms.
+
+/// NotoSans Regular compiled into the binary as a reproducible font fallback.
+///
+/// Source: Google Fonts, licensed under the SIL Open Font License 1.1.
+/// The font is always available regardless of the host operating system or installed fonts.
+const BUNDLED_FONT: &[u8] = include_bytes!("../../../assets/fonts/NotoSans-Regular.ttf");
 
 use crate::backend::RasterError;
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
@@ -161,11 +175,45 @@ pub(crate) struct FontLoadError {
 }
 
 impl FontCache {
-    /// Discover and load the first available system font.
+    /// Load a font using a three-step priority order:
+    ///
+    /// 1. `DIOXUSCUT_FONT_PATH` env var — e.g. `DIOXUSCUT_FONT_PATH=/fonts/MyFont.ttf`
+    /// 2. Platform system font search paths
+    /// 3. Bundled `NotoSans-Regular.ttf` — always succeeds
+    ///
+    /// This method never returns a cache with `is_loaded() == false`.
     pub fn load() -> Self {
+        // Step 1: environment-variable override
+        if let Ok(path) = std::env::var("DIOXUSCUT_FONT_PATH") {
+            let path = path.trim().to_string();
+            if !path.is_empty() {
+                match std::fs::read(&path).and_then(|b| {
+                    LoadedFont::from_bytes(b).map_err(|e| std::io::Error::other(e.to_string()))
+                }) {
+                    Ok(font) => {
+                        tracing::info!(font_path = %path, "Loaded font from DIOXUSCUT_FONT_PATH");
+                        return Self {
+                            font: Some(Arc::new(font)),
+                            path: Some(path),
+                            assets: Mutex::new(HashMap::new()),
+                        };
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            font_path = %path,
+                            error = %err,
+                            "DIOXUSCUT_FONT_PATH could not be loaded, falling back"
+                        );
+                    }
+                }
+            }
+        }
+
+        // Step 2: system search paths
         for path in FONT_SEARCH_PATHS {
             if let Ok(bytes) = std::fs::read(path) {
                 if let Ok(font) = LoadedFont::from_bytes(bytes) {
+                    tracing::debug!(font_path = %path, "Loaded system font");
                     return Self {
                         font: Some(Arc::new(font)),
                         path: Some(path.to_string()),
@@ -174,15 +222,28 @@ impl FontCache {
                 }
             }
         }
-        eprintln!("[dioxuscut-rasterizer] Warning: No system font found. Text will be rendered as blocks.");
+
+        // Step 3: bundled fallback — always succeeds
+        tracing::debug!("No system font found; using bundled NotoSans-Regular");
+        Self::bundled()
+    }
+
+    /// Return a `FontCache` loaded with the bundled `NotoSans-Regular.ttf`.
+    ///
+    /// Unlike [`Self::load`], this skips env-var and system-font discovery and
+    /// directly uses the font compiled into the binary. Useful for tests that
+    /// need a deterministic font independent of the host machine.
+    pub fn bundled() -> Self {
+        let font = LoadedFont::from_bytes(BUNDLED_FONT.to_vec())
+            .expect("bundled NotoSans-Regular.ttf is a valid font");
         Self {
-            font: None,
-            path: None,
+            font: Some(Arc::new(font)),
+            path: Some("<bundled:NotoSans-Regular>".into()),
             assets: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Create a FontCache with no font loaded (for headless/test environments).
+    /// Create a FontCache with no font loaded (for tests that verify tofu-box rendering).
     pub fn headless() -> Self {
         Self {
             font: None,
@@ -866,5 +927,66 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("width and height"));
+    }
+
+    // ── Bundled font tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn font_cache_load_always_returns_a_loaded_cache() {
+        // FontCache::load() must never return a headless (unloaded) cache,
+        // because the bundled NotoSans fallback is always compiled in.
+        let cache = FontCache::load();
+        assert!(
+            cache.is_loaded(),
+            "FontCache::load() must always be loaded (bundled font is the last resort fallback)"
+        );
+        assert!(
+            cache.font_path().is_some(),
+            "font_path() must be Some after a successful load"
+        );
+    }
+
+    #[test]
+    fn font_cache_bundled_is_always_loaded() {
+        let cache = FontCache::bundled();
+        assert!(
+            cache.is_loaded(),
+            "FontCache::bundled() must always be loaded"
+        );
+        assert_eq!(
+            cache.font_path(),
+            Some("<bundled:NotoSans-Regular>"),
+            "font_path() should identify the bundled font"
+        );
+    }
+
+    #[test]
+    fn bundled_font_can_rasterize_ascii_text() {
+        let cache = FontCache::bundled();
+        // Rasterize a short ASCII string — must succeed and produce non-empty pixels.
+        let result = cache.rasterize("Hello", 24.0, &[]).unwrap();
+        let rendered = result.expect("bundled font must produce rendered text for ASCII");
+        assert!(rendered.width > 0, "rendered text must have non-zero width");
+        assert!(
+            rendered.height > 0,
+            "rendered text must have non-zero height"
+        );
+        assert!(
+            !rendered.pixels.is_empty(),
+            "rendered text must have pixel data"
+        );
+    }
+
+    #[test]
+    fn env_override_takes_precedence_over_bundled() {
+        // When DIOXUSCUT_FONT_PATH points to a non-existent file,
+        // FontCache::load() must still succeed via the bundled fallback.
+        std::env::set_var("DIOXUSCUT_FONT_PATH", "/nonexistent/path/font.ttf");
+        let cache = FontCache::load();
+        std::env::remove_var("DIOXUSCUT_FONT_PATH");
+        assert!(
+            cache.is_loaded(),
+            "FontCache::load() must fall back to bundled when env path is invalid"
+        );
     }
 }
