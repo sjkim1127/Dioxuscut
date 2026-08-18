@@ -46,8 +46,8 @@ The general Dioxus preview tree is not currently compiled into native `Scene` no
 | P1 | Migrate general Dioxus primitives to shared Scene output | Done |
 | P1 | Native video decoding and audio muxing | Done |
 | P1 | Full GPU scene parity | Planned |
-| P2 | Reproducible bundled font configuration | Planned |
-| P2 | Functional Studio editing and render queue | Planned |
+| P2 | Reproducible bundled font configuration | Done |
+| P2 | Functional Studio editing and render queue | Done |
 
 ## Required quality gates
 
