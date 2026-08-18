@@ -1,0 +1,190 @@
+name: Visual Regression
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+# Only one visual run per branch/PR at a time
+concurrency:
+  group: visual-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  render_snapshots:
+    name: Render Visual Snapshots (HelloWorld)
+    runs-on: ubuntu-latest
+
+    # Needs write permission to post PR comments
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ffmpeg \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Build dioxuscut-cli (release)
+        run: cargo build --locked -p dioxuscut-cli --release
+
+      - name: Create snapshots directory
+        run: mkdir -p snapshots
+
+      # Render frame 0 (intro — first rendered frame)
+      - name: Render frame 0
+        run: |
+          ./target/release/dioxuscut render \
+            --composition HelloWorld \
+            --frame-start 0 \
+            --frame-end 0 \
+            --output snapshots/frame_0000.png \
+            --codec png \
+            --width 960 \
+            --height 540
+
+      # Render frame 30 (1 s into the composition at 30 fps)
+      - name: Render frame 30
+        run: |
+          ./target/release/dioxuscut render \
+            --composition HelloWorld \
+            --frame-start 30 \
+            --frame-end 30 \
+            --output snapshots/frame_0030.png \
+            --codec png \
+            --width 960 \
+            --height 540
+
+      # Render frame 90 (3 s — late animation)
+      - name: Render frame 90
+        run: |
+          ./target/release/dioxuscut render \
+            --composition HelloWorld \
+            --frame-start 90 \
+            --frame-end 90 \
+            --output snapshots/frame_0090.png \
+            --codec png \
+            --width 960 \
+            --height 540
+
+      - name: Verify snapshots were created
+        run: |
+          for f in snapshots/frame_0000.png snapshots/frame_0030.png snapshots/frame_0090.png; do
+            if [[ ! -f "$f" ]]; then
+              echo "::error::Missing snapshot: $f"
+              exit 1
+            fi
+            size=$(stat -c%s "$f")
+            echo "✓ $f (${size} bytes)"
+          done
+
+      - name: Upload snapshots artifact
+        id: artifact_upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-snapshots-${{ github.sha }}
+          path: snapshots/
+          retention-days: 30
+          if-no-files-found: error
+
+      # Post or update a single comment on the PR with artifact links
+      - name: Post PR comment with snapshot links
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha       = context.sha.substring(0, 7);
+            const runId     = context.runId;
+            const { owner, repo } = context.repo;
+            const runUrl    = `https://github.com/${owner}/${repo}/actions/runs/${runId}`;
+            const artifactUrl = `${runUrl}#artifacts`;
+
+            // Get the workspace version from Cargo.toml for the badge
+            const { execSync } = require('child_process');
+            let version = '0.1.x';
+            try {
+              version = execSync(
+                "cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == \"dioxuscut-cli\") | .version'",
+                { encoding: 'utf8' }
+              ).trim();
+            } catch (_) {}
+
+            const body = [
+              '## 🎬 Visual Regression Snapshots — HelloWorld',
+              '',
+              `Rendered **3 frames** at 960 × 540 from commit \`${sha}\`.`,
+              '',
+              '| Frame | Timestamp (30 fps) | Description |',
+              '|-------|--------------------|-------------|',
+              '| **0** | 0.0 s | First frame — intro |',
+              '| **30** | 1.0 s | Mid-animation |',
+              '| **90** | 3.0 s | Late animation |',
+              '',
+              `📦 **[Download all 3 PNGs](${artifactUrl})**`,
+              `> Artifact: \`visual-snapshots-${context.sha}\` · login required to download`,
+              '',
+              `🔗 [View full CI run](${runUrl})`,
+              `_Rendered on Ubuntu 22.04 · dioxuscut-cli v${version}_`,
+            ].join('\n');
+
+            // Upsert — find an existing bot comment and update it, or create a new one
+            const { data: comments } = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number: context.issue.number,
+            });
+
+            const MARKER = '🎬 Visual Regression Snapshots';
+            const existing = comments.find(
+              c => c.user.type === 'Bot' && c.body.includes(MARKER)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+              core.info(`Updated existing PR comment #${existing.id}`);
+            } else {
+              const { data: created } = await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: context.issue.number,
+                body,
+              });
+              core.info(`Created new PR comment #${created.id}`);
+            }
+
+      # Upload log on failure for debugging render issues
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-failure-logs-${{ github.sha }}
+          path: |
+            snapshots/
+            /tmp/dioxuscut-render-*.log
+          retention-days: 7
