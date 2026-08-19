@@ -41,6 +41,10 @@ pub fn translate_path(path: &str, dx: f64, dy: f64) -> String {
                 *x += dx;
                 *y += dy;
             }
+            Instruction::ArcTo { x, y, .. } => {
+                *x += dx;
+                *y += dy;
+            }
             Instruction::ClosePath => {}
         }
     }
@@ -86,6 +90,12 @@ pub fn scale_path(path: &str, sx: f64, sy: f64) -> String {
                 *x *= sx;
                 *y *= sy;
             }
+            Instruction::ArcTo { rx, ry, x, y, .. } => {
+                *rx *= sx.abs();
+                *ry *= sy.abs();
+                *x *= sx;
+                *y *= sy;
+            }
             Instruction::ClosePath => {}
         }
     }
@@ -109,5 +119,28 @@ mod tests {
         let path = "M 10 20 L 30 40 Z";
         let res = scale_path(path, 2.0, 0.5);
         assert_eq!(res, "M 20.0000 10.0000 L 60.0000 20.0000 Z");
+    }
+
+    #[test]
+    fn test_translate_and_scale_arc() {
+        let path = "M 0 0 A 10 20 0 0 1 10 20";
+        let translated = translate_path(path, 5.0, 5.0);
+        assert_eq!(
+            translated,
+            "M 5.0000 5.0000 A 10.0000 20.0000 0.0000 0 1 15.0000 25.0000"
+        );
+
+        let scaled = scale_path(path, 2.0, 3.0);
+        assert_eq!(
+            scaled,
+            "M 0.0000 0.0000 A 20.0000 60.0000 0.0000 0 1 20.0000 60.0000"
+        );
+    }
+
+    #[test]
+    fn test_transform_invalid_path_returns_original() {
+        let invalid = "not a valid path";
+        assert_eq!(translate_path(invalid, 10.0, 10.0), invalid);
+        assert_eq!(scale_path(invalid, 2.0, 2.0), invalid);
     }
 }

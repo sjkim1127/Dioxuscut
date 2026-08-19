@@ -607,6 +607,359 @@ pub struct SceneLinearGradient {
     pub stops: Vec<GradientStop>,
 }
 
+// ── SceneLoop ─────────────────────────────────────────────────────────────────
+
+/// Repeats a child emitter for a fixed number of frames, looping the local
+/// frame back to zero every `duration_in_frames` frames.
+///
+/// Equivalent to Remotion's `<Loop durationInFrames={n} times={m}>` component.
+///
+/// # Fields
+/// - `duration_in_frames`: length of one loop iteration in frames
+/// - `times`: number of repetitions (0 = infinite)
+/// - `child`: the emitter to loop
+#[derive(Debug, Clone, PartialEq)]
+pub struct SceneLoop<E> {
+    pub duration_in_frames: u32,
+    pub times: u32, // 0 means infinite
+    pub child: E,
+}
+
+impl<E> SceneLoop<E> {
+    /// Create a new infinite loop repeating every `duration_in_frames`.
+    pub fn new(duration_in_frames: u32, child: E) -> Self {
+        Self {
+            duration_in_frames,
+            times: 0,
+            child,
+        }
+    }
+
+    /// Create a loop that repeats exactly `times` times.
+    pub fn with_times(duration_in_frames: u32, times: u32, child: E) -> Self {
+        Self {
+            duration_in_frames,
+            times,
+            child,
+        }
+    }
+
+    /// Fluent builder to set the repetition count (0 = infinite).
+    pub fn times(mut self, times: u32) -> Self {
+        self.times = times;
+        self
+    }
+
+    /// Returns the total duration in frames for bounded loops, or `None` for infinite loops.
+    pub fn total_duration(&self) -> Option<u32> {
+        if self.times > 0 {
+            Some(self.duration_in_frames.saturating_mul(self.times))
+        } else {
+            None
+        }
+    }
+}
+
+impl<E: SceneEmitter> SceneEmitter for SceneLoop<E> {
+    fn emit(
+        &self,
+        context: SceneFrameContext,
+        props: &Value,
+        scene: &mut Scene,
+    ) -> Result<(), CompositionError> {
+        let duration = self.duration_in_frames.max(1);
+        let frame = context.frame;
+
+        // If times > 0, check if we've exceeded the total duration
+        if self.times > 0 {
+            let total_frames = duration.saturating_mul(self.times);
+            if frame >= total_frames {
+                return Ok(()); // Past the end — render nothing
+            }
+        }
+
+        // Loop the frame: local_frame = frame % duration
+        let local_frame = frame % duration;
+
+        self.child
+            .emit(context.with_local_frame(local_frame), props, scene)
+    }
+}
+
+// ── SceneTransitionSeries ─────────────────────────────────────────────────────
+
+/// A transition type between consecutive clips.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TransitionKind {
+    Fade,
+    SlideLeft,
+    SlideRight,
+    SlideUp,
+    SlideDown,
+}
+
+/// Timing for a transition: how many frames the overlap lasts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TransitionTiming {
+    pub duration_in_frames: u32,
+}
+
+impl TransitionTiming {
+    pub fn new(duration_in_frames: u32) -> Self {
+        Self { duration_in_frames }
+    }
+}
+
+/// A clip in the TransitionSeries.
+struct TsClip {
+    duration_in_frames: u32,
+    emitter: Box<dyn SceneEmitter>,
+}
+
+/// A transition between clips.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TsTransition {
+    kind: TransitionKind,
+    timing: TransitionTiming,
+}
+
+/// Builder for `SceneTransitionSeries`.
+///
+/// Usage:
+/// ```rust,ignore
+/// let series = SceneTransitionSeries::new()
+///     .clip(60, scene1)
+///     .transition(TransitionKind::Fade, TransitionTiming::new(15))
+///     .clip(60, scene2)
+///     .transition(TransitionKind::SlideLeft, TransitionTiming::new(20))
+///     .clip(60, scene3);
+/// ```
+pub struct SceneTransitionSeries {
+    clips: Vec<TsClip>,
+    transitions: Vec<(usize, TsTransition)>, // (after clip index, transition)
+}
+
+impl SceneTransitionSeries {
+    pub fn new() -> Self {
+        Self {
+            clips: Vec::new(),
+            transitions: Vec::new(),
+        }
+    }
+
+    pub fn clip<E: SceneEmitter + 'static>(mut self, duration_in_frames: u32, emitter: E) -> Self {
+        self.clips.push(TsClip {
+            duration_in_frames,
+            emitter: Box::new(emitter),
+        });
+        self
+    }
+
+    pub fn transition(mut self, kind: TransitionKind, timing: TransitionTiming) -> Self {
+        // Associate transition with the last added clip (before the next one)
+        let after_index = self.clips.len().saturating_sub(1);
+        self.transitions
+            .push((after_index, TsTransition { kind, timing }));
+        self
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.clips.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.clips.len()
+    }
+
+    /// Computes clip start offsets and effective transition overlap durations.
+    /// Overlap durations are clamped to the duration of both adjacent clips.
+    pub fn calculate_timeline(&self) -> (Vec<u32>, Vec<u32>) {
+        let n = self.clips.len();
+        if n == 0 {
+            return (Vec::new(), Vec::new());
+        }
+
+        let mut transitions_map = std::collections::BTreeMap::new();
+        for (idx, trans) in &self.transitions {
+            transitions_map.insert(*idx, trans);
+        }
+
+        let mut overlaps = Vec::with_capacity(n.saturating_sub(1));
+        for i in 0..n.saturating_sub(1) {
+            let len_cur = self.clips[i].duration_in_frames;
+            let len_next = self.clips[i + 1].duration_in_frames;
+            let overlap = transitions_map
+                .get(&i)
+                .map(|t| t.timing.duration_in_frames.min(len_cur).min(len_next))
+                .unwrap_or(0);
+            overlaps.push(overlap);
+        }
+
+        let mut starts = Vec::with_capacity(n);
+        let mut offset: u32 = 0;
+        for (i, clip) in self.clips.iter().enumerate() {
+            starts.push(offset);
+            if i < overlaps.len() {
+                offset = offset
+                    .saturating_add(clip.duration_in_frames)
+                    .saturating_sub(overlaps[i]);
+            }
+        }
+
+        (starts, overlaps)
+    }
+
+    /// Total timeline duration in frames, accounting for transition overlaps.
+    pub fn total_duration(&self) -> u32 {
+        if self.clips.is_empty() {
+            return 0;
+        }
+        let (starts, _) = self.calculate_timeline();
+        let last_idx = self.clips.len() - 1;
+        starts[last_idx].saturating_add(self.clips[last_idx].duration_in_frames)
+    }
+
+    /// Alias for `total_duration`.
+    pub fn duration_in_frames(&self) -> u32 {
+        self.total_duration()
+    }
+}
+
+impl Default for SceneTransitionSeries {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SceneEmitter for SceneTransitionSeries {
+    fn emit(
+        &self,
+        context: SceneFrameContext,
+        props: &Value,
+        scene: &mut Scene,
+    ) -> Result<(), CompositionError> {
+        if self.clips.is_empty() {
+            return Ok(());
+        }
+
+        let (starts, overlaps) = self.calculate_timeline();
+        let mut transitions_map = std::collections::BTreeMap::new();
+        for (idx, trans) in &self.transitions {
+            transitions_map.insert(*idx, trans);
+        }
+
+        let frame = context.frame;
+        let width = context.composition.width as f32;
+        let height = context.composition.height as f32;
+
+        for (i, clip) in self.clips.iter().enumerate() {
+            let start = starts[i];
+            let duration = clip.duration_in_frames;
+            let end = start.saturating_add(duration);
+
+            if frame < start || frame >= end {
+                continue;
+            }
+
+            let local_frame = frame - start;
+            let clip_context = context.with_local_frame(local_frame);
+
+            // Incoming transition (enter from clip i - 1)
+            let mut alpha_in = 1.0f32;
+            let mut tx_in = 0.0f32;
+            let mut ty_in = 0.0f32;
+
+            if i > 0 && !overlaps.is_empty() {
+                let overlap_in = overlaps[i - 1];
+                if overlap_in > 0 && local_frame < overlap_in {
+                    let p_in = (local_frame as f32 / overlap_in as f32).clamp(0.0, 1.0);
+                    if let Some(trans) = transitions_map.get(&(i - 1)) {
+                        match trans.kind {
+                            TransitionKind::Fade => {
+                                alpha_in = p_in;
+                            }
+                            TransitionKind::SlideLeft => {
+                                tx_in = (1.0 - p_in) * width;
+                            }
+                            TransitionKind::SlideRight => {
+                                tx_in = -(1.0 - p_in) * width;
+                            }
+                            TransitionKind::SlideUp => {
+                                ty_in = (1.0 - p_in) * height;
+                            }
+                            TransitionKind::SlideDown => {
+                                ty_in = -(1.0 - p_in) * height;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Outgoing transition (exit to clip i + 1)
+            let mut alpha_out = 1.0f32;
+            let mut tx_out = 0.0f32;
+            let mut ty_out = 0.0f32;
+
+            if i < overlaps.len() {
+                let overlap_out = overlaps[i];
+                let out_start = duration.saturating_sub(overlap_out);
+                if overlap_out > 0 && local_frame >= out_start {
+                    let p_out =
+                        ((local_frame - out_start) as f32 / overlap_out as f32).clamp(0.0, 1.0);
+                    if let Some(trans) = transitions_map.get(&i) {
+                        match trans.kind {
+                            TransitionKind::Fade => {
+                                alpha_out = 1.0 - p_out;
+                            }
+                            TransitionKind::SlideLeft => {
+                                tx_out = -p_out * width;
+                            }
+                            TransitionKind::SlideRight => {
+                                tx_out = p_out * width;
+                            }
+                            TransitionKind::SlideUp => {
+                                ty_out = -p_out * height;
+                            }
+                            TransitionKind::SlideDown => {
+                                ty_out = p_out * height;
+                            }
+                        }
+                    }
+                }
+            }
+
+            let total_alpha = (alpha_in * alpha_out).clamp(0.0, 1.0);
+            let total_tx = tx_in + tx_out;
+            let total_ty = ty_in + ty_out;
+
+            let needs_group =
+                (total_alpha - 1.0).abs() > 1e-5 || total_tx.abs() > 1e-5 || total_ty.abs() > 1e-5;
+
+            if needs_group {
+                let mut sub_scene = Scene::new();
+                clip.emitter.emit(clip_context, props, &mut sub_scene)?;
+                if !sub_scene.nodes.is_empty() {
+                    scene.push(SceneNode::Group {
+                        transform: Transform2D {
+                            tx: total_tx,
+                            ty: total_ty,
+                            scale_x: 1.0,
+                            scale_y: 1.0,
+                            rotate_deg: 0.0,
+                        },
+                        opacity: total_alpha,
+                        children: sub_scene.nodes,
+                    });
+                }
+            } else {
+                clip.emitter.emit(clip_context, props, scene)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
 impl SceneLinearGradient {
     /// Horizontal left-to-right gradient (0°) spanning the given rectangle.
     pub fn new(x: f32, y: f32, w: f32, h: f32, stops: Vec<GradientStop>) -> Self {
@@ -876,5 +1229,523 @@ mod tests {
                     && (*angle_deg - 135.0).abs() < f32::EPSILON
                     && stops.len() == 2
         ));
+    }
+
+    #[test]
+    fn scene_loop_wraps_frame_at_duration() {
+        let captured_frames = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+        let frames_clone = captured_frames.clone();
+        let child = move |ctx: SceneFrameContext, _props: &Value, _scene: &mut Scene| {
+            frames_clone.lock().unwrap().push(ctx.frame);
+            Ok(())
+        };
+        let looper = SceneLoop::new(10, child);
+        let ctx15 = SceneFrameContext {
+            frame: 15,
+            global_frame: 15,
+            composition: context(),
+        };
+        let mut scene = Scene::new();
+        looper.emit(ctx15, &Value::Null, &mut scene).unwrap();
+        assert_eq!(*captured_frames.lock().unwrap(), vec![5]); // 15 % 10 = 5
+    }
+
+    #[test]
+    fn scene_loop_preserves_global_frame() {
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+        let captured_clone = captured.clone();
+        let child = move |ctx: SceneFrameContext, _props: &Value, _scene: &mut Scene| {
+            captured_clone
+                .lock()
+                .unwrap()
+                .push((ctx.frame, ctx.global_frame));
+            Ok(())
+        };
+        let looper = SceneLoop::new(10, child);
+        for frame in [0, 5, 9, 10, 15, 29, 99] {
+            let ctx = SceneFrameContext {
+                frame,
+                global_frame: frame,
+                composition: context(),
+            };
+            let mut scene = Scene::new();
+            looper.emit(ctx, &Value::Null, &mut scene).unwrap();
+        }
+        assert_eq!(
+            *captured.lock().unwrap(),
+            vec![(0, 0), (5, 5), (9, 9), (0, 10), (5, 15), (9, 29), (9, 99),]
+        );
+    }
+
+    #[test]
+    fn scene_loop_bounded_repetitions_builder_and_total_duration() {
+        let call_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let count_clone = call_count.clone();
+        let child = move |_: SceneFrameContext, _: &Value, _: &mut Scene| {
+            count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        };
+
+        let infinite_loop = SceneLoop::new(10, child.clone());
+        assert_eq!(infinite_loop.total_duration(), None);
+
+        let bounded_loop = SceneLoop::new(10, child).times(3);
+        assert_eq!(bounded_loop.total_duration(), Some(30));
+
+        // Frames 0..30 should emit
+        for frame in 0..30 {
+            let ctx = SceneFrameContext {
+                frame,
+                global_frame: frame,
+                composition: context(),
+            };
+            let mut scene = Scene::new();
+            bounded_loop.emit(ctx, &Value::Null, &mut scene).unwrap();
+        }
+        assert_eq!(call_count.load(std::sync::atomic::Ordering::SeqCst), 30);
+
+        // Frames >= 30 should not emit
+        for frame in [30, 31, 50, 100] {
+            let ctx = SceneFrameContext {
+                frame,
+                global_frame: frame,
+                composition: context(),
+            };
+            let mut scene = Scene::new();
+            bounded_loop.emit(ctx, &Value::Null, &mut scene).unwrap();
+        }
+        assert_eq!(call_count.load(std::sync::atomic::Ordering::SeqCst), 30);
+    }
+
+    #[test]
+    fn scene_loop_zero_duration_guard() {
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+        let captured_clone = captured.clone();
+        let child = move |ctx: SceneFrameContext, _props: &Value, _scene: &mut Scene| {
+            captured_clone.lock().unwrap().push(ctx.frame);
+            Ok(())
+        };
+        let looper = SceneLoop::new(0, child);
+        for frame in [0, 5, 10] {
+            let ctx = SceneFrameContext {
+                frame,
+                global_frame: frame,
+                composition: context(),
+            };
+            let mut scene = Scene::new();
+            looper.emit(ctx, &Value::Null, &mut scene).unwrap();
+        }
+        // When duration is 0, duration is clamped to 1 so frame % 1 = 0
+        assert_eq!(*captured.lock().unwrap(), vec![0, 0, 0]);
+    }
+
+    #[test]
+    fn scene_transition_series_empty_and_single_clip() {
+        let empty = SceneTransitionSeries::new();
+        assert!(empty.is_empty());
+        assert_eq!(empty.len(), 0);
+        assert_eq!(empty.total_duration(), 0);
+        assert_eq!(empty.duration_in_frames(), 0);
+        let mut scene = Scene::new();
+        empty
+            .emit(
+                SceneFrameContext::new(0, context()),
+                &Value::Null,
+                &mut scene,
+            )
+            .unwrap();
+        assert!(scene.nodes.is_empty());
+
+        let rect = SceneRect::new(0.0, 0.0, 10.0, 10.0, Color::WHITE);
+        let single = SceneTransitionSeries::new().clip(45, rect);
+        assert!(!single.is_empty());
+        assert_eq!(single.len(), 1);
+        assert_eq!(single.total_duration(), 45);
+
+        let mut scene = Scene::new();
+        single
+            .emit(
+                SceneFrameContext::new(20, context()),
+                &Value::Null,
+                &mut scene,
+            )
+            .unwrap();
+        assert_eq!(scene.nodes.len(), 1);
+        // Single clip without transition is emitted directly, not in a Group
+        assert!(matches!(&scene.nodes[0], SceneNode::Rect { .. }));
+    }
+
+    #[test]
+    fn scene_transition_series_timeline_calculation_and_clamping() {
+        let rect = SceneRect::new(0.0, 0.0, 10.0, 10.0, Color::WHITE);
+        let series = SceneTransitionSeries::new()
+            .clip(60, rect.clone())
+            .transition(TransitionKind::Fade, TransitionTiming::new(20))
+            .clip(40, rect.clone())
+            .transition(TransitionKind::SlideLeft, TransitionTiming::new(100)) // 100 > min(40, 50) -> clamped to 40
+            .clip(50, rect);
+
+        let (starts, overlaps) = series.calculate_timeline();
+        assert_eq!(overlaps, vec![20, 40]);
+        assert_eq!(starts, vec![0, 40, 40]);
+        assert_eq!(series.total_duration(), 40 + 50); // 90
+    }
+
+    #[test]
+    fn scene_transition_series_fade_crossfade() {
+        let rect1 = SceneRect::new(0.0, 0.0, 10.0, 10.0, Color::WHITE);
+        let rect2 = SceneRect::new(0.0, 0.0, 20.0, 20.0, Color::BLACK);
+        let series = SceneTransitionSeries::new()
+            .clip(60, rect1)
+            .transition(TransitionKind::Fade, TransitionTiming::new(20))
+            .clip(60, rect2);
+
+        // Timeline:
+        // Clip 1: starts at 0, duration 60 -> active [0, 60)
+        // Clip 2: starts at 40 (60 - 20), duration 60 -> active [40, 100)
+        // Total duration: 100
+
+        // Frame 20: Only clip 1 active (no transition yet, local frame 20 < 40)
+        let mut scene = Scene::new();
+        series
+            .emit(
+                SceneFrameContext::new(20, context()),
+                &Value::Null,
+                &mut scene,
+            )
+            .unwrap();
+        assert_eq!(scene.nodes.len(), 1);
+        assert!(
+            matches!(&scene.nodes[0], SceneNode::Rect { w, .. } if (*w - 10.0).abs() < f32::EPSILON)
+        );
+
+        // Frame 50 (midpoint of overlap [40, 60)): p = (50 - 40) / 20 = 0.5
+        // Clip 1: alpha = 1.0 - 0.5 = 0.5
+        // Clip 2: alpha = 0.5
+        let mut scene = Scene::new();
+        series
+            .emit(
+                SceneFrameContext::new(50, context()),
+                &Value::Null,
+                &mut scene,
+            )
+            .unwrap();
+        assert_eq!(scene.nodes.len(), 2);
+
+        if let SceneNode::Group {
+            opacity, children, ..
+        } = &scene.nodes[0]
+        {
+            assert!((*opacity - 0.5).abs() < 1e-4);
+            assert!(
+                matches!(&children[0], SceneNode::Rect { w, .. } if (*w - 10.0).abs() < f32::EPSILON)
+            );
+        } else {
+            panic!("Expected SceneNode::Group for clip 1");
+        }
+
+        if let SceneNode::Group {
+            opacity, children, ..
+        } = &scene.nodes[1]
+        {
+            assert!((*opacity - 0.5).abs() < 1e-4);
+            assert!(
+                matches!(&children[0], SceneNode::Rect { w, .. } if (*w - 20.0).abs() < f32::EPSILON)
+            );
+        } else {
+            panic!("Expected SceneNode::Group for clip 2");
+        }
+
+        // Frame 70: Only clip 2 active (local frame 30 >= 20, no group needed)
+        let mut scene = Scene::new();
+        series
+            .emit(
+                SceneFrameContext::new(70, context()),
+                &Value::Null,
+                &mut scene,
+            )
+            .unwrap();
+        assert_eq!(scene.nodes.len(), 1);
+        assert!(
+            matches!(&scene.nodes[0], SceneNode::Rect { w, .. } if (*w - 20.0).abs() < f32::EPSILON)
+        );
+    }
+
+    #[test]
+    fn scene_transition_series_slide_left() {
+        let rect1 = SceneRect::new(0.0, 0.0, 10.0, 10.0, Color::WHITE);
+        let rect2 = SceneRect::new(0.0, 0.0, 20.0, 20.0, Color::BLACK);
+        let series = SceneTransitionSeries::new()
+            .clip(60, rect1)
+            .transition(TransitionKind::SlideLeft, TransitionTiming::new(20))
+            .clip(60, rect2);
+
+        // Frame 50 (midpoint of overlap [40, 60)): p = 0.5
+        // Composition width = 320
+        // Outgoing (clip 1): tx = -p * width = -0.5 * 320 = -160.0
+        // Incoming (clip 2): tx = (1 - p) * width = 0.5 * 320 = +160.0
+        let mut scene = Scene::new();
+        series
+            .emit(
+                SceneFrameContext::new(50, context()),
+                &Value::Null,
+                &mut scene,
+            )
+            .unwrap();
+        assert_eq!(scene.nodes.len(), 2);
+
+        if let SceneNode::Group {
+            transform, opacity, ..
+        } = &scene.nodes[0]
+        {
+            assert!((*opacity - 1.0).abs() < 1e-4);
+            assert!((transform.tx - -160.0).abs() < 1e-4);
+            assert!(transform.ty.abs() < 1e-4);
+        } else {
+            panic!("Expected SceneNode::Group for clip 1");
+        }
+
+        if let SceneNode::Group {
+            transform, opacity, ..
+        } = &scene.nodes[1]
+        {
+            assert!((*opacity - 1.0).abs() < 1e-4);
+            assert!((transform.tx - 160.0).abs() < 1e-4);
+            assert!(transform.ty.abs() < 1e-4);
+        } else {
+            panic!("Expected SceneNode::Group for clip 2");
+        }
+    }
+
+    #[test]
+    fn scene_transition_series_slide_right() {
+        let rect1 = SceneRect::new(0.0, 0.0, 10.0, 10.0, Color::WHITE);
+        let rect2 = SceneRect::new(0.0, 0.0, 20.0, 20.0, Color::BLACK);
+        let series = SceneTransitionSeries::new()
+            .clip(60, rect1)
+            .transition(TransitionKind::SlideRight, TransitionTiming::new(20))
+            .clip(60, rect2);
+
+        // Frame 50 (midpoint of overlap [40, 60)): p = 0.5
+        // Composition width = 320
+        // Outgoing (clip 1): tx = p * width = +160.0
+        // Incoming (clip 2): tx = -(1 - p) * width = -160.0
+        let mut scene = Scene::new();
+        series
+            .emit(
+                SceneFrameContext::new(50, context()),
+                &Value::Null,
+                &mut scene,
+            )
+            .unwrap();
+        assert_eq!(scene.nodes.len(), 2);
+
+        if let SceneNode::Group { transform, .. } = &scene.nodes[0] {
+            assert!((transform.tx - 160.0).abs() < 1e-4);
+            assert!(transform.ty.abs() < 1e-4);
+        } else {
+            panic!("Expected SceneNode::Group for clip 1");
+        }
+
+        if let SceneNode::Group { transform, .. } = &scene.nodes[1] {
+            assert!((transform.tx - -160.0).abs() < 1e-4);
+            assert!(transform.ty.abs() < 1e-4);
+        } else {
+            panic!("Expected SceneNode::Group for clip 2");
+        }
+    }
+
+    #[test]
+    fn scene_transition_series_slide_up() {
+        let rect1 = SceneRect::new(0.0, 0.0, 10.0, 10.0, Color::WHITE);
+        let rect2 = SceneRect::new(0.0, 0.0, 20.0, 20.0, Color::BLACK);
+        let series = SceneTransitionSeries::new()
+            .clip(60, rect1)
+            .transition(TransitionKind::SlideUp, TransitionTiming::new(20))
+            .clip(60, rect2);
+
+        // Frame 50 (midpoint of overlap [40, 60)): p = 0.5
+        // Composition height = 180
+        // Outgoing (clip 1): ty = -p * height = -90.0
+        // Incoming (clip 2): ty = (1 - p) * height = +90.0
+        let mut scene = Scene::new();
+        series
+            .emit(
+                SceneFrameContext::new(50, context()),
+                &Value::Null,
+                &mut scene,
+            )
+            .unwrap();
+        assert_eq!(scene.nodes.len(), 2);
+
+        if let SceneNode::Group { transform, .. } = &scene.nodes[0] {
+            assert!(transform.tx.abs() < 1e-4);
+            assert!((transform.ty - -90.0).abs() < 1e-4);
+        } else {
+            panic!("Expected SceneNode::Group for clip 1");
+        }
+
+        if let SceneNode::Group { transform, .. } = &scene.nodes[1] {
+            assert!(transform.tx.abs() < 1e-4);
+            assert!((transform.ty - 90.0).abs() < 1e-4);
+        } else {
+            panic!("Expected SceneNode::Group for clip 2");
+        }
+    }
+
+    #[test]
+    fn scene_transition_series_slide_down() {
+        let rect1 = SceneRect::new(0.0, 0.0, 10.0, 10.0, Color::WHITE);
+        let rect2 = SceneRect::new(0.0, 0.0, 20.0, 20.0, Color::BLACK);
+        let series = SceneTransitionSeries::new()
+            .clip(60, rect1)
+            .transition(TransitionKind::SlideDown, TransitionTiming::new(20))
+            .clip(60, rect2);
+
+        // Frame 50 (midpoint of overlap [40, 60)): p = 0.5
+        // Composition height = 180
+        // Outgoing (clip 1): ty = p * height = +90.0
+        // Incoming (clip 2): ty = -(1 - p) * height = -90.0
+        let mut scene = Scene::new();
+        series
+            .emit(
+                SceneFrameContext::new(50, context()),
+                &Value::Null,
+                &mut scene,
+            )
+            .unwrap();
+        assert_eq!(scene.nodes.len(), 2);
+
+        if let SceneNode::Group { transform, .. } = &scene.nodes[0] {
+            assert!(transform.tx.abs() < 1e-4);
+            assert!((transform.ty - 90.0).abs() < 1e-4);
+        } else {
+            panic!("Expected SceneNode::Group for clip 1");
+        }
+
+        if let SceneNode::Group { transform, .. } = &scene.nodes[1] {
+            assert!(transform.tx.abs() < 1e-4);
+            assert!((transform.ty - -90.0).abs() < 1e-4);
+        } else {
+            panic!("Expected SceneNode::Group for clip 2");
+        }
+    }
+
+    #[test]
+    fn scene_transition_series_chained_multi_transitions() {
+        let r1 = SceneRect::new(0.0, 0.0, 10.0, 10.0, Color::WHITE);
+        let r2 = SceneRect::new(0.0, 0.0, 20.0, 20.0, Color::BLACK);
+        let r3 = SceneRect::new(0.0, 0.0, 30.0, 30.0, Color::rgb(255, 0, 0));
+
+        let series = SceneTransitionSeries::new()
+            .clip(40, r1)
+            .transition(TransitionKind::SlideLeft, TransitionTiming::new(10))
+            .clip(40, r2)
+            .transition(TransitionKind::Fade, TransitionTiming::new(10))
+            .clip(40, r3);
+
+        // Clip 1: start = 0, duration = 40 (active [0, 40))
+        // Clip 2: start = 30, duration = 40 (active [30, 70))
+        // Clip 3: start = 60, duration = 40 (active [60, 100))
+        // Total duration: 100
+        assert_eq!(series.total_duration(), 100);
+
+        // Transition 1 midpoint at frame 35 (overlap [30, 40), p = 0.5)
+        let mut scene = Scene::new();
+        series
+            .emit(
+                SceneFrameContext::new(35, context()),
+                &Value::Null,
+                &mut scene,
+            )
+            .unwrap();
+        assert_eq!(scene.nodes.len(), 2);
+        if let SceneNode::Group { transform, .. } = &scene.nodes[0] {
+            assert!((transform.tx - -160.0).abs() < 1e-4);
+        } else {
+            panic!("Clip 1 should be a group");
+        }
+        if let SceneNode::Group { transform, .. } = &scene.nodes[1] {
+            assert!((transform.tx - 160.0).abs() < 1e-4);
+        } else {
+            panic!("Clip 2 should be a group");
+        }
+
+        // Transition 2 midpoint at frame 65 (overlap [60, 70), p = 0.5)
+        let mut scene = Scene::new();
+        series
+            .emit(
+                SceneFrameContext::new(65, context()),
+                &Value::Null,
+                &mut scene,
+            )
+            .unwrap();
+        assert_eq!(scene.nodes.len(), 2);
+        if let SceneNode::Group { opacity, .. } = &scene.nodes[0] {
+            assert!((*opacity - 0.5).abs() < 1e-4);
+        } else {
+            panic!("Clip 2 should fade out");
+        }
+        if let SceneNode::Group { opacity, .. } = &scene.nodes[1] {
+            assert!((*opacity - 0.5).abs() < 1e-4);
+        } else {
+            panic!("Clip 3 should fade in");
+        }
+    }
+
+    #[test]
+    fn scene_transition_series_combined_in_out_for_short_clip() {
+        let r1 = SceneRect::new(0.0, 0.0, 10.0, 10.0, Color::WHITE);
+        let r2 = SceneRect::new(0.0, 0.0, 20.0, 20.0, Color::BLACK);
+        let r3 = SceneRect::new(0.0, 0.0, 30.0, 30.0, Color::rgb(255, 0, 0));
+
+        let series = SceneTransitionSeries::new()
+            .clip(30, r1)
+            .transition(TransitionKind::Fade, TransitionTiming::new(10))
+            .clip(10, r2) // 10 frames: entering on [0, 10) AND exiting on [0, 10)
+            .transition(TransitionKind::Fade, TransitionTiming::new(10))
+            .clip(30, r3);
+
+        // Timeline starts:
+        // Clip 1: start 0, duration 30
+        // Clip 2: start 20 (30 - 10), duration 10
+        // Clip 3: start 20 (20 + 10 - 10), duration 30
+        // Total duration: 50
+        assert_eq!(series.total_duration(), 50);
+
+        // At frame 25 (local frame 5 in Clip 2):
+        // Clip 2: p_in = 5/10 = 0.5 (alpha_in = 0.5), p_out = 5/10 = 0.5 (alpha_out = 0.5)
+        // Combined alpha = 0.5 * 0.5 = 0.25
+        let mut scene = Scene::new();
+        series
+            .emit(
+                SceneFrameContext::new(25, context()),
+                &Value::Null,
+                &mut scene,
+            )
+            .unwrap();
+        // At frame 25, all 3 clips overlap:
+        // Clip 1: local frame 25 -> out_start = 20 -> p_out = 5/10 = 0.5 -> alpha = 0.5
+        // Clip 2: local frame 5 -> alpha = 0.25
+        // Clip 3: local frame 5 -> in_overlap = 10 -> p_in = 5/10 = 0.5 -> alpha = 0.5
+        assert_eq!(scene.nodes.len(), 3);
+
+        if let SceneNode::Group { opacity, .. } = &scene.nodes[0] {
+            assert!((*opacity - 0.5).abs() < 1e-4);
+        } else {
+            panic!("Clip 1 expected group");
+        }
+
+        if let SceneNode::Group { opacity, .. } = &scene.nodes[1] {
+            assert!((*opacity - 0.25).abs() < 1e-4);
+        } else {
+            panic!("Clip 2 expected group with combined opacity");
+        }
+
+        if let SceneNode::Group { opacity, .. } = &scene.nodes[2] {
+            assert!((*opacity - 0.5).abs() < 1e-4);
+        } else {
+            panic!("Clip 3 expected group");
+        }
     }
 }

@@ -1,6 +1,9 @@
 //! Native Scene adapter for all procedural shape generators.
 
-use crate::{make_arrow, make_circle, make_pie, make_polygon, make_rect, make_star, make_triangle};
+use crate::{
+    make_arrow, make_callout, make_circle, make_heart, make_pie, make_polygon, make_rect,
+    make_spark, make_star, make_triangle, CalloutDirection,
+};
 use dioxuscut_composition::{CompositionError, SceneEmitter, SceneFrameContext};
 use dioxuscut_rasterizer::{Color, Scene, SceneNode, Transform2D};
 use serde_json::Value;
@@ -44,9 +47,30 @@ impl SceneShape {
         Self::new(path, width, height)
     }
 
-    pub fn pie(radius: f64, progress: f64) -> Self {
-        let (path, width, height) = make_pie(radius, progress);
-        Self::new(path, width, height)
+    pub fn callout(
+        width: f64,
+        height: f64,
+        pointer_length: f64,
+        pointer_direction: CalloutDirection,
+    ) -> Self {
+        let shape = make_callout(width, height, pointer_length, pointer_direction);
+        Self::new(shape.path, shape.width, shape.height)
+    }
+
+    pub fn heart(width: f64, height: f64) -> Self {
+        let shape = make_heart(width, height);
+        Self::new(shape.path, shape.width, shape.height)
+    }
+
+    pub fn pie(
+        radius: f64,
+        progress: f64,
+        close_path: bool,
+        counter_clockwise: bool,
+        rotation: f64,
+    ) -> Self {
+        let shape = make_pie(radius, progress, close_path, counter_clockwise, rotation);
+        Self::new(shape.path, shape.width, shape.height)
     }
 
     pub fn polygon(points: usize, radius: f64) -> Self {
@@ -57,6 +81,11 @@ impl SceneShape {
     pub fn rect(width: f64, height: f64, corner_radius: f64) -> Self {
         let (path, width, height) = make_rect(width, height, corner_radius);
         Self::new(path, width, height)
+    }
+
+    pub fn spark(width: f64, height: f64, edge_roundness: f64, corner_radius: f64) -> Self {
+        let shape = make_spark(width, height, edge_roundness, corner_radius);
+        Self::new(shape.path, shape.width, shape.height)
     }
 
     pub fn star(points: usize, inner_radius: f64, outer_radius: f64) -> Self {
@@ -163,10 +192,13 @@ mod tests {
     fn every_shape_generator_emits_a_native_path() {
         let shapes = [
             SceneShape::arrow(80.0, 10.0),
+            SceneShape::callout(60.0, 40.0, 15.0, CalloutDirection::Down),
             SceneShape::circle(30.0),
-            SceneShape::pie(30.0, 0.25),
+            SceneShape::heart(60.0, 60.0),
+            SceneShape::pie(30.0, 0.25, true, false, 0.0),
             SceneShape::polygon(6, 30.0),
             SceneShape::rect(60.0, 40.0, 8.0),
+            SceneShape::spark(50.0, 50.0, 0.5, 2.0),
             SceneShape::star(5, 12.0, 30.0),
             SceneShape::triangle(60.0),
         ];
@@ -190,6 +222,67 @@ mod tests {
 
         assert!(image.get_pixel(50, 50)[0] > 240);
         assert_eq!(image.get_pixel(20, 30)[3], 0);
+    }
+
+    #[test]
+    fn heart_shape_renders_native_pixels() {
+        let shape = SceneShape::heart(80.0, 80.0)
+            .at(20.0, 20.0)
+            .with_fill("#ff0000");
+        let composition = SceneEmitterComposition::new("heart_shape", shape);
+        let scene = composition.render(0, &Value::Null, context()).unwrap();
+        let image = TinySkiaBackend::headless()
+            .render_frame(&scene, &FrameConfig::new(120, 120, 0, 30.0))
+            .unwrap();
+
+        // Center of heart at (60, 60) should be filled with red
+        assert!(image.get_pixel(60, 60)[0] > 200);
+    }
+
+    #[test]
+    fn callout_shape_renders_native_pixels() {
+        let shape = SceneShape::callout(80.0, 50.0, 20.0, CalloutDirection::Down)
+            .at(10.0, 10.0)
+            .with_fill("#00ff00");
+        let composition = SceneEmitterComposition::new("callout_shape", shape);
+        let scene = composition.render(0, &Value::Null, context()).unwrap();
+        let image = TinySkiaBackend::headless()
+            .render_frame(&scene, &FrameConfig::new(120, 120, 0, 30.0))
+            .unwrap();
+
+        // Inside callout body
+        assert!(image.get_pixel(50, 35)[1] > 200);
+    }
+
+    #[test]
+    fn spark_shape_renders_native_pixels() {
+        let shape = SceneShape::spark(80.0, 80.0, 0.5, 0.0)
+            .at(20.0, 20.0)
+            .with_fill("#0000ff");
+        let composition = SceneEmitterComposition::new("spark_shape", shape);
+        let scene = composition.render(0, &Value::Null, context()).unwrap();
+        let image = TinySkiaBackend::headless()
+            .render_frame(&scene, &FrameConfig::new(120, 120, 0, 30.0))
+            .unwrap();
+
+        // Center of spark at (60, 60) should be blue
+        assert!(image.get_pixel(60, 60)[2] > 200);
+    }
+
+    #[test]
+    fn pie_shape_renders_native_pixels() {
+        let shape = SceneShape::pie(40.0, 0.5, true, false, 0.0)
+            .at(20.0, 20.0)
+            .with_fill("#ffff00");
+        let composition = SceneEmitterComposition::new("pie_shape", shape);
+        let scene = composition.render(0, &Value::Null, context()).unwrap();
+        let image = TinySkiaBackend::headless()
+            .render_frame(&scene, &FrameConfig::new(120, 120, 0, 30.0))
+            .unwrap();
+
+        // Right half of pie slice at (80, 60) should be yellow (R > 200, G > 200)
+        assert!(image.get_pixel(80, 60)[0] > 200);
+        assert!(image.get_pixel(80, 60)[1] > 200);
     }
 
     #[test]

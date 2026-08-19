@@ -524,6 +524,93 @@ pub fn measure_text_width(
     measure_text(text, font_size, &fonts).map_err(font_asset_error)
 }
 
+/// Find the largest font size at which `text` fits within `max_width`.
+///
+/// Binary search between `min_font_size` and `max_font_size` with sub-pixel precision.
+/// Returns the font size that just fits, or `min_font_size` if text cannot fit.
+///
+/// # Arguments
+/// * `text` - the text to measure
+/// * `max_width` - maximum allowed width in pixels
+/// * `font_sources` - font file paths (same as `measure_text_width`)
+/// * `min_font_size` - lower bound for binary search (must be positive)
+/// * `max_font_size` - upper bound for binary search (must be >= `min_font_size` and <= 4096.0)
+pub fn fit_text(
+    text: &str,
+    max_width: f64,
+    font_sources: &[String],
+    min_font_size: f64,
+    max_font_size: f64,
+) -> Result<f64, RasterError> {
+    if !max_width.is_finite() || !min_font_size.is_finite() || !max_font_size.is_finite() {
+        return Err(RasterError::Scene(
+            "fit_text parameters must be finite".into(),
+        ));
+    }
+    if max_width <= 0.0 {
+        return Err(RasterError::Scene(
+            "fit_text max_width must be positive".into(),
+        ));
+    }
+    if min_font_size <= 0.0 {
+        return Err(RasterError::Scene(
+            "fit_text min_font_size must be positive".into(),
+        ));
+    }
+    if max_font_size < min_font_size {
+        return Err(RasterError::Scene(
+            "fit_text max_font_size must be greater than or equal to min_font_size".into(),
+        ));
+    }
+    if max_font_size > 4096.0 {
+        return Err(RasterError::Scene(
+            "fit_text max_font_size must not exceed 4096".into(),
+        ));
+    }
+
+    if text.is_empty() {
+        return Ok(max_font_size);
+    }
+
+    let max_width_actual = f64::from(measure_text_width(
+        text,
+        max_font_size as f32,
+        font_sources,
+    )?);
+    if max_width_actual <= max_width {
+        return Ok(max_font_size);
+    }
+
+    let min_width_actual = f64::from(measure_text_width(
+        text,
+        min_font_size as f32,
+        font_sources,
+    )?);
+    if min_width_actual > max_width {
+        return Ok(min_font_size);
+    }
+
+    let mut lo = min_font_size;
+    let mut hi = max_font_size;
+    let mut best = min_font_size;
+
+    // Up to 25 iterations of binary search → precision ~0.1px
+    for _ in 0..25 {
+        if hi - lo < 0.1 {
+            break;
+        }
+        let mid = (lo + hi) / 2.0;
+        let width = f64::from(measure_text_width(text, mid as f32, font_sources)?);
+        if width <= max_width {
+            best = mid;
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    Ok(best)
+}
+
 fn validate_text_box(request: &TextBox) -> Result<(), RasterError> {
     let finite = [
         ("x", request.x),
@@ -765,6 +852,145 @@ pub struct RenderedText {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fit_text_finds_font_size_within_width() {
+        let cache = FontCache::bundled();
+        let _font_path = cache.font_path().unwrap().to_string();
+        let sources: Vec<String> = vec![];
+        let size = fit_text("Hello World", 200.0, &sources, 8.0, 48.0);
+        assert!(size.is_ok(), "fit_text should succeed");
+        let size = size.unwrap();
+        assert!(
+            (8.0..=48.0).contains(&size),
+            "font size {size} out of range"
+        );
+        let measured = measure_text_width("Hello World", size as f32, &sources).unwrap();
+        assert!(
+            f64::from(measured) <= 200.0,
+            "measured width {measured} should be <= max_width 200.0"
+        );
+    }
+
+    #[test]
+    fn fit_text_exact_max_font_size_for_short_text() {
+        let sources: Vec<String> = vec![];
+        let size = fit_text("Hi", 1000.0, &sources, 10.0, 50.0).unwrap();
+        assert_eq!(
+            size, 50.0,
+            "should return max_font_size when text easily fits"
+        );
+    }
+
+    #[test]
+    fn fit_text_empty_string_returns_max_font_size() {
+        let sources: Vec<String> = vec![];
+        let size = fit_text("", 200.0, &sources, 8.0, 48.0).unwrap();
+        assert_eq!(size, 48.0, "empty text should return max_font_size");
+    }
+
+    #[test]
+    fn fit_text_returns_min_font_size_when_overflows() {
+        let sources: Vec<String> = vec![];
+        let size = fit_text(
+            "This is a very long sentence that cannot possibly fit in a tiny width",
+            5.0,
+            &sources,
+            12.0,
+            64.0,
+        )
+        .unwrap();
+        assert_eq!(
+            size, 12.0,
+            "should return min_font_size when text cannot fit"
+        );
+    }
+
+    #[test]
+    fn fit_text_equal_min_and_max_font_size() {
+        let sources: Vec<String> = vec![];
+        // Fits:
+        let size_fit = fit_text("Hello", 500.0, &sources, 24.0, 24.0).unwrap();
+        assert_eq!(size_fit, 24.0);
+
+        // Does not fit:
+        let size_overflow = fit_text("Hello World Very Long", 5.0, &sources, 24.0, 24.0).unwrap();
+        assert_eq!(size_overflow, 24.0);
+    }
+
+    #[test]
+    fn fit_text_rejects_non_finite_inputs() {
+        let sources: Vec<String> = vec![];
+        assert!(fit_text("test", f64::NAN, &sources, 8.0, 48.0).is_err());
+        assert!(fit_text("test", 200.0, &sources, f64::NAN, 48.0).is_err());
+        assert!(fit_text("test", 200.0, &sources, 8.0, f64::NAN).is_err());
+        assert!(fit_text("test", f64::INFINITY, &sources, 8.0, 48.0).is_err());
+        assert!(fit_text("test", 200.0, &sources, f64::INFINITY, 48.0).is_err());
+        assert!(fit_text("test", 200.0, &sources, 8.0, f64::INFINITY).is_err());
+    }
+
+    #[test]
+    fn fit_text_rejects_invalid_bounds() {
+        let sources: Vec<String> = vec![];
+        // Non-positive max_width
+        assert!(fit_text("test", 0.0, &sources, 8.0, 48.0).is_err());
+        assert!(fit_text("test", -100.0, &sources, 8.0, 48.0).is_err());
+
+        // Non-positive min_font_size
+        assert!(fit_text("test", 200.0, &sources, 0.0, 48.0).is_err());
+        assert!(fit_text("test", 200.0, &sources, -10.0, 48.0).is_err());
+
+        // max_font_size < min_font_size
+        assert!(fit_text("test", 200.0, &sources, 50.0, 20.0).is_err());
+
+        // max_font_size > 4096.0
+        assert!(fit_text("test", 200.0, &sources, 10.0, 5000.0).is_err());
+    }
+
+    #[test]
+    fn fit_text_propagates_font_load_error_for_invalid_source() {
+        let sources = vec!["/nonexistent/path/custom_font.ttf".to_string()];
+        let err = fit_text("test", 200.0, &sources, 8.0, 48.0);
+        assert!(err.is_err());
+        match err.unwrap_err() {
+            RasterError::FontAsset { path, .. } => {
+                assert!(path.contains("custom_font.ttf"));
+            }
+            other => panic!("expected RasterError::FontAsset, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn measure_text_width_empty_string() {
+        let width = measure_text_width("", 24.0, &[]).unwrap();
+        assert_eq!(width, 0.0);
+    }
+
+    #[test]
+    fn measure_text_width_scales_with_font_size() {
+        let w1 = measure_text_width("Scaling Test", 16.0, &[]).unwrap();
+        let w2 = measure_text_width("Scaling Test", 32.0, &[]).unwrap();
+        assert!(w1 > 0.0);
+        assert!(
+            w2 > w1 * 1.8,
+            "doubling font size should roughly double width"
+        );
+    }
+
+    #[test]
+    fn measure_text_width_scales_with_text_length() {
+        let w_short = measure_text_width("Short", 20.0, &[]).unwrap();
+        let w_long = measure_text_width("Short and much longer text", 20.0, &[]).unwrap();
+        assert!(w_long > w_short);
+    }
+
+    #[test]
+    fn measure_text_width_rejects_invalid_font_size() {
+        assert!(measure_text_width("test", f32::NAN, &[]).is_err());
+        assert!(measure_text_width("test", 0.0, &[]).is_err());
+        assert!(measure_text_width("test", -5.0, &[]).is_err());
+        assert!(measure_text_width("test", 5000.0, &[]).is_err());
+    }
 
     #[test]
     fn test_font_cache_loads() {

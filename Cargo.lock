@@ -1765,6 +1765,7 @@ dependencies = [
  "dioxus",
  "dioxuscut-animation",
  "dioxuscut-composition",
+ "dioxuscut-paths",
  "dioxuscut-rasterizer",
  "serde",
  "serde_json",

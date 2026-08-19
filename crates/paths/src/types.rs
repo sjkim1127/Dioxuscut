@@ -33,6 +33,16 @@ pub enum Instruction {
     },
     /// `Q x1 y1 x y` or `q x1 y1 x y` (Quadratic Bezier)
     QuadCurveTo { x1: f64, y1: f64, x: f64, y: f64 },
+    /// `A rx ry x_axis_rotation large_arc_flag sweep_flag x y` or `a ...` (Elliptical Arc)
+    ArcTo {
+        rx: f64,
+        ry: f64,
+        x_axis_rotation: f64,
+        large_arc_flag: bool,
+        sweep_flag: bool,
+        x: f64,
+        y: f64,
+    },
     /// `Z` or `z`
     ClosePath,
 }
