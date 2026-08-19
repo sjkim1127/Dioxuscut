@@ -381,6 +381,86 @@ impl Default for Transform2D {
 }
 
 impl Transform2D {
+    /// Returns the identity transform (no translation, unit scale, 0 rotation).
+    pub fn identity() -> Self {
+        Self::default()
+    }
+
+    /// Creates a translation transform.
+    pub fn translate(tx: f32, ty: f32) -> Self {
+        Self {
+            tx,
+            ty,
+            ..Self::default()
+        }
+    }
+
+    /// Creates a uniform or non-uniform scale transform.
+    pub fn scale(scale_x: f32, scale_y: f32) -> Self {
+        Self {
+            scale_x,
+            scale_y,
+            ..Self::default()
+        }
+    }
+
+    /// Creates a uniform scale transform.
+    pub fn scale_uniform(factor: f32) -> Self {
+        Self::scale(factor, factor)
+    }
+
+    /// Creates a rotation transform in degrees.
+    pub fn rotate(deg: f32) -> Self {
+        Self {
+            rotate_deg: deg,
+            ..Self::default()
+        }
+    }
+
+    /// Sets or adds translation along the X and Y axes.
+    pub fn with_translate(mut self, tx: f32, ty: f32) -> Self {
+        self.tx = tx;
+        self.ty = ty;
+        self
+    }
+
+    /// Sets or adds scale along X and Y axes.
+    pub fn with_scale(mut self, scale_x: f32, scale_y: f32) -> Self {
+        self.scale_x = scale_x;
+        self.scale_y = scale_y;
+        self
+    }
+
+    /// Sets uniform scale.
+    pub fn with_scale_uniform(self, factor: f32) -> Self {
+        self.with_scale(factor, factor)
+    }
+
+    /// Sets rotation in degrees.
+    pub fn with_rotate(mut self, deg: f32) -> Self {
+        self.rotate_deg = deg;
+        self
+    }
+
+    /// Combines transforms in sequential order: translate, scale, then rotate.
+    pub fn make_transform(
+        translate: Option<(f32, f32)>,
+        scale: Option<(f32, f32)>,
+        rotate_deg: Option<f32>,
+    ) -> Self {
+        let mut t = Self::identity();
+        if let Some((tx, ty)) = translate {
+            t = t.with_translate(tx, ty);
+        }
+        if let Some((sx, sy)) = scale {
+            t = t.with_scale(sx, sy);
+        }
+        if let Some(deg) = rotate_deg {
+            t = t.with_rotate(deg);
+        }
+        t
+    }
+
     pub fn to_tiny_skia(&self) -> tiny_skia::Transform {
         tiny_skia::Transform::from_translate(self.tx, self.ty)
             .post_scale(self.scale_x, self.scale_y)
@@ -566,5 +646,38 @@ mod tests {
                 ..
             } if (opacity - 1.0).abs() < f32::EPSILON
         ));
+    }
+
+    #[test]
+    fn transform2d_builder_methods() {
+        let t = Transform2D::identity()
+            .with_translate(100.0, 200.0)
+            .with_scale(2.0, 3.0)
+            .with_rotate(45.0);
+
+        assert_eq!(t.tx, 100.0);
+        assert_eq!(t.ty, 200.0);
+        assert_eq!(t.scale_x, 2.0);
+        assert_eq!(t.scale_y, 3.0);
+        assert_eq!(t.rotate_deg, 45.0);
+
+        let t_direct = Transform2D::translate(10.0, 20.0);
+        assert_eq!(t_direct.tx, 10.0);
+        assert_eq!(t_direct.ty, 20.0);
+        assert_eq!(t_direct.scale_x, 1.0);
+
+        let t_scale_uni = Transform2D::scale_uniform(1.5);
+        assert_eq!(t_scale_uni.scale_x, 1.5);
+        assert_eq!(t_scale_uni.scale_y, 1.5);
+
+        let t_rot = Transform2D::rotate(90.0);
+        assert_eq!(t_rot.rotate_deg, 90.0);
+
+        let t_combo =
+            Transform2D::make_transform(Some((50.0, -50.0)), Some((0.5, 0.5)), Some(180.0));
+        assert_eq!(t_combo.tx, 50.0);
+        assert_eq!(t_combo.ty, -50.0);
+        assert_eq!(t_combo.scale_x, 0.5);
+        assert_eq!(t_combo.rotate_deg, 180.0);
     }
 }

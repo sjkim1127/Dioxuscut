@@ -5759,6 +5759,7 @@ dependencies = [
  "dioxuscut-composition",
  "dioxuscut-core",
  "dioxuscut-player",
+ "dioxuscut-rasterizer",
  "dioxuscut-renderer",
  "serde",
  "serde_json",

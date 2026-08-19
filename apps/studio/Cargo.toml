@@ -20,6 +20,7 @@ dioxuscut-composition = { workspace = true }
 dioxuscut-core      = { workspace = true }
 dioxuscut-animation = { workspace = true }
 dioxuscut-player    = { workspace = true }
+dioxuscut-rasterizer  = { workspace = true }
 dioxuscut-renderer  = { workspace = true }
 tokio               = { workspace = true }
 tracing             = { workspace = true }

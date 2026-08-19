@@ -998,6 +998,101 @@ impl SceneEmitter for SceneLinearGradient {
     }
 }
 
+// ── SceneTrail ────────────────────────────────────────────────────────────────
+
+/// Strategy for calculating opacity across ghost layers in a trail.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum SceneTrailOpacity {
+    /// Linear decay: newest layer is base_opacity, oldest approaches 0.
+    #[default]
+    Linear,
+    /// Exponential decay: opacity = base_opacity * decay_factor^layer_index.
+    Exponential(f32),
+    /// Uniform opacity across all trail layers.
+    Uniform(f32),
+}
+
+/// Renders ghost trailing copies of child elements from preceding frames.
+///
+/// Ported from `@remotion/motion-blur`'s `<Trail />` component.
+///
+/// # Fields
+/// - `layers`: Number of trailing ghost layers (e.g. 5)
+/// - `lag_in_frames`: Frame delay between consecutive ghost layers (e.g. 1 or 2)
+/// - `trail_opacity`: Opacity decay strategy across trailing layers
+/// - `child`: Inner emitter to produce ghost trails for
+pub struct SceneTrail<E> {
+    pub layers: u32,
+    pub lag_in_frames: u32,
+    pub trail_opacity: SceneTrailOpacity,
+    pub child: E,
+}
+
+impl<E> SceneTrail<E> {
+    /// Creates a new trail with the specified number of layers and frame lag.
+    pub fn new(layers: u32, lag_in_frames: u32, child: E) -> Self {
+        Self {
+            layers: layers.max(1),
+            lag_in_frames: lag_in_frames.max(1),
+            trail_opacity: SceneTrailOpacity::Linear,
+            child,
+        }
+    }
+
+    /// Customizes the opacity decay across trail layers.
+    pub fn with_opacity_strategy(mut self, strategy: SceneTrailOpacity) -> Self {
+        self.trail_opacity = strategy;
+        self
+    }
+}
+
+impl<E: SceneEmitter> SceneEmitter for SceneTrail<E> {
+    fn emit(
+        &self,
+        context: SceneFrameContext,
+        props: &Value,
+        scene: &mut Scene,
+    ) -> Result<(), CompositionError> {
+        let total_layers = self.layers.max(1);
+
+        // Render from oldest ghost layer (layer = total_layers - 1) to newest (layer = 0)
+        // so that newer frames render on top.
+        for layer_idx in (0..total_layers).rev() {
+            let frame_lag = layer_idx * self.lag_in_frames;
+            let ghost_frame = context.frame.saturating_sub(frame_lag);
+
+            let opacity = match self.trail_opacity {
+                SceneTrailOpacity::Linear => {
+                    // layer 0 (current) -> 1.0; oldest layer -> 1.0 / (total_layers + 1)
+                    1.0 - (layer_idx as f32 / total_layers as f32) * 0.8
+                }
+                SceneTrailOpacity::Exponential(decay) => {
+                    decay.clamp(0.0, 1.0).powi(layer_idx as i32)
+                }
+                SceneTrailOpacity::Uniform(val) => val.clamp(0.0, 1.0),
+            };
+
+            let ghost_context = context.with_local_frame(ghost_frame);
+
+            if (opacity - 1.0).abs() < 1e-4 {
+                self.child.emit(ghost_context, props, scene)?;
+            } else if opacity > 1e-4 {
+                let mut ghost_scene = Scene::new();
+                self.child.emit(ghost_context, props, &mut ghost_scene)?;
+                if !ghost_scene.nodes.is_empty() {
+                    scene.push(SceneNode::Group {
+                        transform: Transform2D::identity(),
+                        opacity,
+                        children: ghost_scene.nodes,
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1746,6 +1841,91 @@ mod tests {
             assert!((*opacity - 0.5).abs() < 1e-4);
         } else {
             panic!("Clip 3 expected group");
+        }
+    }
+
+    #[test]
+    fn scene_trail_emits_multiple_lagged_layers() {
+        let captured_frames = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+        let frames_clone = captured_frames.clone();
+        let child = move |ctx: SceneFrameContext, _props: &Value, scene: &mut Scene| {
+            frames_clone.lock().unwrap().push(ctx.frame);
+            scene.push(SceneNode::Rect {
+                x: ctx.frame as f32 * 10.0,
+                y: 0.0,
+                w: 20.0,
+                h: 20.0,
+                fill: Color::WHITE,
+                stroke: None,
+                stroke_width: 0.0,
+                corner_radius: 0.0,
+            });
+            Ok(())
+        };
+
+        // 3 layers with lag 2 frames:
+        // at frame 10:
+        // layer 2 (oldest): ghost_frame = 10 - 2*2 = 6
+        // layer 1: ghost_frame = 10 - 1*2 = 8
+        // layer 0 (newest): ghost_frame = 10 - 0*2 = 10
+        let trail = SceneTrail::new(3, 2, child);
+        let mut scene = Scene::new();
+        trail
+            .emit(
+                SceneFrameContext::new(10, context()),
+                &Value::Null,
+                &mut scene,
+            )
+            .unwrap();
+
+        assert_eq!(*captured_frames.lock().unwrap(), vec![6, 8, 10]);
+        assert_eq!(scene.nodes.len(), 3);
+
+        // First 2 ghost layers should be wrapped in SceneNode::Group with opacity < 1.0
+        // The newest layer (frame 10) is rendered directly (opacity = 1.0)
+        assert!(matches!(scene.nodes[0], SceneNode::Group { opacity, .. } if opacity < 1.0));
+        assert!(matches!(scene.nodes[1], SceneNode::Group { opacity, .. } if opacity < 1.0));
+        assert!(matches!(scene.nodes[2], SceneNode::Rect { .. }));
+    }
+
+    #[test]
+    fn scene_trail_exponential_opacity() {
+        let child = |ctx: SceneFrameContext, _props: &Value, scene: &mut Scene| {
+            scene.push(SceneNode::Rect {
+                x: ctx.frame as f32,
+                y: 0.0,
+                w: 10.0,
+                h: 10.0,
+                fill: Color::WHITE,
+                stroke: None,
+                stroke_width: 0.0,
+                corner_radius: 0.0,
+            });
+            Ok(())
+        };
+
+        let trail =
+            SceneTrail::new(3, 1, child).with_opacity_strategy(SceneTrailOpacity::Exponential(0.5));
+        let mut scene = Scene::new();
+        trail
+            .emit(
+                SceneFrameContext::new(5, context()),
+                &Value::Null,
+                &mut scene,
+            )
+            .unwrap();
+
+        // 3 layers: layer 2 (opacity 0.25), layer 1 (opacity 0.5), layer 0 (opacity 1.0)
+        assert_eq!(scene.nodes.len(), 3);
+        if let SceneNode::Group { opacity, .. } = scene.nodes[0] {
+            assert!((opacity - 0.25).abs() < 1e-4);
+        } else {
+            panic!("Expected group for layer 2");
+        }
+        if let SceneNode::Group { opacity, .. } = scene.nodes[1] {
+            assert!((opacity - 0.5).abs() < 1e-4);
+        } else {
+            panic!("Expected group for layer 1");
         }
     }
 }

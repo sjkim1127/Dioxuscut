@@ -11,11 +11,12 @@
 use dioxus::prelude::*;
 use dioxus_desktop::{Config, LogicalSize, WindowBuilder};
 use dioxuscut_cli::{
-    built_in_registry, execute_render_command_with_registry, RenderBackend, RenderCodec,
-    RenderRequest,
+    built_in_registry, execute_render_command_with_registry_and_control, RenderBackend,
+    RenderCodec, RenderRequest,
 };
 use dioxuscut_composition::HelloWorldComposition;
 use dioxuscut_player::{CompositionHandle, NativeCompositionPreview, Player};
+use dioxuscut_rasterizer::RenderControl;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -68,9 +69,10 @@ enum RenderStatus {
     Running { percent: u8 },
     Done { output: PathBuf, elapsed: Duration },
     Failed { reason: String },
+    Cancelled,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone)]
 struct RenderJob {
     id: u64,
     composition_id: String,
@@ -81,10 +83,30 @@ struct RenderJob {
     output: PathBuf,
     status: RenderStatus,
     queued_at: Instant,
+    cancellation_token: dioxuscut_rasterizer::RenderCancellationToken,
+}
+
+impl PartialEq for RenderJob {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.composition_id == other.composition_id
+            && self.width == other.width
+            && self.height == other.height
+            && (self.fps - other.fps).abs() < f64::EPSILON
+            && self.duration_in_frames == other.duration_in_frames
+            && self.output == other.output
+            && self.status == other.status
+            && self.queued_at == other.queued_at
+    }
 }
 
 impl RenderJob {
-    fn new(id: u64, meta: &CompositionMeta, output: PathBuf) -> Self {
+    fn new(
+        id: u64,
+        meta: &CompositionMeta,
+        output: PathBuf,
+        cancellation_token: dioxuscut_rasterizer::RenderCancellationToken,
+    ) -> Self {
         Self {
             id,
             composition_id: meta.id.clone(),
@@ -95,6 +117,7 @@ impl RenderJob {
             output,
             status: RenderStatus::Queued,
             queued_at: Instant::now(),
+            cancellation_token,
         }
     }
 
@@ -106,6 +129,7 @@ impl RenderJob {
                 format!("Done ({:.1}s)", elapsed.as_secs_f64())
             }
             RenderStatus::Failed { reason } => format!("Failed: {reason}"),
+            RenderStatus::Cancelled => "Cancelled".into(),
         }
     }
 
@@ -115,6 +139,7 @@ impl RenderJob {
             RenderStatus::Running { .. } => "#6c63ff",
             RenderStatus::Done { .. } => "#22c55e",
             RenderStatus::Failed { .. } => "#ef4444",
+            RenderStatus::Cancelled => "#f59e0b",
         }
     }
 
@@ -123,8 +148,12 @@ impl RenderJob {
             RenderStatus::Queued => 0,
             RenderStatus::Running { percent } => *percent,
             RenderStatus::Done { .. } => 100,
-            RenderStatus::Failed { .. } => 0,
+            RenderStatus::Failed { .. } | RenderStatus::Cancelled => 0,
         }
+    }
+
+    fn is_running(&self) -> bool {
+        matches!(self.status, RenderStatus::Running { .. })
     }
 }
 
@@ -329,7 +358,11 @@ fn TopBar(mut props: TopBarProps) -> Element {
             ts,
         ));
 
-        let job = RenderJob::new(job_id, meta, output.clone());
+        // Create RenderControl with cancellation token
+        let control = RenderControl::new();
+        let cancel_token = control.cancellation_token();
+
+        let job = RenderJob::new(job_id, meta, output.clone(), cancel_token);
         props.jobs.push(job);
 
         // Build the render request
@@ -363,7 +396,9 @@ fn TopBar(mut props: TopBarProps) -> Element {
             }
 
             let registry = built_in_registry();
-            let result = execute_render_command_with_registry(&request, &registry).await;
+            let result =
+                execute_render_command_with_registry_and_control(&request, &registry, control)
+                    .await;
 
             let elapsed = start.elapsed();
             if let Some(job) = jobs_signal.write().iter_mut().find(|j| j.id == job_id) {
@@ -372,9 +407,14 @@ fn TopBar(mut props: TopBarProps) -> Element {
                         output: output.clone(),
                         elapsed,
                     },
-                    Err(e) => RenderStatus::Failed {
-                        reason: e.to_string(),
-                    },
+                    Err(e) => {
+                        let err_str = e.to_string();
+                        if err_str.to_lowercase().contains("cancel") {
+                            RenderStatus::Cancelled
+                        } else {
+                            RenderStatus::Failed { reason: err_str }
+                        }
+                    }
                 };
             }
         });
@@ -441,7 +481,10 @@ fn RenderQueuePanel(props: RenderQueuePanelProps) -> Element {
                 div {
                     style: "display: flex; flex-direction: column; gap: 8px;",
                     for job in jobs.iter().rev() {
-                        RenderJobRow { job: job.clone() }
+                        RenderJobRow {
+                            job: job.clone(),
+                            jobs: props.jobs,
+                        }
                     }
                 }
             }
@@ -452,19 +495,29 @@ fn RenderQueuePanel(props: RenderQueuePanelProps) -> Element {
 #[derive(Props, Clone, PartialEq)]
 struct RenderJobRowProps {
     job: RenderJob,
+    jobs: Signal<Vec<RenderJob>>,
 }
 
 #[component]
-fn RenderJobRow(props: RenderJobRowProps) -> Element {
+fn RenderJobRow(mut props: RenderJobRowProps) -> Element {
     let job = &props.job;
+    let job_id = job.id;
     let pct = job.progress_percent();
     let color = job.status_color();
     let label = job.status_label();
+    let is_running = job.is_running();
     let filename = job
         .output
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("output.mp4");
+
+    let on_cancel = move |_| {
+        if let Some(j) = props.jobs.write().iter_mut().find(|j| j.id == job_id) {
+            j.cancellation_token.cancel();
+            j.status = RenderStatus::Cancelled;
+        }
+    };
 
     rsx! {
         div {
@@ -475,14 +528,25 @@ fn RenderJobRow(props: RenderJobRowProps) -> Element {
                 font-size: 12px;
             ",
             div {
-                style: "display: flex; justify-content: space-between; margin-bottom: 5px;",
+                style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;",
                 span {
-                    style: "color: rgba(255,255,255,0.85); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px;",
+                    style: "color: rgba(255,255,255,0.85); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px;",
                     "{job.composition_id}"
                 }
-                span {
-                    style: "color: {color}; font-size: 11px; font-weight: 600; white-space: nowrap; margin-left: 6px;",
-                    "{label}"
+                div {
+                    style: "display: flex; align-items: center; gap: 6px;",
+                    span {
+                        style: "color: {color}; font-size: 11px; font-weight: 600; white-space: nowrap;",
+                        "{label}"
+                    }
+                    if is_running {
+                        button {
+                            onclick: on_cancel,
+                            title: "Cancel render",
+                            style: "background: rgba(239,68,68,0.2); color: #ef4444; border: 1px solid rgba(239,68,68,0.4); border-radius: 4px; padding: 1px 6px; font-size: 10px; cursor: pointer; font-weight: 600; transition: background 0.2s;",
+                            "✕ Cancel"
+                        }
+                    }
                 }
             }
             // Progress bar
