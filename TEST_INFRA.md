@@ -1,51 +1,33 @@
-# Dioxuscut Test Infrastructure
+# E2E Test Infra: Dioxuscut High-Performance Remotion-Equivalent Compositor Architecture
 
-## Test layers
+## Test Philosophy
+- Opaque-box, requirement-driven, and white-box adversarial verification.
+- Validates the complete stack across LRU caching, binary streaming IPC protocol, compositor daemon, and timeline virtualization.
+- Pass criteria: 100% test pass rate, 0 clippy warnings (`-D warnings`), 0 cargo fmt differences, clean forensic audit.
 
-### Tier 1: CLI feature coverage
+## Feature Inventory & Test Coverage Goals
+| # | Feature | Requirement | Tier 1 (Unit) | Tier 2 (Boundary) | Tier 3 (Cross-Feature) | Tier 4 (Scenario) |
+|---|---------|-------------|:-------------:|:-----------------:|:----------------------:|:-----------------:|
+| 1 | `FrameCacheManager` LRU Eviction & Bounded Memory | R1 | >=5 | >=5 | ✓ | ✓ |
+| 2 | Thread-Safe Concurrent Frame Cache Queries & Metrics | R1 | >=5 | >=5 | ✓ | ✓ |
+| 3 | Binary Packet Framing `remotion_buffer:...` Format | R2 | >=5 | >=5 | ✓ | ✓ |
+| 4 | Chunked Streaming `BinaryIpcCodec` / `StreamDecoder` | R2 | >=5 | >=5 | ✓ | ✓ |
+| 5 | Async Nonce Correlation & Out-of-Order Multiplexing | R2 | >=5 | >=5 | ✓ | ✓ |
+| 6 | Persistent `CompositorDaemon` Lifecycle & Warm Caches | R1 / R2 | >=5 | >=5 | ✓ | ✓ |
+| 7 | CLI Daemon Command (`dioxuscut daemon`) & Stdio Isolation | R2 | >=5 | >=5 | ✓ | ✓ |
+| 8 | `calculate_timestamp_slots` Viewport Partitioning | R3 | >=5 | >=5 | ✓ | ✓ |
+| 9 | `calculate_ruler_ticks` Multi-tier Continuous Zoom | R3 | >=5 | >=5 | ✓ | ✓ |
+| 10 | Background `ThumbnailCache` & Generator | R3 | >=5 | >=5 | ✓ | ✓ |
+| 11 | `WaveformPeaks` Min/Max Downsampling & SVG Path | R3 | >=5 | >=5 | ✓ | ✓ |
+| 12 | Studio Timeline Filmstrip & Scrubbing UI | R3 | >=5 | >=5 | ✓ | ✓ |
 
-`crates/cli/tests/tier1_feature_coverage.rs` verifies required flags, defaults, custom values, and short options.
+## Test Architecture
+- Unit Tests: Embedded in each respective crate (`crates/rasterizer/tests/` & modules, `crates/renderer/tests/`, `crates/player/tests/`).
+- Integration & E2E Tests: `tests/` and CLI subprocess verification.
+- Stress / Adversarial Tests: Concurrency races, cache thrashing, malformed packet injection, high-frequency zoom/pan timeline virtualization.
 
-### Tier 2: validation boundaries
-
-`crates/cli/tests/tier2_boundary_cases.rs` covers empty IDs, missing props, zero or odd dimensions, invalid FPS, zero duration, and valid props paths. Registry unit tests separately verify duplicate and unknown IDs.
-
-### Tier 3: subsystem integration
-
-`crates/cli/tests/tier3_subsystem_integration.rs` exercises:
-
-- Axum static-server startup, health check, and shutdown.
-- Real tiny-skia PNG frame generation and PNG signatures.
-- Real FFmpeg encoding from synthetic frames and MP4 container signatures.
-
-These tests are subsystem tests; they do not claim that Dioxus VDOM is converted into native scenes.
-
-### Tier 4: native acceptance render
-
-`crates/cli/tests/tier4_acceptance_scenario.rs` resolves the registered `HelloWorld` composition, applies JSON props, renders 60 native frames through the bounded raw-video pipe, invokes FFmpeg, and verifies the resulting MP4.
-
-```bash
-cargo run -p dioxuscut-cli -- render \
-  --composition HelloWorld \
-  --props data.json \
-  --output output.mp4 \
-  --width 1280 \
-  --height 720 \
-  --fps 30 \
-  --duration 60
-```
-
-## Optional-feature coverage
-
-GPU code must compile and pass Clippy even on hosts where no GPU adapter is available. The GPU initialization test accepts a clean unavailable-adapter error; supported hosts also render a real offscreen frame. Scenes containing unsupported GPU nodes use the CPU fallback.
-
-## Commands
-
-```bash
-cargo fmt --all -- --check
-cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-cargo check --locked --workspace --all-targets --all-features
-cargo test --locked --workspace --all-features
-```
-
-FFmpeg must be installed for Tier 3 encoding and Tier 4 acceptance tests.
+## Acceptance Commands
+- `cargo check --locked --workspace --all-targets --all-features`
+- `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`
+- `cargo test --locked --workspace --all-features`
+- `cargo fmt --all -- --check`

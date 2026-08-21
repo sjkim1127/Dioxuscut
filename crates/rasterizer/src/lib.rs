@@ -27,6 +27,7 @@
 
 pub mod backend;
 pub mod font;
+pub mod frame_cache;
 mod image_cache;
 pub mod render;
 pub mod scene;
@@ -39,6 +40,10 @@ pub use backend::{FrameConfig, RasterError, RasterizerBackend};
 pub use font::{
     fit_text, layout_text_box, measure_text_width, FontCache, PositionedTextLine, TextBox,
     TextBoxLayout, TextHorizontalAlign, TextOverflow, TextVerticalAlign,
+};
+pub use frame_cache::{
+    CacheMetrics, CachedFrame, FrameCacheConfig, FrameCacheKey, FrameCacheManager,
+    DEFAULT_MAX_CACHE_BYTES,
 };
 pub use render::{
     build_pipe_ffmpeg_args, render_all_frames, render_frame_timed, render_parallel,
