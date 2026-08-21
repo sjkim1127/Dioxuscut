@@ -52,11 +52,11 @@ Dioxuscut is a high-performance programmatic video composition and rendering eng
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | Native Noise & Procedural Shaders | `crates/noise` (Simplex 2D/3D/4D, Mulberry32, fBm, turbulence, `<NoiseBackground />`) | none | PLANNED |
-| M2 | Visual Effects & Transitions Engine | `crates/rasterizer` (filters), `crates/transitions` (wipes/flips/zoom), `crates/composition` | none | PLANNED |
-| M3 | Typography, Text Fitting & Rounded Boxes | `crates/rasterizer/src/font.rs`, `crates/shapes`, `crates/core` re-exports, formatting | none | PLANNED |
-| M4 | E2E Testing Suite (Tiers 1-4) | Independent E2E test harness & test suite creating `TEST_READY.md` | none | PLANNED |
-| M5 | Final Integration & Adversarial Hardening | Pass 100% of E2E suite, Tier 5 white-box challenger hardening, full workspace check | M1, M2, M3, M4 | PLANNED |
+| M1 | Native Noise & Procedural Shaders | `crates/noise` (Simplex 2D/3D/4D, Mulberry32, fBm, turbulence, `<NoiseBackground />`) | none | DONE |
+| M2 | Visual Effects & Transitions Engine | `crates/rasterizer` (filters), `crates/transitions` (wipes/flips/zoom), `crates/composition` | none | DONE |
+| M3 | Typography, Text Fitting & Rounded Boxes | `crates/rasterizer/src/font.rs`, `crates/shapes`, `crates/core` re-exports, formatting | none | DONE |
+| M4 | E2E Testing Suite (Tiers 1-4) | Independent E2E test harness & test suite creating `TEST_READY.md` | none | DONE |
+| M5 | Final Integration & Adversarial Hardening | Pass 100% of E2E suite, Tier 5 white-box challenger hardening, full workspace check | M1, M2, M3, M4 | DONE |
 
 ## Interface Contracts
 
@@ -96,6 +96,7 @@ pub enum SceneFilter {
     Tint { color: [u8; 4], amount: f32 },
     Duotone { primary: [u8; 4], secondary: [u8; 4] },
     ColorGrading { contrast: f32, saturation: f32, gamma: f32, tint: Option<[u8; 4]> },
+    ColorKey { key_color: [u8; 4], similarity: f32, smoothness: f32, spill_suppression: f32 },
 }
 ```
 
@@ -107,7 +108,7 @@ pub trait TransitionPresentation: Send + Sync {
 }
 
 pub struct ClockWipe { pub counter_clockwise: bool, pub start_angle_deg: f32 }
-pub struct LinearWipe { pub direction: WipeDirection, pub angle_rad: f32 }
+pub struct LinearWipe { pub direction: LinearWipeDirection, pub angle_rad: f32 }
 pub struct FlipTransition { pub direction: FlipDirection, pub perspective: f32 }
 pub struct ZoomTransition { pub mode: ZoomMode, pub max_scale: f32 }
 ```
@@ -176,5 +177,5 @@ pub fn create_rounded_text_box(
   - `easing.rs`: easing curves and spring physics
 - `crates/core/src/`:
   - `lib.rs`: re-exports of core noise, transitions, layout, and scene traits
-- `tests/e2e/`:
-  - Comprehensive opaque-box E2E tests validating R1, R2, R3
+- `tests/`:
+  - Comprehensive opaque-box E2E tests validating R1, R2, R3 across all crates
