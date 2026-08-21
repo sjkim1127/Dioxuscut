@@ -1,151 +1,180 @@
-# Project: Dioxuscut High-Performance Remotion-Equivalent Compositor Architecture
+# Project: Dioxuscut Remotion Native Porting
 
 ## Architecture
-This project implements the high-performance Remotion-equivalent compositor architecture in Dioxuscut, comprising:
-1. **LRU Frame Cache & Compositor Pipeline (`crates/rasterizer`, `crates/renderer`)**: Memory-bounded LRU frame caching (`FrameCacheManager`), persistent daemon compositor (`CompositorDaemon`), warm decoder reuse, thread-safe concurrent queries, cache hit metrics.
-2. **Zero-Copy Binary IPC Protocol (`crates/renderer`, `crates/cli`, `apps/studio`)**: `remotion_buffer:<nonce>:<len>:<status>:<payload>` streaming packet codec, chunked streaming, asynchronous response correlation via monotonic nonces, raw RGBA pixel byte stream transport, CLI daemon subcommand.
-3. **Dynamic Timeline Filmstrip & Waveform Virtualizer (`crates/player`, `apps/studio`)**: Viewport-aware slot partitioning (`calculate_timestamp_slots`), adaptive multi-tier dynamic ruler (`calculate_ruler_ticks`), background asynchronous thumbnail generation with LRU caching (`ThumbnailCache`), audio waveform peaks virtualization, and Studio UI integration.
+Dioxuscut is a high-performance programmatic video composition and rendering engine built with Rust and Dioxus. The project replaces Remotion TypeScript/WebGL packages with 100% pure Rust implementations, integrating directly into the Dioxuscut core timeline, scene graph, tiny-skia CPU rasterizer, and Dioxus reactive UI components with zero runtime dependency on `vendor/`.
 
 ```
-+------------------------------------------------------------------------------------------------+
-|                                      apps/studio (UI)                                          |
-|  +------------------------------------------------------------------------------------------+  |
-|  | TimelinePanel: Virtualized Filmstrip, Multi-tier Ruler, Waveform Peaks, Zoom/Scroll      |  |
-|  +------------------------------------------------------------------------------------------+  |
-|          |                                                            |                        |
-|          v                                                            v                        |
-|  crates/player (Virtualizer)                              crates/renderer (DaemonClient)       |
-|  - calculate_timestamp_slots                              - BinaryPacket framing               |
-|  - calculate_ruler_ticks                                  - Asynchronous Nonce Correlation     |
-|  - ThumbnailCache & Generator                             - Zero-copy Bytes transport          |
-+----------|------------------------------------------------------------|------------------------+
-           |                                                            | stdio / socket / IPC
-           |                                                            v
-           |                                                crates/renderer (CompositorDaemon)   |
-           |                                                - IPC Server (BinaryIpcCodec)        |
-           |                                                - Warm Font & Video Decoders         |
-           |                                                - CompositionRegistry                |
-           |                                                            |
-           +------------------------------------------------------------+
-                                        |
-                                        v
-                            crates/rasterizer
-                            - FrameCacheManager (Memory-bounded LRU)
-                            - CacheMetrics (hits, misses, evictions, bytes)
-                            - TinySkiaBackend (CPU Rasterizer)
+                    ┌─────────────────────────┐
+                    │      apps / studio      │
+                    └────────────┬────────────┘
+                                 │
+             ┌───────────────────┼───────────────────┐
+             ▼                   ▼                   ▼
+     ┌───────────────┐   ┌───────────────┐   ┌───────────────┐
+     │ crates/noise  │   │crates/transit.│   │crates/raster. │
+     │ - Simplex 2D-4D│   │ - ClockWipe   │   │ - Visual FX   │
+     │ - Mulberry32  │   │ - LinearWipe  │   │   (Vignette,  │
+     │ - fBm / Turb. │   │ - Flip / Zoom │   │    Chromatic, │
+     │ - <NoiseBg /> │   │ - Easing / Tim│   │    Grading)   │
+     └───────┬───────┘   └───────┬───────┘   │ - fit_text_*  │
+             │                   │           │ - rounded_box │
+             └───────────────────┼───────────┴───────┬───────┘
+                                 │                   │
+                                 ▼                   ▼
+                         ┌───────────────┐   ┌───────────────┐
+                         │crates/composit│   │  crates/core  │
+                         │ - SceneTrans. │   │ - Prelude     │
+                         │ - Timeline    │   │ - Public APIs │
+                         └───────────────┘   └───────────────┘
 ```
 
 ## Feature Inventory
 | # | Feature | Description | Milestone | Source |
 |---|---------|-------------|-----------|--------|
-| 1 | Memory-bounded LRU Frame Cache (`FrameCacheManager`) | Thread-safe in-memory LRU cache indexed by `FrameCacheKey` with byte-budget eviction | M1 | R1 |
-| 2 | Cache Metrics & Hit Ratio Tracking | Atomic tracking of hits, misses, evictions, bytes, and hit ratio | M1 | R1 |
-| 3 | Binary Packet Framing Protocol | `remotion_buffer:<nonce>:<len>:<status>:<payload>` framing format & parser | M2 | R2 |
-| 4 | Streaming Codec & Chunked Decoder/Encoder | `tokio_util::codec` `BinaryIpcCodec`, `StreamDecoder`, `StreamEncoder`, `make_streamer` | M2 | R2 |
-| 5 | Asynchronous Nonce Correlation & Error Signaling | Monotonic nonces with status code signaling and out-of-order response matching | M2 | R2 |
-| 6 | Persistent Compositor Daemon Pipeline | Long-running daemon managing warm renderers, decoders, and composition registry | M3 | R3 (Compositor) |
-| 7 | CLI Daemon Command & Stdio Isolation | `dioxuscut daemon` supporting stdio, socket, and port with strict stderr logging | M3 | R2 / R3 |
-| 8 | Viewport-Aware Timestamp Slots Calculation | `calculate_timestamp_slots` mapping zoom, client width, scroll, overscan to slots | M4 | R3 |
-| 9 | Adaptive Multi-tier Timeline Ruler | `calculate_ruler_ticks` computing adaptive tick intervals across 10,000x zoom range | M4 | R3 |
-| 10 | Background Thumbnail Generator & LRU Cache | Async thumbnail generation with LRU caching and Dioxus reactive updates | M4 | R3 |
-| 11 | Audio Waveform Peaks Virtualization | Min/max amplitude downsampling and SVG path generation | M4 | R3 |
-| 12 | Studio Virtualized Filmstrip & Timeline UI | Dynamic `<FilmstripView>`, `<TimelinePanel>`, zoom controls, track lanes | M5 | R3 |
-| 13 | Full E2E Integration, Verification & Stress Hardening | End-to-end integration tests, clippy, formatting, adversarial stress testing | M6 | Acceptance |
+| 1 | Simplex Noise (2D, 3D, 4D) | Deterministic Simplex noise algorithms with Mulberry32 seeding | M1 | ORIGINAL_REQUEST §R1 |
+| 2 | Perlin Gradient Generators | Gradient generators with seedable PRNG (`noise2d`, `noise3d`, `noise4d`) | M1 | ORIGINAL_REQUEST §R1 |
+| 3 | Fractal Brownian Motion (fBm) | Multi-octave fBm procedural noise synthesis (`fbm_2d`, `fbm_3d`) | M1 | ORIGINAL_REQUEST §R1 |
+| 4 | Turbulent Flow & Domain Warping | Vector path and coordinate domain warping using procedural turbulence | M1 | ORIGINAL_REQUEST §R1 |
+| 5 | Dioxus `<NoiseBackground />` | Native Dioxus component generating procedural SVG/canvas noise patterns | M1 | ORIGINAL_REQUEST §R1 |
+| 6 | Chromatic Aberration Filter | Offscreen RGB spatial shift filter on `SceneNode::Layer` in `tiny_skia_backend` | M2 | ORIGINAL_REQUEST §R2 |
+| 7 | Vignette Filter | Radial/Euclidean/Chebyshev falloff darkening & alpha filter on `SceneNode::Layer` | M2 | ORIGINAL_REQUEST §R2 |
+| 8 | Color Grading Suite | Contrast, Saturation, HueRotate, Invert, Tint, Duotone, ColorKey filters | M2 | ORIGINAL_REQUEST §R2 |
+| 9 | Presentation & Wipe Transitions | ClockWipe, LinearWipe, Flip, Zoom, Slide, Fade, Iris in `crates/transitions` | M2 | ORIGINAL_REQUEST §R2 |
+| 10 | Customizable Easing & Timing | Easing functions, Bézier curves, spring physics in transitions & timeline | M2 | ORIGINAL_REQUEST §R2 |
+| 11 | SceneTransitionSeries Integration | Seamless track overlap & composition scheduling in `crates/composition` | M2 | ORIGINAL_REQUEST §R2 |
+| 12 | Multi-line Text Auto-scaling | `fit_text_on_n_lines` optimal font size calculation in `crates/rasterizer` | M3 | ORIGINAL_REQUEST §R3 |
+| 13 | Bounding-box Fill Layout | `fill_text_box` greedy line-wrapping text fitting in `crates/rasterizer` | M3 | ORIGINAL_REQUEST §R3 |
+| 14 | Parametric Rounded Text Boxes | `create_rounded_text_box` multi-corner badge path generator with padding | M3 | ORIGINAL_REQUEST §R3 |
+| 15 | Unified Public APIs & Re-exports | Clean public exports in `crates/core`, `crates/rasterizer`, `crates/noise`, etc. | M3 | ORIGINAL_REQUEST §R3 |
+| 16 | E2E Requirements Verification | 4-tier opaque-box test suite derivation and execution across all features | M4 | ORIGINAL_REQUEST §Acceptance Criteria |
+| 17 | Adversarial Hardening & Final Gate | White-box stress testing, coverage gap elimination, zero warnings, 100% tests | M5 | ORIGINAL_REQUEST §Acceptance Criteria |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | Frame Cache & Rasterizer Foundation | `crates/rasterizer`: `FrameCacheManager`, `FrameCacheKey`, `CacheMetrics`, tests | none | PLANNED |
-| M2 | Zero-Copy Binary IPC Protocol | `crates/renderer`: `BinaryPacket`, `BinaryIpcCodec`, `StreamEncoder`, `StreamDecoder`, tests | none | PLANNED |
-| M3 | Compositor Daemon & CLI Daemon | `crates/renderer`, `crates/cli`: `CompositorDaemon`, `DaemonClient`, `DaemonServer`, `dioxuscut daemon` | M1, M2 | PLANNED |
-| M4 | Timeline Virtualizer & Filmstrip Engine | `crates/player`: `slots.rs`, `ruler.rs`, `thumbnail_cache.rs`, `waveform.rs`, `filmstrip.rs` | M1 | PLANNED |
-| M5 | Studio Timeline & UI Integration | `apps/studio`: Timeline UI, zoom controls, filmstrip rendering, IPC preview | M3, M4 | PLANNED |
-| M6 | E2E Testing, Adversarial Verification & Hardening | Opaque-box E2E suite (Tiers 1-4), adversarial stress tests (Tier 5), audit | M1-M5 | PLANNED |
+| M1 | Native Noise & Procedural Shaders | `crates/noise` (Simplex 2D/3D/4D, Mulberry32, fBm, turbulence, `<NoiseBackground />`) | none | PLANNED |
+| M2 | Visual Effects & Transitions Engine | `crates/rasterizer` (filters), `crates/transitions` (wipes/flips/zoom), `crates/composition` | none | PLANNED |
+| M3 | Typography, Text Fitting & Rounded Boxes | `crates/rasterizer/src/font.rs`, `crates/shapes`, `crates/core` re-exports, formatting | none | PLANNED |
+| M4 | E2E Testing Suite (Tiers 1-4) | Independent E2E test harness & test suite creating `TEST_READY.md` | none | PLANNED |
+| M5 | Final Integration & Adversarial Hardening | Pass 100% of E2E suite, Tier 5 white-box challenger hardening, full workspace check | M1, M2, M3, M4 | PLANNED |
 
 ## Interface Contracts
 
-### `crates/rasterizer` (`FrameCacheManager`)
+### `crates/noise` Interface
 ```rust
-pub struct FrameCacheConfig {
-    pub max_bytes: usize, // e.g. 512MB default
-}
+pub fn noise2d(seed: impl Into<NoiseSeed>, x: f64, y: f64) -> f64;
+pub fn noise3d(seed: impl Into<NoiseSeed>, x: f64, y: f64, z: f64) -> f64;
+pub fn noise4d(seed: impl Into<NoiseSeed>, x: f64, y: f64, z: f64, w: f64) -> f64;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FrameCacheKey {
-    pub composition_id: String,
-    pub frame: u64,
-    pub width: u32,
-    pub height: u32,
-    pub props_hash: u64,
+pub struct FbmOptions {
+    pub octaves: usize,
+    pub lacunarity: f64,
+    pub persistence: f64,
 }
+pub fn fbm_2d(seed: impl Into<NoiseSeed>, x: f64, y: f64, options: &FbmOptions) -> f64;
+pub fn fbm_3d(seed: impl Into<NoiseSeed>, x: f64, y: f64, z: f64, options: &FbmOptions) -> f64;
+pub fn turbulence_warp_2d(seed: impl Into<NoiseSeed>, x: f64, y: f64, strength: f64, freq: f64) -> (f64, f64);
 
-pub struct FrameCacheManager {
-    // Thread-safe RwLock + Atomic metrics
-    pub fn new(config: FrameCacheConfig) -> Self;
-    pub fn get(&self, key: &FrameCacheKey) -> Option<Arc<image::RgbaImage>>;
-    pub fn insert(&self, key: FrameCacheKey, frame: Arc<image::RgbaImage>);
-    pub fn get_or_render<F>(&self, key: FrameCacheKey, render_fn: F) -> Result<Arc<image::RgbaImage>, RasterError>
-        where F: FnOnce() -> Result<image::RgbaImage, RasterError>;
-    pub fn metrics(&self) -> CacheMetrics;
-    pub fn clear(&self);
+#[component]
+pub fn NoiseBackground(props: NoiseBackgroundProps) -> Element;
+```
+
+### `crates/rasterizer` ↔ `crates/composition` Filter Interface
+```rust
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SceneFilter {
+    Blur { radius: f32 },
+    Brightness { factor: f32 },
+    Grayscale { amount: f32 },
+    Opacity { factor: f32 },
+    ChromaticAberration { offset_x: f32, offset_y: f32, angle_rad: f32 },
+    Vignette { offset: f32, darkness: f32, roundness: f32 },
+    Contrast { factor: f32 },
+    Saturation { factor: f32 },
+    HueRotate { degrees: f32 },
+    Invert { amount: f32 },
+    Tint { color: [u8; 4], amount: f32 },
+    Duotone { primary: [u8; 4], secondary: [u8; 4] },
+    ColorGrading { contrast: f32, saturation: f32, gamma: f32, tint: Option<[u8; 4]> },
 }
 ```
 
-### `crates/renderer` (`BinaryPacket` & IPC Protocol)
+### `crates/transitions` Interface
 ```rust
-// Packet Header: "remotion_buffer:<nonce>:<len>:<status>:<payload>"
-pub struct BinaryPacket {
-    pub nonce: u64,
-    pub status: u32, // 0 = OK, non-zero = error code
-    pub payload: bytes::Bytes,
+pub trait TransitionPresentation: Send + Sync {
+    fn name(&self) -> &'static str;
+    fn render_transition(&self, ctx: &TransitionContext) -> SceneNode;
 }
 
-pub struct BinaryIpcCodec {
-    pub max_payload_bytes: usize,
-}
-
-impl tokio_util::codec::Decoder for BinaryIpcCodec {
-    type Item = BinaryPacket;
-    type Error = IpcError;
-    // decodes streaming chunks, supports resync
-}
-
-impl tokio_util::codec::Encoder<BinaryPacket> for BinaryIpcCodec {
-    type Error = IpcError;
-    // encodes to remotion_buffer format
-}
+pub struct ClockWipe { pub counter_clockwise: bool, pub start_angle_deg: f32 }
+pub struct LinearWipe { pub direction: WipeDirection, pub angle_rad: f32 }
+pub struct FlipTransition { pub direction: FlipDirection, pub perspective: f32 }
+pub struct ZoomTransition { pub mode: ZoomMode, pub max_scale: f32 }
 ```
 
-### `crates/player` (`calculate_timestamp_slots` & Virtualizer)
+### `crates/rasterizer` Typography & Layout Interface
 ```rust
-pub struct TimelineViewport {
-    pub duration_in_frames: u64,
-    pub fps: f64,
-    pub zoom_factor: f64,
-    pub scroll_left_px: f64,
-    pub client_width_px: f64,
-    pub target_slot_width_px: f64,
-    pub overscan_px: f64,
+pub struct FitTextOnNLinesOptions {
+    pub max_lines: usize,
+    pub max_box_width: f32,
+    pub max_box_height: Option<f32>,
+    pub min_font_size: f32,
+    pub max_font_size: f32,
 }
 
-pub struct TimestampSlot {
-    pub index: usize,
-    pub start_frame: u64,
-    pub end_frame: u64,
-    pub start_time_secs: f64,
-    pub x_position_px: f64,
-    pub width_px: f64,
+pub struct TextFitResult {
+    pub font_size: f32,
+    pub lines: Vec<String>,
+    pub total_height: f32,
+    pub max_line_width: f32,
 }
 
-pub fn calculate_timestamp_slots(viewport: &TimelineViewport) -> VirtualizedTimelineSlots;
-pub fn calculate_ruler_ticks(viewport: &TimelineViewport) -> Vec<RulerTick>;
+pub fn fit_text_on_n_lines(
+    text: &str,
+    font: &Font,
+    options: &FitTextOnNLinesOptions,
+) -> Result<TextFitResult, LayoutError>;
+
+pub fn fill_text_box(
+    text: &str,
+    font: &Font,
+    font_size: f32,
+    max_box_width: f32,
+) -> Vec<String>;
+
+pub struct RoundedTextBoxOptions {
+    pub padding_x: f32,
+    pub padding_y: f32,
+    pub border_radius: f32,
+    pub align: TextAlign,
+}
+
+pub fn create_rounded_text_box(
+    lines: &[String],
+    font: &Font,
+    font_size: f32,
+    options: &RoundedTextBoxOptions,
+) -> String; // SVG Path 'd'
 ```
 
 ## Code Layout
-- `crates/rasterizer/src/frame_cache.rs`: In-memory LRU FrameCacheManager, metrics, and unit tests
-- `crates/renderer/src/ipc/`: Binary IPC protocol, codec, streaming parser, client, server, and tests
-- `crates/renderer/src/compositor/`: Compositor daemon, request router, warm pipeline manager, and tests
-- `crates/cli/src/main.rs` & `commands/daemon.rs`: CLI daemon subcommand handler
-- `crates/player/src/virtualizer/`: Virtualized slots, adaptive ruler, thumbnail cache, waveform, filmstrip
-- `apps/studio/src/timeline/`: Modular studio timeline panel, track lanes, waveform view, zoom controls
-- `tests/e2e/`: End-to-end integration and Remotion-parity test suites
+- `crates/noise/src/`:
+  - `lib.rs`: exports and module index
+  - `simplex.rs`: 2D, 3D, 4D Simplex noise and Mulberry32 PRNG
+  - `fbm.rs`: Fractal Brownian Motion and turbulence domain warping
+  - `noise_bg.rs`: Dioxus `<NoiseBackground />` SVG/Canvas component
+- `crates/rasterizer/src/`:
+  - `scene.rs`: `SceneFilter` enum definition and `SceneNode::Layer` filter list
+  - `tiny_skia_backend.rs`: `apply_filter` pixel processing algorithms
+  - `font.rs`: typography, `fit_text_on_n_lines`, `fill_text_box`, `create_rounded_text_box`
+- `crates/transitions/src/`:
+  - `lib.rs`: transition presentations index
+  - `clock_wipe.rs`: pie arc clipping transition
+  - `linear_wipe.rs`: directional polygon clipping transition
+  - `flip.rs`: 3D perspective flip transition
+  - `zoom.rs`: zoom and scale blur transition
+  - `easing.rs`: easing curves and spring physics
+- `crates/core/src/`:
+  - `lib.rs`: re-exports of core noise, transitions, layout, and scene traits
+- `tests/e2e/`:
+  - Comprehensive opaque-box E2E tests validating R1, R2, R3

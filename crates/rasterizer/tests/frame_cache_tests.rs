@@ -1,14 +1,11 @@
 //! Integration tests for FrameCacheManager, LRU eviction, thread safety, and metrics.
 
 use dioxuscut_rasterizer::backend::RasterError;
-use dioxuscut_rasterizer::frame_cache::{
-    CacheMetrics, FrameCacheConfig, FrameCacheKey, FrameCacheManager,
-};
+use dioxuscut_rasterizer::frame_cache::{FrameCacheConfig, FrameCacheKey, FrameCacheManager};
 use image::{Rgba, RgbaImage};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 
 fn make_rgba_frame(width: u32, height: u32, fill: [u8; 4]) -> Arc<RgbaImage> {
     let mut img = RgbaImage::new(width, height);
@@ -47,7 +44,11 @@ fn test_strict_memory_bounded_eviction() {
     // Frames 0..6 should be evicted, 6..10 (i.e. 6, 7, 8, 9) should remain
     for frame_idx in 0..6 {
         let key = FrameCacheKey::new("comp_main", frame_idx, 256, 512, 0);
-        assert!(!cache.contains(&key), "Frame {} should have been evicted", frame_idx);
+        assert!(
+            !cache.contains(&key),
+            "Frame {} should have been evicted",
+            frame_idx
+        );
     }
     for frame_idx in 6..10 {
         let key = FrameCacheKey::new("comp_main", frame_idx, 256, 512, 0);
@@ -78,10 +79,22 @@ fn test_lru_access_promotion_preserves_hot_frames() {
     // Insert key_3. Since key_2 was least recently accessed, it must be evicted!
     cache.insert(key_3.clone(), make_rgba_frame(100, 100, [3, 0, 0, 255]));
 
-    assert!(cache.contains(&key_0), "key_0 was promoted, should remain in cache");
-    assert!(cache.contains(&key_1), "key_1 was promoted, should remain in cache");
-    assert!(!cache.contains(&key_2), "key_2 was LRU, should have been evicted");
-    assert!(cache.contains(&key_3), "key_3 was just inserted, should be in cache");
+    assert!(
+        cache.contains(&key_0),
+        "key_0 was promoted, should remain in cache"
+    );
+    assert!(
+        cache.contains(&key_1),
+        "key_1 was promoted, should remain in cache"
+    );
+    assert!(
+        !cache.contains(&key_2),
+        "key_2 was LRU, should have been evicted"
+    );
+    assert!(
+        cache.contains(&key_3),
+        "key_3 was just inserted, should be in cache"
+    );
     assert_eq!(cache.metrics().evictions, 1);
 }
 
@@ -135,7 +148,9 @@ fn test_timeline_scrubbing_simulation_hit_ratio() {
 fn test_concurrent_multithreaded_stress() {
     // 50 frames budget (each 50x50 = 10,000 bytes; 50 * 10,000 = 500,000 bytes)
     let max_bytes = 500_000;
-    let cache = Arc::new(FrameCacheManager::new(FrameCacheConfig::with_max_bytes(max_bytes)));
+    let cache = Arc::new(FrameCacheManager::new(FrameCacheConfig::with_max_bytes(
+        max_bytes,
+    )));
     let running = Arc::new(AtomicBool::new(true));
 
     let thread_count = 16;
@@ -154,7 +169,10 @@ fn test_concurrent_multithreaded_stress() {
                 if i % 3 == 0 {
                     // get_or_render path
                     let _ = cache_clone.get_or_render(key, || {
-                        Ok((*make_rgba_frame(50, 50, [(frame_idx % 256) as u8, 0, 0, 255])).clone())
+                        Ok(
+                            (*make_rgba_frame(50, 50, [(frame_idx % 256) as u8, 0, 0, 255]))
+                                .clone(),
+                        )
                     });
                 } else if i % 3 == 1 {
                     // insert path
@@ -193,9 +211,18 @@ fn test_concurrent_multithreaded_stress() {
         final_metrics.current_bytes,
         "Entry count does not match current_bytes"
     );
-    assert!(final_metrics.hits > 0, "Stress test should have recorded cache hits");
-    assert!(final_metrics.misses > 0, "Stress test should have recorded cache misses");
-    assert!(final_metrics.evictions > 0, "Stress test should have triggered evictions");
+    assert!(
+        final_metrics.hits > 0,
+        "Stress test should have recorded cache hits"
+    );
+    assert!(
+        final_metrics.misses > 0,
+        "Stress test should have recorded cache misses"
+    );
+    assert!(
+        final_metrics.evictions > 0,
+        "Stress test should have triggered evictions"
+    );
 }
 
 #[test]

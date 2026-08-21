@@ -28,7 +28,7 @@ pub enum ExtrapolateType {
 }
 
 /// Options for [`interpolate`].
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct InterpolateOptions<'a> {
     /// Optional easing function applied to the normalised `t` inside each segment.
     pub easing: Option<&'a dyn Fn(f64) -> f64>,

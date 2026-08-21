@@ -1,33 +1,51 @@
-# E2E Test Infra: Dioxuscut High-Performance Remotion-Equivalent Compositor Architecture
+# E2E Test Infra: Dioxuscut Remotion Native Porting
 
 ## Test Philosophy
-- Opaque-box, requirement-driven, and white-box adversarial verification.
-- Validates the complete stack across LRU caching, binary streaming IPC protocol, compositor daemon, and timeline virtualization.
-- Pass criteria: 100% test pass rate, 0 clippy warnings (`-D warnings`), 0 cargo fmt differences, clean forensic audit.
+- Opaque-box, requirement-driven. Zero dependency on `vendor/` or implementation internals.
+- Methodology: Category-Partition + Boundary Value Analysis (BVA) + Pairwise Interaction Testing + Real-World Workload Testing.
 
-## Feature Inventory & Test Coverage Goals
-| # | Feature | Requirement | Tier 1 (Unit) | Tier 2 (Boundary) | Tier 3 (Cross-Feature) | Tier 4 (Scenario) |
-|---|---------|-------------|:-------------:|:-----------------:|:----------------------:|:-----------------:|
-| 1 | `FrameCacheManager` LRU Eviction & Bounded Memory | R1 | >=5 | >=5 | ✓ | ✓ |
-| 2 | Thread-Safe Concurrent Frame Cache Queries & Metrics | R1 | >=5 | >=5 | ✓ | ✓ |
-| 3 | Binary Packet Framing `remotion_buffer:...` Format | R2 | >=5 | >=5 | ✓ | ✓ |
-| 4 | Chunked Streaming `BinaryIpcCodec` / `StreamDecoder` | R2 | >=5 | >=5 | ✓ | ✓ |
-| 5 | Async Nonce Correlation & Out-of-Order Multiplexing | R2 | >=5 | >=5 | ✓ | ✓ |
-| 6 | Persistent `CompositorDaemon` Lifecycle & Warm Caches | R1 / R2 | >=5 | >=5 | ✓ | ✓ |
-| 7 | CLI Daemon Command (`dioxuscut daemon`) & Stdio Isolation | R2 | >=5 | >=5 | ✓ | ✓ |
-| 8 | `calculate_timestamp_slots` Viewport Partitioning | R3 | >=5 | >=5 | ✓ | ✓ |
-| 9 | `calculate_ruler_ticks` Multi-tier Continuous Zoom | R3 | >=5 | >=5 | ✓ | ✓ |
-| 10 | Background `ThumbnailCache` & Generator | R3 | >=5 | >=5 | ✓ | ✓ |
-| 11 | `WaveformPeaks` Min/Max Downsampling & SVG Path | R3 | >=5 | >=5 | ✓ | ✓ |
-| 12 | Studio Timeline Filmstrip & Scrubbing UI | R3 | >=5 | >=5 | ✓ | ✓ |
+## Feature Inventory Test Matrix
+| # | Feature | Source (Requirement) | Tier 1 (Coverage ≥5) | Tier 2 (Boundary ≥5) | Tier 3 (Pairwise) | Tier 4 (Real-World) |
+|---|---------|----------------------|:-------------------:|:--------------------:|:-----------------:|:-------------------:|
+| 1 | Simplex 2D/3D/4D | ORIGINAL_REQUEST §R1 | 5 | 5 | ✓ | ✓ |
+| 2 | Mulberry32 PRNG & Seeding | ORIGINAL_REQUEST §R1 | 5 | 5 | ✓ | ✓ |
+| 3 | Fractal Brownian Motion (fBm) | ORIGINAL_REQUEST §R1 | 5 | 5 | ✓ | ✓ |
+| 4 | Turbulence & Domain Warping | ORIGINAL_REQUEST §R1 | 5 | 5 | ✓ | ✓ |
+| 5 | `<NoiseBackground />` | ORIGINAL_REQUEST §R1 | 5 | 5 | ✓ | ✓ |
+| 6 | Chromatic Aberration Filter | ORIGINAL_REQUEST §R2 | 5 | 5 | ✓ | ✓ |
+| 7 | Vignette Filter | ORIGINAL_REQUEST §R2 | 5 | 5 | ✓ | ✓ |
+| 8 | Color Grading Suite | ORIGINAL_REQUEST §R2 | 5 | 5 | ✓ | ✓ |
+| 9 | ClockWipe Transition | ORIGINAL_REQUEST §R2 | 5 | 5 | ✓ | ✓ |
+| 10 | LinearWipe / Polygon Transitions | ORIGINAL_REQUEST §R2 | 5 | 5 | ✓ | ✓ |
+| 11 | Flip & Zoom Transitions | ORIGINAL_REQUEST §R2 | 5 | 5 | ✓ | ✓ |
+| 12 | Easing Curves & Timing | ORIGINAL_REQUEST §R2 | 5 | 5 | ✓ | ✓ |
+| 13 | SceneTransitionSeries Integration | ORIGINAL_REQUEST §R2 | 5 | 5 | ✓ | ✓ |
+| 14 | `fit_text_on_n_lines` | ORIGINAL_REQUEST §R3 | 5 | 5 | ✓ | ✓ |
+| 15 | `fill_text_box` | ORIGINAL_REQUEST §R3 | 5 | 5 | ✓ | ✓ |
+| 16 | `create_rounded_text_box` | ORIGINAL_REQUEST §R3 | 5 | 5 | ✓ | ✓ |
+| 17 | Unified Public APIs | ORIGINAL_REQUEST §R3 | 5 | 5 | ✓ | ✓ |
 
 ## Test Architecture
-- Unit Tests: Embedded in each respective crate (`crates/rasterizer/tests/` & modules, `crates/renderer/tests/`, `crates/player/tests/`).
-- Integration & E2E Tests: `tests/` and CLI subprocess verification.
-- Stress / Adversarial Tests: Concurrency races, cache thrashing, malformed packet injection, high-frequency zoom/pan timeline virtualization.
+- Test Runner: `cargo test --locked --workspace --all-features` (and targeted test modules).
+- Target Test Directories:
+  - Unit / Mathematical parity tests: `crates/noise/tests/`, `crates/rasterizer/tests/`, `crates/transitions/tests/`
+  - Integration & E2E tests: `tests/e2e/` (or integration test files in root/crates)
+- Pass/Fail Semantics:
+  - Exit code 0
+  - Zero panics, zero unexpected NaN / Inf, exact deterministic reproduction on seeds, zero memory leaks.
 
-## Acceptance Commands
-- `cargo check --locked --workspace --all-targets --all-features`
-- `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`
-- `cargo test --locked --workspace --all-features`
-- `cargo fmt --all -- --check`
+## Real-World Application Scenarios (Tier 4)
+| # | Scenario | Features Exercised | Complexity |
+|---|----------|--------------------|------------|
+| 1 | Procedural Cyberpunk Title Card | Simplex noise background + Vignette + Chromatic Aberration + Multi-line fitted text | High |
+| 2 | Dynamic Presentation Deck | ClockWipe & LinearWipe transitions + Easing + Multi-corner rounded text badge badges | High |
+| 3 | Cinematic Color Grading Video Reel | Contrast + Saturation + Tint + 3D Flip transition + SceneTransitionSeries overlap | High |
+| 4 | Organic Flow Graphic Animation | 4D Simplex noise + Domain Warping + Procedural SVG path deformation | High |
+| 5 | Streaming Word-by-Word Caption Box | `fill_text_box` + `create_rounded_text_box` + dynamic padding & corner radius | High |
+
+## Coverage Thresholds
+- Tier 1: ≥5 per feature (Total ≥85 test cases)
+- Tier 2: ≥5 per feature boundary/corner (Total ≥85 test cases)
+- Tier 3: Pairwise feature combination tests (Total ≥20 test cases)
+- Tier 4: ≥5 realistic end-to-end video application scenarios
+- Tier 5: Adversarial white-box stress & edge-case hardening

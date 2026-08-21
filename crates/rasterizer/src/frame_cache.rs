@@ -385,9 +385,7 @@ impl FrameCacheManager {
             .entries
             .keys()
             .filter(|k| {
-                k.composition_id == composition_id
-                    && k.frame >= start_frame
-                    && k.frame <= end_frame
+                k.composition_id == composition_id && k.frame >= start_frame && k.frame <= end_frame
             })
             .cloned()
             .collect();
