@@ -38,8 +38,11 @@ pub mod wgpu_backend;
 
 pub use backend::{FrameConfig, RasterError, RasterizerBackend};
 pub use font::{
-    fit_text, layout_text_box, measure_text_width, FontCache, PositionedTextLine, TextBox,
-    TextBoxLayout, TextHorizontalAlign, TextOverflow, TextVerticalAlign,
+    create_rounded_text_box, create_rounded_text_box_from_measurements, fill_text_box, fit_text,
+    fit_text_on_n_lines, layout_text_box, measure_text_width, measure_text_width_with_font,
+    FitTextOnNLinesOptions, FontCache, LayoutError, PositionedTextLine, RoundedTextBoxOptions,
+    TextAlign, TextBox, TextBoxLayout, TextFitResult, TextHorizontalAlign, TextLineDimension,
+    TextOverflow, TextVerticalAlign,
 };
 pub use frame_cache::{
     CacheMetrics, CachedFrame, FrameCacheConfig, FrameCacheKey, FrameCacheManager,

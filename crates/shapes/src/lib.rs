@@ -22,6 +22,7 @@ pub mod pie;
 pub mod polygon;
 pub mod rect;
 pub mod render_svg;
+pub mod rounded_text_box;
 pub mod scene;
 pub mod shape_output;
 pub mod spark;
@@ -36,6 +37,10 @@ pub use pie::{make_pie, Pie, PieProps};
 pub use polygon::{make_polygon, Polygon, PolygonProps};
 pub use rect::{make_rect, Rect, RectProps};
 pub use render_svg::{RenderSvg, RenderSvgProps};
+pub use rounded_text_box::{
+    create_rounded_text_box, create_rounded_text_box_from_measurements, make_rounded_text_box,
+    RoundedTextBox, RoundedTextBoxOptions, RoundedTextBoxProps, TextAlign, TextLineDimension,
+};
 pub use scene::SceneShape;
 pub use shape_output::ShapeOutput;
 pub use spark::{make_spark, Spark, SparkProps};

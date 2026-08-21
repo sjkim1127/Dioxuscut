@@ -36,5 +36,30 @@ pub use sequence::{Sequence, SequenceProps};
 pub use timeline::context::{TimelineContext, VideoConfigContext};
 pub use types::VideoConfig;
 
-// Re-export animation crate for convenience
+// Re-export sibling crates
 pub use dioxuscut_animation as animation;
+pub use dioxuscut_composition as native_composition;
+pub use dioxuscut_rasterizer as rasterizer;
+
+// Core animation primitives
+pub use dioxuscut_animation::{
+    bezier, interpolate, interpolate_colors, spring, EasingFn, ExtrapolateType, InterpolateOptions,
+    SpringConfig,
+};
+
+// Composition primitives & emitters
+pub use dioxuscut_composition::{
+    CompositionError, NativeComposition, NativeCompositionContext, SceneEmitter, SceneFrameContext,
+    SceneLoop, SceneSequence, SceneStack, SceneTransitionSeries,
+};
+
+// Typography, layout & rasterizer primitives
+pub use dioxuscut_rasterizer::{
+    create_rounded_text_box, create_rounded_text_box_from_measurements, fill_text_box, fit_text,
+    fit_text_on_n_lines, layout_text_box, measure_text_width, measure_text_width_with_font,
+    BlendMode, ClipRegion, Color, FitTextOnNLinesOptions, FontCache, FrameConfig, GradientStop,
+    ImageFit, LayoutError, MaskMode, PositionedTextLine, RasterError, RasterizerBackend,
+    RoundedTextBoxOptions, Scene, SceneFilter, SceneNode, SceneShadow, TextAlign, TextBox,
+    TextBoxLayout, TextFitResult, TextHorizontalAlign, TextLineDimension, TextOverflow,
+    TextVerticalAlign, TinySkiaBackend, Transform2D,
+};

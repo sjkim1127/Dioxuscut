@@ -942,6 +942,61 @@ mod tests {
     }
 
     #[test]
+    fn test_all_10_filter_variants_in_layer_filter_css() {
+        let filters = vec![
+            SceneFilter::Blur { sigma: 4.0 },
+            SceneFilter::Brightness { amount: 1.2 },
+            SceneFilter::Grayscale { amount: 0.5 },
+            SceneFilter::Opacity { amount: 0.8 },
+            SceneFilter::ChromaticAberration {
+                offset_x: 5.0,
+                offset_y: 0.0,
+                angle_rad: 0.0,
+            },
+            SceneFilter::Vignette {
+                offset: 0.5,
+                darkness: 0.8,
+                roundness: 0.5,
+            },
+            SceneFilter::Contrast { factor: 1.5 },
+            SceneFilter::Saturation { factor: 2.0 },
+            SceneFilter::HueRotate { degrees: 90.0 },
+            SceneFilter::Invert { amount: 1.0 },
+            SceneFilter::Tint {
+                color: [255, 0, 0, 128],
+                amount: 0.5,
+            },
+            SceneFilter::Duotone {
+                primary: [0, 0, 0, 255],
+                secondary: [255, 255, 255, 255],
+            },
+            SceneFilter::ColorGrading {
+                contrast: 1.2,
+                saturation: 1.4,
+                gamma: 1.0,
+                tint: None,
+            },
+            SceneFilter::ColorKey {
+                key_color: [0, 255, 0, 255],
+                similarity: 0.4,
+                smoothness: 0.1,
+                spill_suppression: 0.2,
+            },
+        ];
+
+        let css = layer_filter_css(&filters, None);
+        assert!(css.contains("blur(4px)"));
+        assert!(css.contains("brightness(1.2)"));
+        assert!(css.contains("grayscale(0.5)"));
+        assert!(css.contains("opacity(0.8)"));
+        assert!(css.contains("drop-shadow"));
+        assert!(css.contains("contrast(1.5)"));
+        assert!(css.contains("saturate(2)"));
+        assert!(css.contains("hue-rotate(90deg)"));
+        assert!(css.contains("invert(1)"));
+    }
+
+    #[test]
     fn explicit_fonts_map_to_ordered_font_faces() {
         let (declarations, family) = text_font_css(
             "node-2",

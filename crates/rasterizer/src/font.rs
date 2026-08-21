@@ -19,6 +19,7 @@ const BUNDLED_FONT: &[u8] = include_bytes!("../../../assets/fonts/NotoSans-Regul
 
 use crate::backend::RasterError;
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use unicode_linebreak::{linebreaks, BreakOpportunity};
@@ -26,8 +27,119 @@ use unicode_segmentation::UnicodeSegmentation;
 
 const MAX_FONT_BYTES: u64 = 32 * 1024 * 1024;
 
+/// Text horizontal alignment.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TextAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+impl From<TextAlign> for TextHorizontalAlign {
+    fn from(align: TextAlign) -> Self {
+        match align {
+            TextAlign::Left => TextHorizontalAlign::Start,
+            TextAlign::Center => TextHorizontalAlign::Center,
+            TextAlign::Right => TextHorizontalAlign::End,
+        }
+    }
+}
+
+impl From<TextHorizontalAlign> for TextAlign {
+    fn from(align: TextHorizontalAlign) -> Self {
+        match align {
+            TextHorizontalAlign::Start => TextAlign::Left,
+            TextHorizontalAlign::Center => TextAlign::Center,
+            TextHorizontalAlign::End => TextAlign::Right,
+        }
+    }
+}
+
+/// Options for multi-line text auto-scaling (`fit_text_on_n_lines`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FitTextOnNLinesOptions {
+    pub max_lines: usize,
+    pub max_box_width: f32,
+    pub max_box_height: Option<f32>,
+    pub min_font_size: f32,
+    pub max_font_size: f32,
+}
+
+impl Default for FitTextOnNLinesOptions {
+    fn default() -> Self {
+        Self {
+            max_lines: 1,
+            max_box_width: 1920.0,
+            max_box_height: None,
+            min_font_size: 1.0,
+            max_font_size: 200.0,
+        }
+    }
+}
+
+/// Result of auto-fitting text across multiple lines.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TextFitResult {
+    pub font_size: f32,
+    pub lines: Vec<String>,
+    pub total_height: f32,
+    pub max_line_width: f32,
+}
+
+/// Options for multi-corner parametric rounded text box generation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RoundedTextBoxOptions {
+    pub padding_x: f32,
+    pub padding_y: f32,
+    pub border_radius: f32,
+    pub align: TextAlign,
+}
+
+impl Default for RoundedTextBoxOptions {
+    fn default() -> Self {
+        Self {
+            padding_x: 16.0,
+            padding_y: 12.0,
+            border_radius: 8.0,
+            align: TextAlign::Left,
+        }
+    }
+}
+
+/// Layout error for text fitting and layout calculation failures.
+#[derive(Debug, thiserror::Error, PartialEq, Clone)]
+pub enum LayoutError {
+    #[error("Invalid constraints: {0}")]
+    InvalidConstraints(String),
+    #[error("Text could not be fit into the specified bounds: {0}")]
+    CannotFit(String),
+    #[error("Layout error: {0}")]
+    Generic(String),
+}
+
+impl From<LayoutError> for RasterError {
+    fn from(err: LayoutError) -> Self {
+        RasterError::Scene(err.to_string())
+    }
+}
+
+/// Measurement of a single line of text for parametric path generation.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TextLineDimension {
+    pub width: f32,
+    pub height: f32,
+}
+
+impl TextLineDimension {
+    pub fn new(width: f32, height: f32) -> Self {
+        Self { width, height }
+    }
+}
+
 /// Horizontal alignment inside a resolved text box.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TextHorizontalAlign {
     #[default]
     Start,
@@ -609,6 +721,452 @@ pub fn fit_text(
         }
     }
     Ok(best)
+}
+
+/// Measure text width using an explicit font instance.
+pub fn measure_text_width_with_font<F: Font>(text: &str, font: &F, font_size: f32) -> f32 {
+    if text.is_empty() || !font_size.is_finite() || font_size <= 0.0 {
+        return 0.0;
+    }
+    let scaled = font.as_scaled(PxScale::from(font_size));
+    let mut total_width = 0.0_f32;
+    let mut prev_glyph: Option<ab_glyph::GlyphId> = None;
+    for ch in text.chars() {
+        if ch == '\n' || ch == '\r' {
+            continue;
+        }
+        let glyph_id = scaled.glyph_id(ch);
+        if let Some(prev) = prev_glyph {
+            total_width += scaled.kern(prev, glyph_id);
+        }
+        total_width += scaled.h_advance(glyph_id);
+        prev_glyph = Some(glyph_id);
+    }
+    total_width
+}
+
+/// Greedy word-by-word text box line-wrapping algorithm.
+///
+/// Accumulates words into lines such that each line does not exceed `max_box_width`.
+/// Respects explicit line breaks in the input string.
+pub fn fill_text_box<F: Font>(
+    text: &str,
+    font: &F,
+    font_size: f32,
+    max_box_width: f32,
+) -> Vec<String> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+    if !font_size.is_finite()
+        || font_size <= 0.0
+        || !max_box_width.is_finite()
+        || max_box_width <= 0.0
+    {
+        return vec![text.to_string()];
+    }
+
+    let mut result_lines = Vec::new();
+
+    // Split by hard line breaks first
+    let raw_lines: Vec<&str> = text.split('\n').collect();
+
+    for raw_line in raw_lines {
+        let clean_line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
+        let words: Vec<&str> = clean_line.split_whitespace().collect();
+        if words.is_empty() {
+            if raw_line.is_empty() {
+                result_lines.push(String::new());
+            }
+            continue;
+        }
+
+        let mut current_line = String::new();
+
+        for word in words {
+            if current_line.is_empty() {
+                current_line = word.to_string();
+            } else {
+                let candidate = format!("{current_line} {word}");
+                let candidate_width = measure_text_width_with_font(&candidate, font, font_size);
+                if candidate_width <= max_box_width {
+                    current_line = candidate;
+                } else {
+                    result_lines.push(current_line);
+                    current_line = word.to_string();
+                }
+            }
+        }
+
+        if !current_line.is_empty() {
+            result_lines.push(current_line);
+        }
+    }
+
+    result_lines
+}
+
+/// Binary search font auto-scaling to fit multi-line word-wrapped text into bounding box.
+///
+/// Finds the maximum font size in `[options.min_font_size, options.max_font_size]` such that
+/// the word-wrapped text fits within `options.max_lines` and `options.max_box_width` (and optional `max_box_height`).
+pub fn fit_text_on_n_lines<F: Font>(
+    text: &str,
+    font: &F,
+    options: &FitTextOnNLinesOptions,
+) -> Result<TextFitResult, LayoutError> {
+    if options.max_lines == 0 {
+        return Err(LayoutError::InvalidConstraints(
+            "max_lines must be at least 1".into(),
+        ));
+    }
+    if !options.max_box_width.is_finite() || options.max_box_width <= 0.0 {
+        return Err(LayoutError::InvalidConstraints(
+            "max_box_width must be positive and finite".into(),
+        ));
+    }
+    if let Some(h) = options.max_box_height {
+        if !h.is_finite() || h <= 0.0 {
+            return Err(LayoutError::InvalidConstraints(
+                "max_box_height must be positive and finite".into(),
+            ));
+        }
+    }
+    if !options.min_font_size.is_finite() || options.min_font_size <= 0.0 {
+        return Err(LayoutError::InvalidConstraints(
+            "min_font_size must be positive and finite".into(),
+        ));
+    }
+    if !options.max_font_size.is_finite() || options.max_font_size < options.min_font_size {
+        return Err(LayoutError::InvalidConstraints(
+            "max_font_size must be >= min_font_size and finite".into(),
+        ));
+    }
+
+    if text.trim().is_empty() {
+        let scaled = font.as_scaled(PxScale::from(options.max_font_size));
+        let total_height = (scaled.ascent() - scaled.descent()).max(options.max_font_size);
+        return Ok(TextFitResult {
+            font_size: options.max_font_size,
+            lines: if text.is_empty() {
+                vec![]
+            } else {
+                vec![text.to_string()]
+            },
+            total_height,
+            max_line_width: 0.0,
+        });
+    }
+
+    let test_fit = |size: f32| -> Option<(Vec<String>, f32, f32)> {
+        let lines = fill_text_box(text, font, size, options.max_box_width);
+        if lines.len() > options.max_lines {
+            return None;
+        }
+        let mut max_w = 0.0_f32;
+        for line in &lines {
+            let w = measure_text_width_with_font(line, font, size);
+            if w > options.max_box_width + 0.01 {
+                return None;
+            }
+            max_w = max_w.max(w);
+        }
+        let scaled = font.as_scaled(PxScale::from(size));
+        let line_h = (scaled.ascent() - scaled.descent() + scaled.line_gap()).max(size);
+        let total_h = if lines.is_empty() {
+            0.0
+        } else if lines.len() == 1 {
+            (scaled.ascent() - scaled.descent()).max(size)
+        } else {
+            lines.len() as f32 * line_h
+        };
+        if let Some(max_h) = options.max_box_height {
+            if total_h > max_h + 0.01 {
+                return None;
+            }
+        }
+        Some((lines, total_h, max_w))
+    };
+
+    // First check if max_font_size fits
+    if let Some((lines, total_height, max_line_width)) = test_fit(options.max_font_size) {
+        return Ok(TextFitResult {
+            font_size: options.max_font_size,
+            lines,
+            total_height,
+            max_line_width,
+        });
+    }
+
+    // Binary search between min_font_size and max_font_size
+    let mut low = options.min_font_size;
+    let mut high = options.max_font_size;
+    let mut best_result = test_fit(low);
+    let mut best_size = low;
+
+    for _ in 0..30 {
+        if high - low < 0.05 {
+            break;
+        }
+        let mid = (low + high) / 2.0;
+        if let Some(fit) = test_fit(mid) {
+            best_result = Some(fit);
+            best_size = mid;
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+
+    if let Some((lines, total_height, max_line_width)) = best_result {
+        Ok(TextFitResult {
+            font_size: best_size,
+            lines,
+            total_height,
+            max_line_width,
+        })
+    } else {
+        // Fallback to min_font_size with best effort wrapping
+        let lines = fill_text_box(text, font, options.min_font_size, options.max_box_width);
+        let scaled = font.as_scaled(PxScale::from(options.min_font_size));
+        let line_h =
+            (scaled.ascent() - scaled.descent() + scaled.line_gap()).max(options.min_font_size);
+        let total_height = if lines.is_empty() {
+            0.0
+        } else {
+            lines.len() as f32 * line_h
+        };
+        let max_line_width = lines
+            .iter()
+            .map(|l| measure_text_width_with_font(l, font, options.min_font_size))
+            .fold(0.0_f32, f32::max);
+        Ok(TextFitResult {
+            font_size: options.min_font_size,
+            lines,
+            total_height,
+            max_line_width,
+        })
+    }
+}
+
+/// Create a parametric rounded text box SVG path string from pre-computed line measurements.
+pub fn create_rounded_text_box_from_measurements(
+    measurements: &[TextLineDimension],
+    options: &RoundedTextBoxOptions,
+) -> String {
+    if measurements.is_empty() {
+        return String::new();
+    }
+
+    let mut instructions: Vec<String> = Vec::new();
+
+    let max_width = measurements
+        .iter()
+        .map(|m| m.width + options.padding_x * 2.0)
+        .fold(0.0_f32, f32::max);
+
+    let mut y_offset = 0.0_f32;
+
+    // Forward pass (Top & Right edges)
+    for i in 0..measurements.len() {
+        let current_line = &measurements[i];
+        let prev_line = if i > 0 {
+            Some(&measurements[i - 1])
+        } else {
+            None
+        };
+        let next_line = if i + 1 < measurements.len() {
+            Some(&measurements[i + 1])
+        } else {
+            None
+        };
+
+        let line_total_width = current_line.width + options.padding_x * 2.0;
+        let x_offset = match options.align {
+            TextAlign::Left => 0.0,
+            TextAlign::Center => (max_width - line_total_width) / 2.0,
+            TextAlign::Right => max_width - line_total_width,
+        };
+
+        let max_corner_radius = (options.border_radius.max(0.0)).min(current_line.height / 2.0);
+
+        if i == 0 {
+            instructions.push(format!("M {} {}", x_offset + max_corner_radius, y_offset));
+        }
+
+        let top_right_radius_raw = match prev_line {
+            Some(prev) => match options.align {
+                TextAlign::Right => 0.0,
+                TextAlign::Left => (prev.width - current_line.width) / 2.0,
+                TextAlign::Center => (prev.width - current_line.width) / 4.0,
+            },
+            None => -f32::INFINITY,
+        };
+        let top_right_corner_radius =
+            top_right_radius_raw.clamp(-max_corner_radius, max_corner_radius);
+
+        if top_right_corner_radius != 0.0 {
+            let r = top_right_corner_radius.abs();
+            let lx =
+                x_offset + current_line.width + options.padding_x * 2.0 + top_right_corner_radius;
+            instructions.push(format!("L {lx} {y_offset}"));
+            let sweep = if top_right_corner_radius < 0.0 { 1 } else { 0 };
+            let end_x = x_offset + current_line.width + options.padding_x * 2.0;
+            let end_y = y_offset + r;
+            instructions.push(format!("A {r} {r} 0 0 {sweep} {end_x} {end_y}"));
+        } else {
+            let lx = x_offset + current_line.width + options.padding_x * 2.0;
+            instructions.push(format!("L {lx} {y_offset}"));
+        }
+
+        let bottom_right_radius_raw = match next_line {
+            Some(next) => match options.align {
+                TextAlign::Right => 0.0,
+                TextAlign::Left => (next.width - current_line.width) / 2.0,
+                TextAlign::Center => (next.width - current_line.width) / 4.0,
+            },
+            None => -f32::INFINITY,
+        };
+        let bottom_right_corner_radius =
+            bottom_right_radius_raw.clamp(-max_corner_radius, max_corner_radius);
+
+        if bottom_right_corner_radius != 0.0 {
+            let r = bottom_right_corner_radius.abs();
+            let ly = y_offset + current_line.height - r;
+            let lx = x_offset + current_line.width + options.padding_x * 2.0;
+            instructions.push(format!("L {lx} {ly}"));
+            let sweep = if bottom_right_corner_radius < 0.0 {
+                1
+            } else {
+                0
+            };
+            let end_x = x_offset
+                + current_line.width
+                + options.padding_x * 2.0
+                + bottom_right_corner_radius;
+            let end_y = y_offset + current_line.height;
+            instructions.push(format!("A {r} {r} 0 0 {sweep} {end_x} {end_y}"));
+        } else {
+            let lx = x_offset + current_line.width + options.padding_x * 2.0;
+            let ly = y_offset + current_line.height;
+            instructions.push(format!("L {lx} {ly}"));
+        }
+
+        y_offset += current_line.height;
+    }
+
+    // Backward pass (Bottom & Left edges)
+    for i in (0..measurements.len()).rev() {
+        let current_line = &measurements[i];
+        let prev_line = if i + 1 < measurements.len() {
+            Some(&measurements[i + 1])
+        } else {
+            None
+        };
+        let next_line = if i > 0 {
+            Some(&measurements[i - 1])
+        } else {
+            None
+        };
+
+        let line_total_width = current_line.width + options.padding_x * 2.0;
+        let x_offset = match options.align {
+            TextAlign::Left => 0.0,
+            TextAlign::Center => (max_width - line_total_width) / 2.0,
+            TextAlign::Right => max_width - line_total_width,
+        };
+
+        let max_corner_radius = (options.border_radius.max(0.0)).min(current_line.height / 2.0);
+
+        let bottom_left_radius_raw = match prev_line {
+            Some(prev) => {
+                let diff = prev.width - current_line.width;
+                match options.align {
+                    TextAlign::Left => 0.0,
+                    TextAlign::Right => diff / 2.0,
+                    TextAlign::Center => diff / 4.0,
+                }
+            }
+            None => -f32::INFINITY,
+        };
+        let bottom_left_corner_radius =
+            bottom_left_radius_raw.clamp(-max_corner_radius, max_corner_radius);
+
+        if bottom_left_corner_radius != 0.0 {
+            let r = bottom_left_corner_radius.abs();
+            let lx = x_offset - bottom_left_corner_radius;
+            instructions.push(format!("L {lx} {y_offset}"));
+            let sweep = if bottom_left_corner_radius < 0.0 {
+                1
+            } else {
+                0
+            };
+            let end_x = x_offset;
+            let end_y = y_offset - r;
+            instructions.push(format!("A {r} {r} 0 0 {sweep} {end_x} {end_y}"));
+        } else {
+            instructions.push(format!("L {x_offset} {y_offset}"));
+        }
+
+        let top_left_radius_raw = match next_line {
+            Some(next) => {
+                let diff = next.width - current_line.width;
+                match options.align {
+                    TextAlign::Left => 0.0,
+                    TextAlign::Right => diff / 2.0,
+                    TextAlign::Center => diff / 4.0,
+                }
+            }
+            None => -f32::INFINITY,
+        };
+        let top_left_corner_radius =
+            top_left_radius_raw.clamp(-max_corner_radius, max_corner_radius);
+
+        if top_left_corner_radius != 0.0 {
+            let r = top_left_corner_radius.abs();
+            let ly = y_offset - current_line.height + r;
+            instructions.push(format!("L {x_offset} {ly}"));
+            let sweep = if top_left_corner_radius < 0.0 { 1 } else { 0 };
+            let end_x = x_offset - top_left_corner_radius;
+            let end_y = y_offset - current_line.height;
+            instructions.push(format!("A {r} {r} 0 0 {sweep} {end_x} {end_y}"));
+        } else {
+            let ly = y_offset - current_line.height;
+            instructions.push(format!("L {x_offset} {ly}"));
+        }
+
+        y_offset -= current_line.height;
+    }
+
+    instructions.push("Z".to_string());
+    instructions.join(" ")
+}
+
+/// Create a parametric rounded text box SVG path string from rendered lines of text.
+pub fn create_rounded_text_box<F: Font>(
+    lines: &[String],
+    font: &F,
+    font_size: f32,
+    options: &RoundedTextBoxOptions,
+) -> String {
+    if lines.is_empty() {
+        return String::new();
+    }
+    let scaled = font.as_scaled(PxScale::from(font_size));
+    let line_height = (scaled.ascent() - scaled.descent() + scaled.line_gap()).max(font_size)
+        + options.padding_y * 2.0;
+    let measurements: Vec<TextLineDimension> = lines
+        .iter()
+        .map(|line| {
+            let width = measure_text_width_with_font(line, font, font_size);
+            TextLineDimension {
+                width,
+                height: line_height,
+            }
+        })
+        .collect();
+
+    create_rounded_text_box_from_measurements(&measurements, options)
 }
 
 fn validate_text_box(request: &TextBox) -> Result<(), RasterError> {
@@ -1214,5 +1772,162 @@ mod tests {
             cache.is_loaded(),
             "FontCache::load() must fall back to bundled when env path is invalid"
         );
+    }
+
+    // ── Milestone 3: Advanced Layout & Text Fitting Tests ─────────────────────
+
+    #[test]
+    fn test_fill_text_box_single_and_multi_line() {
+        let font = FontVec::try_from_vec(BUNDLED_FONT.to_vec()).unwrap();
+
+        // 1. Single line fits
+        let lines = fill_text_box("Hello world", &font, 16.0, 500.0);
+        assert_eq!(lines, vec!["Hello world"]);
+
+        // 2. Wraps into multiple lines when box width is narrow
+        let lines = fill_text_box(
+            "The quick brown fox jumps over the lazy dog",
+            &font,
+            16.0,
+            100.0,
+        );
+        assert!(lines.len() > 1, "Should wrap into multiple lines");
+        for line in &lines {
+            let width = measure_text_width_with_font(line, &font, 16.0);
+            assert!(
+                width <= 100.0 + 1.0,
+                "Line '{line}' width {width} exceeds 100.0"
+            );
+        }
+
+        // 3. Preserves explicit newlines
+        let lines = fill_text_box("Line 1\nLine 2\n\nLine 3", &font, 16.0, 500.0);
+        assert_eq!(lines, vec!["Line 1", "Line 2", "", "Line 3"]);
+
+        // 4. Empty string returns empty
+        let lines = fill_text_box("", &font, 16.0, 500.0);
+        assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn test_fit_text_on_n_lines_optimal_scaling() {
+        let font = FontVec::try_from_vec(BUNDLED_FONT.to_vec()).unwrap();
+
+        // Fits on 1 line
+        let options = FitTextOnNLinesOptions {
+            max_lines: 1,
+            max_box_width: 300.0,
+            max_box_height: None,
+            min_font_size: 10.0,
+            max_font_size: 60.0,
+        };
+        let result = fit_text_on_n_lines("Dioxuscut Engine", &font, &options).unwrap();
+        assert_eq!(result.lines.len(), 1);
+        assert!(result.font_size >= 10.0 && result.font_size <= 60.0);
+        assert!(result.max_line_width <= 300.0);
+
+        // Fits on 2 lines with higher font size than 1 line
+        let options_2lines = FitTextOnNLinesOptions {
+            max_lines: 2,
+            max_box_width: 200.0,
+            max_box_height: None,
+            min_font_size: 10.0,
+            max_font_size: 80.0,
+        };
+        let result_2lines = fit_text_on_n_lines(
+            "High Performance Video Editing in Pure Rust",
+            &font,
+            &options_2lines,
+        )
+        .unwrap();
+        assert!(result_2lines.lines.len() <= 2);
+        assert!(result_2lines.max_line_width <= 200.0);
+
+        // Respects max_box_height constraint
+        let options_height_limited = FitTextOnNLinesOptions {
+            max_lines: 3,
+            max_box_width: 300.0,
+            max_box_height: Some(40.0),
+            min_font_size: 5.0,
+            max_font_size: 100.0,
+        };
+        let result_height =
+            fit_text_on_n_lines("Short title", &font, &options_height_limited).unwrap();
+        assert!(result_height.total_height <= 40.0 + 0.5);
+    }
+
+    #[test]
+    fn test_fit_text_on_n_lines_invalid_constraints_error() {
+        let font = FontVec::try_from_vec(BUNDLED_FONT.to_vec()).unwrap();
+
+        // max_lines == 0
+        let opt_zero_lines = FitTextOnNLinesOptions {
+            max_lines: 0,
+            ..Default::default()
+        };
+        assert!(matches!(
+            fit_text_on_n_lines("test", &font, &opt_zero_lines),
+            Err(LayoutError::InvalidConstraints(_))
+        ));
+
+        // Negative width
+        let opt_neg_width = FitTextOnNLinesOptions {
+            max_box_width: -100.0,
+            ..Default::default()
+        };
+        assert!(matches!(
+            fit_text_on_n_lines("test", &font, &opt_neg_width),
+            Err(LayoutError::InvalidConstraints(_))
+        ));
+
+        // max_font_size < min_font_size
+        let opt_inverted_size = FitTextOnNLinesOptions {
+            min_font_size: 50.0,
+            max_font_size: 20.0,
+            ..Default::default()
+        };
+        assert!(matches!(
+            fit_text_on_n_lines("test", &font, &opt_inverted_size),
+            Err(LayoutError::InvalidConstraints(_))
+        ));
+    }
+
+    #[test]
+    fn test_create_rounded_text_box_svg_generation() {
+        let font = FontVec::try_from_vec(BUNDLED_FONT.to_vec()).unwrap();
+        let lines = vec!["Title Line".to_string(), "Subtitle Line Long".to_string()];
+        let options = RoundedTextBoxOptions {
+            padding_x: 16.0,
+            padding_y: 8.0,
+            border_radius: 12.0,
+            align: TextAlign::Left,
+        };
+
+        let path = create_rounded_text_box(&lines, &font, 20.0, &options);
+        assert!(path.starts_with('M'), "Path must begin with Move command");
+        assert!(path.contains('L'), "Path must contain Line commands");
+        assert!(
+            path.contains('A'),
+            "Path must contain Arc commands for rounded corners"
+        );
+        assert!(path.ends_with('Z'), "Path must close with Z");
+
+        // Center alignment
+        let mut center_opts = options.clone();
+        center_opts.align = TextAlign::Center;
+        let center_path = create_rounded_text_box(&lines, &font, 20.0, &center_opts);
+        assert!(center_path.starts_with('M'));
+        assert!(center_path.ends_with('Z'));
+
+        // Right alignment
+        let mut right_opts = options.clone();
+        right_opts.align = TextAlign::Right;
+        let right_path = create_rounded_text_box(&lines, &font, 20.0, &right_opts);
+        assert!(right_path.starts_with('M'));
+        assert!(right_path.ends_with('Z'));
+
+        // Empty lines produces empty path
+        let empty_path = create_rounded_text_box(&[], &font, 20.0, &options);
+        assert_eq!(empty_path, "");
     }
 }
