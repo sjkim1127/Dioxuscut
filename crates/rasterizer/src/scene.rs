@@ -183,10 +183,60 @@ pub enum MaskMode {
 /// Pixel filter applied to an offscreen layer in declaration order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SceneFilter {
-    Blur { sigma: f32 },
-    Brightness { amount: f32 },
-    Grayscale { amount: f32 },
-    Opacity { amount: f32 },
+    Blur {
+        sigma: f32,
+    },
+    Brightness {
+        amount: f32,
+    },
+    Grayscale {
+        amount: f32,
+    },
+    Opacity {
+        amount: f32,
+    },
+    ChromaticAberration {
+        offset_x: f32,
+        offset_y: f32,
+        angle_rad: f32,
+    },
+    Vignette {
+        offset: f32,
+        darkness: f32,
+        roundness: f32,
+    },
+    Contrast {
+        factor: f32,
+    },
+    Saturation {
+        factor: f32,
+    },
+    HueRotate {
+        degrees: f32,
+    },
+    Invert {
+        amount: f32,
+    },
+    Tint {
+        color: [u8; 4],
+        amount: f32,
+    },
+    Duotone {
+        primary: [u8; 4],
+        secondary: [u8; 4],
+    },
+    ColorGrading {
+        contrast: f32,
+        saturation: f32,
+        gamma: f32,
+        tint: Option<[u8; 4]>,
+    },
+    ColorKey {
+        key_color: [u8; 4],
+        similarity: f32,
+        smoothness: f32,
+        spill_suppression: f32,
+    },
 }
 
 /// Drop shadow generated from the filtered and masked layer alpha.

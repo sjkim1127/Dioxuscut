@@ -688,6 +688,28 @@ impl<E: SceneEmitter> SceneEmitter for SceneLoop<E> {
 
 // ── SceneTransitionSeries ─────────────────────────────────────────────────────
 
+/// Direction for linear wipes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LinearWipeDirection {
+    FromLeft,
+    FromRight,
+    FromTop,
+    FromBottom,
+    FromTopLeft,
+    FromTopRight,
+    FromBottomLeft,
+    FromBottomRight,
+}
+
+/// Direction for 3D card flips.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FlipDirection {
+    FromRight,
+    FromLeft,
+    FromTop,
+    FromBottom,
+}
+
 /// A transition type between consecutive clips.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TransitionKind {
@@ -696,6 +718,12 @@ pub enum TransitionKind {
     SlideRight,
     SlideUp,
     SlideDown,
+    ClockWipe,
+    LinearWipe(LinearWipeDirection),
+    Flip(FlipDirection),
+    Zoom,
+    Iris,
+    Dissolve,
 }
 
 /// Timing for a transition: how many frames the overlap lasts.
@@ -831,6 +859,105 @@ impl Default for SceneTransitionSeries {
     }
 }
 
+fn clock_wipe_path(width: f32, height: f32, progress: f32) -> String {
+    let p = progress.clamp(0.0, 1.0);
+    if p <= 0.0 {
+        return "M 0 0 Z".to_string();
+    }
+    if p >= 1.0 {
+        return format!("M 0 0 L {width} 0 L {width} {height} L 0 {height} Z");
+    }
+    let cx = width / 2.0;
+    let cy = height / 2.0;
+    let radius = (width * width + height * height).sqrt() / 2.0 * 1.05;
+    let start_deg = -90.0f32;
+    let end_deg = start_deg + p * 360.0;
+    let start_rad = start_deg.to_radians();
+    let end_rad = end_deg.to_radians();
+    let x0 = cx + radius * start_rad.cos();
+    let y0 = cy + radius * start_rad.sin();
+    let x1 = cx + radius * end_rad.cos();
+    let y1 = cy + radius * end_rad.sin();
+    let large_arc_flag = if p > 0.5 { 1 } else { 0 };
+    format!(
+        "M {cx:.2} {cy:.2} L {x0:.2} {y0:.2} A {radius:.2} {radius:.2} 0 {large_arc_flag} 1 {x1:.2} {y1:.2} Z"
+    )
+}
+
+fn iris_path(width: f32, height: f32, progress: f32) -> String {
+    let p = progress.clamp(0.0, 1.0);
+    if p <= 0.0 {
+        return "M 0 0 Z".to_string();
+    }
+    if p >= 1.0 {
+        return format!("M 0 0 L {width} 0 L {width} {height} L 0 {height} Z");
+    }
+    let cx = width / 2.0;
+    let cy = height / 2.0;
+    let max_r = (width * width + height * height).sqrt() / 2.0 * 1.05;
+    let r = p * max_r;
+    let d = 2.0 * r;
+    format!(
+        "M {cx:.2} {cy:.2} m -{r:.2}, 0 a {r:.2},{r:.2} 0 1,0 {d:.2},0 a {r:.2},{r:.2} 0 1,0 -{d:.2},0 Z"
+    )
+}
+
+fn linear_wipe_path(dir: LinearWipeDirection, width: f32, height: f32, progress: f32) -> String {
+    let p = progress.clamp(0.0, 1.0);
+    if p <= 0.0 {
+        return "M 0 0 Z".to_string();
+    }
+    if p >= 1.0 {
+        return format!("M 0 0 L {width} 0 L {width} {height} L 0 {height} Z");
+    }
+    match dir {
+        LinearWipeDirection::FromLeft => {
+            let w = width * p;
+            format!("M 0 0 L {w:.2} 0 L {w:.2} {height:.2} L 0 {height:.2} Z")
+        }
+        LinearWipeDirection::FromRight => {
+            let x0 = width * (1.0 - p);
+            format!("M {x0:.2} 0 L {width:.2} 0 L {width:.2} {height:.2} L {x0:.2} {height:.2} Z")
+        }
+        LinearWipeDirection::FromTop => {
+            let h = height * p;
+            format!("M 0 0 L {width:.2} 0 L {width:.2} {h:.2} L 0 {h:.2} Z")
+        }
+        LinearWipeDirection::FromBottom => {
+            let y0 = height * (1.0 - p);
+            format!("M 0 {y0:.2} L {width:.2} {y0:.2} L {width:.2} {height:.2} L 0 {height:.2} Z")
+        }
+        LinearWipeDirection::FromTopLeft => {
+            let d = 2.0 * p;
+            format!("M 0 0 L {:.2} 0 L 0 {:.2} Z", width * d, height * d)
+        }
+        LinearWipeDirection::FromTopRight => {
+            let d = 2.0 * p;
+            format!(
+                "M {width:.2} 0 L {:.2} 0 L {width:.2} {:.2} Z",
+                width * (1.0 - d),
+                height * d
+            )
+        }
+        LinearWipeDirection::FromBottomLeft => {
+            let d = 2.0 * p;
+            format!(
+                "M 0 {height:.2} L 0 {:.2} L {:.2} {height:.2} Z",
+                height * (1.0 - d),
+                width * d
+            )
+        }
+        LinearWipeDirection::FromBottomRight => {
+            let d = 2.0 * p;
+            format!(
+                "M {width:.2} {height:.2} L {:.2} {height:.2} L {width:.2} {:.2} Z",
+                width * (1.0 - d),
+                height * (1.0 - d)
+            )
+        }
+    }
+}
+
 impl SceneEmitter for SceneTransitionSeries {
     fn emit(
         &self,
@@ -868,6 +995,9 @@ impl SceneEmitter for SceneTransitionSeries {
             let mut alpha_in = 1.0f32;
             let mut tx_in = 0.0f32;
             let mut ty_in = 0.0f32;
+            let mut scale_x_in = 1.0f32;
+            let mut scale_y_in = 1.0f32;
+            let mut clip_in: Option<ClipRegion> = None;
 
             if i > 0 && !overlaps.is_empty() {
                 let overlap_in = overlaps[i - 1];
@@ -875,7 +1005,7 @@ impl SceneEmitter for SceneTransitionSeries {
                     let p_in = (local_frame as f32 / overlap_in as f32).clamp(0.0, 1.0);
                     if let Some(trans) = transitions_map.get(&(i - 1)) {
                         match trans.kind {
-                            TransitionKind::Fade => {
+                            TransitionKind::Fade | TransitionKind::Dissolve => {
                                 alpha_in = p_in;
                             }
                             TransitionKind::SlideLeft => {
@@ -890,6 +1020,47 @@ impl SceneEmitter for SceneTransitionSeries {
                             TransitionKind::SlideDown => {
                                 ty_in = -(1.0 - p_in) * height;
                             }
+                            TransitionKind::ClockWipe => {
+                                clip_in = Some(ClipRegion::Path {
+                                    d: clock_wipe_path(width, height, p_in),
+                                });
+                            }
+                            TransitionKind::LinearWipe(dir) => {
+                                clip_in = Some(ClipRegion::Path {
+                                    d: linear_wipe_path(dir, width, height, p_in),
+                                });
+                            }
+                            TransitionKind::Iris => {
+                                clip_in = Some(ClipRegion::Path {
+                                    d: iris_path(width, height, p_in),
+                                });
+                            }
+                            TransitionKind::Flip(dir) => {
+                                if p_in < 0.5 {
+                                    alpha_in = 0.0;
+                                } else {
+                                    let local_p = (p_in - 0.5) * 2.0;
+                                    let s = ((1.0 - local_p) * 90.0f32).to_radians().cos().max(0.0);
+                                    match dir {
+                                        FlipDirection::FromRight | FlipDirection::FromLeft => {
+                                            scale_x_in = s;
+                                            tx_in = (width / 2.0) * (1.0 - s);
+                                        }
+                                        FlipDirection::FromTop | FlipDirection::FromBottom => {
+                                            scale_y_in = s;
+                                            ty_in = (height / 2.0) * (1.0 - s);
+                                        }
+                                    }
+                                }
+                            }
+                            TransitionKind::Zoom => {
+                                alpha_in = p_in;
+                                let s = p_in;
+                                scale_x_in = s;
+                                scale_y_in = s;
+                                tx_in = (width / 2.0) * (1.0 - s);
+                                ty_in = (height / 2.0) * (1.0 - s);
+                            }
                         }
                     }
                 }
@@ -899,6 +1070,8 @@ impl SceneEmitter for SceneTransitionSeries {
             let mut alpha_out = 1.0f32;
             let mut tx_out = 0.0f32;
             let mut ty_out = 0.0f32;
+            let mut scale_x_out = 1.0f32;
+            let mut scale_y_out = 1.0f32;
 
             if i < overlaps.len() {
                 let overlap_out = overlaps[i];
@@ -908,7 +1081,7 @@ impl SceneEmitter for SceneTransitionSeries {
                         ((local_frame - out_start) as f32 / overlap_out as f32).clamp(0.0, 1.0);
                     if let Some(trans) = transitions_map.get(&i) {
                         match trans.kind {
-                            TransitionKind::Fade => {
+                            TransitionKind::Fade | TransitionKind::Dissolve => {
                                 alpha_out = 1.0 - p_out;
                             }
                             TransitionKind::SlideLeft => {
@@ -923,6 +1096,37 @@ impl SceneEmitter for SceneTransitionSeries {
                             TransitionKind::SlideDown => {
                                 ty_out = p_out * height;
                             }
+                            TransitionKind::ClockWipe
+                            | TransitionKind::LinearWipe(_)
+                            | TransitionKind::Iris => {
+                                // Exiting clip remains visible beneath entering clip's clip-path
+                            }
+                            TransitionKind::Flip(dir) => {
+                                if p_out >= 0.5 {
+                                    alpha_out = 0.0;
+                                } else {
+                                    let local_p = p_out * 2.0;
+                                    let s = (local_p * 90.0f32).to_radians().cos().max(0.0);
+                                    match dir {
+                                        FlipDirection::FromRight | FlipDirection::FromLeft => {
+                                            scale_x_out = s;
+                                            tx_out = (width / 2.0) * (1.0 - s);
+                                        }
+                                        FlipDirection::FromTop | FlipDirection::FromBottom => {
+                                            scale_y_out = s;
+                                            ty_out = (height / 2.0) * (1.0 - s);
+                                        }
+                                    }
+                                }
+                            }
+                            TransitionKind::Zoom => {
+                                alpha_out = 1.0 - p_out;
+                                let s = 1.0 + 0.5 * p_out;
+                                scale_x_out = s;
+                                scale_y_out = s;
+                                tx_out = (width / 2.0) * (1.0 - s);
+                                ty_out = (height / 2.0) * (1.0 - s);
+                            }
                         }
                     }
                 }
@@ -931,28 +1135,69 @@ impl SceneEmitter for SceneTransitionSeries {
             let total_alpha = (alpha_in * alpha_out).clamp(0.0, 1.0);
             let total_tx = tx_in + tx_out;
             let total_ty = ty_in + ty_out;
+            let total_scale_x = scale_x_in * scale_x_out;
+            let total_scale_y = scale_y_in * scale_y_out;
 
-            let needs_group =
-                (total_alpha - 1.0).abs() > 1e-5 || total_tx.abs() > 1e-5 || total_ty.abs() > 1e-5;
-
-            if needs_group {
+            if let Some(clip_region) = clip_in {
                 let mut sub_scene = Scene::new();
                 clip.emitter.emit(clip_context, props, &mut sub_scene)?;
                 if !sub_scene.nodes.is_empty() {
-                    scene.push(SceneNode::Group {
-                        transform: Transform2D {
-                            tx: total_tx,
-                            ty: total_ty,
-                            scale_x: 1.0,
-                            scale_y: 1.0,
-                            rotate_deg: 0.0,
-                        },
+                    let children = if total_tx.abs() > 1e-5
+                        || total_ty.abs() > 1e-5
+                        || (total_scale_x - 1.0).abs() > 1e-5
+                        || (total_scale_y - 1.0).abs() > 1e-5
+                    {
+                        vec![SceneNode::Group {
+                            transform: Transform2D {
+                                tx: total_tx,
+                                ty: total_ty,
+                                scale_x: total_scale_x,
+                                scale_y: total_scale_y,
+                                rotate_deg: 0.0,
+                            },
+                            opacity: 1.0,
+                            children: sub_scene.nodes,
+                        }]
+                    } else {
+                        sub_scene.nodes
+                    };
+                    scene.push(SceneNode::Layer {
                         opacity: total_alpha,
-                        children: sub_scene.nodes,
+                        blend_mode: BlendMode::Normal,
+                        clip: Some(clip_region),
+                        mask: None,
+                        mask_mode: MaskMode::Alpha,
+                        filters: Vec::new(),
+                        shadow: None,
+                        children,
                     });
                 }
             } else {
-                clip.emitter.emit(clip_context, props, scene)?;
+                let needs_group = (total_alpha - 1.0).abs() > 1e-5
+                    || total_tx.abs() > 1e-5
+                    || total_ty.abs() > 1e-5
+                    || (total_scale_x - 1.0).abs() > 1e-5
+                    || (total_scale_y - 1.0).abs() > 1e-5;
+
+                if needs_group {
+                    let mut sub_scene = Scene::new();
+                    clip.emitter.emit(clip_context, props, &mut sub_scene)?;
+                    if !sub_scene.nodes.is_empty() {
+                        scene.push(SceneNode::Group {
+                            transform: Transform2D {
+                                tx: total_tx,
+                                ty: total_ty,
+                                scale_x: total_scale_x,
+                                scale_y: total_scale_y,
+                                rotate_deg: 0.0,
+                            },
+                            opacity: total_alpha,
+                            children: sub_scene.nodes,
+                        });
+                    }
+                } else {
+                    clip.emitter.emit(clip_context, props, scene)?;
+                }
             }
         }
 

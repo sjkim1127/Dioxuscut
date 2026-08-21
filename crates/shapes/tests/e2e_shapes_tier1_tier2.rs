@@ -183,7 +183,9 @@ fn test_pairwise_scene_shape_emitter_rendering() {
 
     assert_eq!(scene.nodes.len(), 1);
     match &scene.nodes[0] {
-        SceneNode::Path { d, stroke_width, .. } => {
+        SceneNode::Path {
+            d, stroke_width, ..
+        } => {
             assert!(d.starts_with('M'));
             assert_eq!(*stroke_width, 0.0);
         }
@@ -231,8 +233,11 @@ fn test_pairwise_callout_and_pie_chart_composition() {
     let ctx = make_test_context(800, 600, 30);
     let mut scene = Scene::new();
 
-    callout.emit(SceneFrameContext::new(0, ctx), &Value::Null, &mut scene).unwrap();
-    pie.emit(SceneFrameContext::new(0, ctx), &Value::Null, &mut scene).unwrap();
+    callout
+        .emit(SceneFrameContext::new(0, ctx), &Value::Null, &mut scene)
+        .unwrap();
+    pie.emit(SceneFrameContext::new(0, ctx), &Value::Null, &mut scene)
+        .unwrap();
 
     assert_eq!(scene.nodes.len(), 2);
 }
@@ -253,7 +258,7 @@ fn test_tier4_scenario_streaming_caption_box_with_callout() {
     scene.push(SceneNode::Path {
         d: callout.path,
         fill: Some(Color::rgba(15, 23, 42, 230)), // #0f172a
-        stroke: Some(Color::rgb(56, 189, 248)),  // #38bdf8 cyan border
+        stroke: Some(Color::rgb(56, 189, 248)),   // #38bdf8 cyan border
         stroke_width: 2.0,
         opacity: 1.0,
     });

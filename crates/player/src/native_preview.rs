@@ -661,7 +661,22 @@ fn layer_filter_css(filters: &[SceneFilter], shadow: Option<&SceneShadow>) -> St
                 format!("grayscale({})", amount.clamp(0.0, 1.0))
             }
             SceneFilter::Opacity { amount } => format!("opacity({})", amount.clamp(0.0, 1.0)),
+            SceneFilter::Contrast { factor } => format!("contrast({})", factor.max(0.0)),
+            SceneFilter::Saturation { factor } => format!("saturate({})", factor.max(0.0)),
+            SceneFilter::HueRotate { degrees } => format!("hue-rotate({}deg)", degrees),
+            SceneFilter::Invert { amount } => format!("invert({})", amount.clamp(0.0, 1.0)),
+            SceneFilter::ChromaticAberration { offset_x, offset_y, .. } => {
+                format!("drop-shadow({}px {}px 0 rgba(255,0,0,0.5)) drop-shadow({}px {}px 0 rgba(0,0,255,0.5))", -offset_x, -offset_y, offset_x, offset_y)
+            }
+            SceneFilter::Vignette { .. } => String::new(),
+            SceneFilter::Tint { .. } => String::new(),
+            SceneFilter::Duotone { .. } => String::new(),
+            SceneFilter::ColorGrading { contrast, saturation, .. } => {
+                format!("contrast({}) saturate({})", contrast.max(0.0), saturation.max(0.0))
+            }
+            SceneFilter::ColorKey { .. } => String::new(),
         })
+        .filter(|s| !s.is_empty())
         .collect::<Vec<_>>();
     if let Some(shadow) = shadow {
         values.push(format!(

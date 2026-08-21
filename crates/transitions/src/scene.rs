@@ -1,6 +1,10 @@
-//! Native Scene transition emitters matching the Dioxus wrappers.
-
-use crate::slide::SlideDirection;
+pub use crate::clock_wipe::SceneClockWipe;
+pub use crate::dissolve::SceneDissolve;
+pub use crate::flip::SceneFlip;
+pub use crate::iris::SceneIris;
+pub use crate::linear_wipe::{SceneLinearWipe, SceneLinearWipe as SceneWipe};
+pub use crate::slide::SlideDirection;
+pub use crate::zoom::SceneZoom;
 use dioxuscut_composition::{CompositionError, SceneEmitter, SceneFrameContext};
 use dioxuscut_rasterizer::{Scene, SceneNode, Transform2D};
 use serde_json::Value;

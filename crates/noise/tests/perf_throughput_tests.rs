@@ -1,6 +1,6 @@
 //! Performance throughput and zero-allocation hot path verification.
 
-use dioxuscut_noise::{fbm_2d, FbmOptions, SimplexNoise};
+use dioxuscut_noise::{FbmOptions, SimplexNoise};
 use std::time::Instant;
 
 #[test]

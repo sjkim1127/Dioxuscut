@@ -578,27 +578,42 @@ fn test_f12_t1_interpolate_modes_clamp_extend() {
     let out_range = [0.0, 1000.0];
 
     assert_eq!(
-        interpolate(-10.0, &in_range, &out_range, InterpolateOptions {
-            extrapolate_left: ExtrapolateType::Clamp,
-            extrapolate_right: ExtrapolateType::Clamp,
-            easing: None,
-        }),
+        interpolate(
+            -10.0,
+            &in_range,
+            &out_range,
+            InterpolateOptions {
+                extrapolate_left: ExtrapolateType::Clamp,
+                extrapolate_right: ExtrapolateType::Clamp,
+                easing: None,
+            }
+        ),
         0.0
     );
     assert_eq!(
-        interpolate(50.0, &in_range, &out_range, InterpolateOptions {
-            extrapolate_left: ExtrapolateType::Clamp,
-            extrapolate_right: ExtrapolateType::Clamp,
-            easing: None,
-        }),
+        interpolate(
+            50.0,
+            &in_range,
+            &out_range,
+            InterpolateOptions {
+                extrapolate_left: ExtrapolateType::Clamp,
+                extrapolate_right: ExtrapolateType::Clamp,
+                easing: None,
+            }
+        ),
         500.0
     );
     assert_eq!(
-        interpolate(150.0, &in_range, &out_range, InterpolateOptions {
-            extrapolate_left: ExtrapolateType::Clamp,
-            extrapolate_right: ExtrapolateType::Clamp,
-            easing: None,
-        }),
+        interpolate(
+            150.0,
+            &in_range,
+            &out_range,
+            InterpolateOptions {
+                extrapolate_left: ExtrapolateType::Clamp,
+                extrapolate_right: ExtrapolateType::Clamp,
+                easing: None,
+            }
+        ),
         1000.0
     );
 }
@@ -694,7 +709,11 @@ fn test_pairwise_wipe_with_color_interpolation() {
             y: 0.0,
             w: 100.0,
             h: 100.0,
-            fill: Color::rgb((255.0 * (1.0 - progress)) as u8, (255.0 * progress) as u8, 0),
+            fill: Color::rgb(
+                (255.0 * (1.0 - progress)) as u8,
+                (255.0 * progress) as u8,
+                0,
+            ),
             stroke: None,
             stroke_width: 0.0,
             corner_radius: 0.0,

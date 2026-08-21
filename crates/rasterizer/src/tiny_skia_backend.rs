@@ -637,6 +637,440 @@ fn apply_filter(pixmap: &mut Pixmap, filter: &SceneFilter) -> Result<(), RasterE
                 *channel = (f32::from(*channel) * amount).round() as u8;
             }
         }
+        SceneFilter::ChromaticAberration {
+            offset_x,
+            offset_y,
+            angle_rad,
+        } => {
+            if !offset_x.is_finite() || !offset_y.is_finite() || !angle_rad.is_finite() {
+                return Err(RasterError::Scene(
+                    "chromatic aberration parameters must be finite".into(),
+                ));
+            }
+            let cos_a = angle_rad.cos();
+            let sin_a = angle_rad.sin();
+            let dx = offset_x * cos_a - offset_y * sin_a;
+            let dy = offset_x * sin_a + offset_y * cos_a;
+
+            if dx.abs() < 1e-6 && dy.abs() < 1e-6 {
+                return Ok(());
+            }
+
+            let width = pixmap.width() as i32;
+            let height = pixmap.height() as i32;
+            let src = pixmap.data().to_vec();
+
+            let sample_channel = |x: f32, y: f32, channel: usize| -> f32 {
+                if x < 0.0 || x > (width - 1) as f32 || y < 0.0 || y > (height - 1) as f32 {
+                    return 0.0;
+                }
+                let x0 = x.floor() as i32;
+                let y0 = y.floor() as i32;
+                let x1 = (x0 + 1).min(width - 1);
+                let y1 = (y0 + 1).min(height - 1);
+                let fx = x - x.floor();
+                let fy = y - y.floor();
+
+                let p00 = src[((y0 * width + x0) * 4) as usize + channel] as f32;
+                let p10 = src[((y0 * width + x1) * 4) as usize + channel] as f32;
+                let p01 = src[((y1 * width + x0) * 4) as usize + channel] as f32;
+                let p11 = src[((y1 * width + x1) * 4) as usize + channel] as f32;
+
+                let top = p00 * (1.0 - fx) + p10 * fx;
+                let bot = p01 * (1.0 - fx) + p11 * fx;
+                top * (1.0 - fy) + bot * fy
+            };
+
+            let dst = pixmap.data_mut();
+            for y in 0..height {
+                for x in 0..width {
+                    let idx = ((y * width + x) * 4) as usize;
+                    let fx = x as f32;
+                    let fy = y as f32;
+
+                    let a_r = sample_channel(fx - dx, fy - dy, 3);
+                    let a_g = src[idx + 3] as f32;
+                    let a_b = sample_channel(fx + dx, fy + dy, 3);
+                    let alpha = a_r.max(a_g).max(a_b);
+
+                    if alpha == 0.0 {
+                        continue;
+                    }
+
+                    let r = sample_channel(fx - dx, fy - dy, 0);
+                    let g = src[idx + 1] as f32;
+                    let b = sample_channel(fx + dx, fy + dy, 2);
+
+                    dst[idx] = r.round().clamp(0.0, alpha) as u8;
+                    dst[idx + 1] = g.round().clamp(0.0, alpha) as u8;
+                    dst[idx + 2] = b.round().clamp(0.0, alpha) as u8;
+                    dst[idx + 3] = alpha.round().clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+        SceneFilter::Vignette {
+            offset,
+            darkness,
+            roundness,
+        } => {
+            if !offset.is_finite() || !darkness.is_finite() || !roundness.is_finite() {
+                return Err(RasterError::Scene(
+                    "vignette parameters must be finite".into(),
+                ));
+            }
+            let off = offset.clamp(0.0, 2.0);
+            let dark = darkness.clamp(0.0, 1.0);
+            let rnd = roundness.clamp(0.0, 1.0);
+
+            let width = pixmap.width() as f32;
+            let height = pixmap.height() as f32;
+            let max_diag = (1.0 - rnd) * 1.0 + rnd * 2.0f32.sqrt();
+            let span = (max_diag - off).max(1e-5);
+
+            for y in 0..pixmap.height() {
+                let v = (y as f32 + 0.5) / height;
+                let py = 2.0 * (v - 0.5).abs();
+                for x in 0..pixmap.width() {
+                    let u = (x as f32 + 0.5) / width;
+                    let px = 2.0 * (u - 0.5).abs();
+
+                    let d_rect = px.max(py);
+                    let d_ellipse = (px * px + py * py).sqrt();
+                    let d = (1.0 - rnd) * d_rect + rnd * d_ellipse;
+
+                    let factor = if d <= off {
+                        1.0
+                    } else {
+                        let t = ((d - off) / span).clamp(0.0, 1.0);
+                        let s = t * t * (3.0 - 2.0 * t);
+                        1.0 - dark * s
+                    };
+
+                    let idx = ((y * pixmap.width() + x) * 4) as usize;
+                    let pixel = &mut pixmap.data_mut()[idx..idx + 4];
+                    let alpha = pixel[3] as f32;
+                    for ch in pixel[0..3].iter_mut() {
+                        *ch = (*ch as f32 * factor).round().clamp(0.0, alpha) as u8;
+                    }
+                }
+            }
+        }
+        SceneFilter::Contrast { factor } => {
+            if !factor.is_finite() || factor < 0.0 {
+                return Err(RasterError::Scene(
+                    "contrast factor must be non-negative and finite".into(),
+                ));
+            }
+            for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+                let alpha = pixel[3] as f32;
+                if alpha == 0.0 {
+                    continue;
+                }
+                for channel in &mut pixel[..3] {
+                    let unpre = (*channel as f32 / alpha) * 255.0;
+                    let contrasted = (unpre - 128.0) * factor + 128.0;
+                    *channel = ((contrasted / 255.0) * alpha).round().clamp(0.0, alpha) as u8;
+                }
+            }
+        }
+        SceneFilter::Saturation { factor } => {
+            if !factor.is_finite() || factor < 0.0 {
+                return Err(RasterError::Scene(
+                    "saturation factor must be non-negative and finite".into(),
+                ));
+            }
+            for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+                let alpha = pixel[3] as f32;
+                if alpha == 0.0 {
+                    continue;
+                }
+                let r_unpre = (pixel[0] as f32 / alpha) * 255.0;
+                let g_unpre = (pixel[1] as f32 / alpha) * 255.0;
+                let b_unpre = (pixel[2] as f32 / alpha) * 255.0;
+
+                let luma = 0.299 * r_unpre + 0.587 * g_unpre + 0.114 * b_unpre;
+
+                let r_sat = (luma + (r_unpre - luma) * factor).clamp(0.0, 255.0);
+                let g_sat = (luma + (g_unpre - luma) * factor).clamp(0.0, 255.0);
+                let b_sat = (luma + (b_unpre - luma) * factor).clamp(0.0, 255.0);
+
+                pixel[0] = ((r_sat / 255.0) * alpha).round().clamp(0.0, alpha) as u8;
+                pixel[1] = ((g_sat / 255.0) * alpha).round().clamp(0.0, alpha) as u8;
+                pixel[2] = ((b_sat / 255.0) * alpha).round().clamp(0.0, alpha) as u8;
+            }
+        }
+        SceneFilter::HueRotate { degrees } => {
+            if !degrees.is_finite() {
+                return Err(RasterError::Scene("hue degrees must be finite".into()));
+            }
+            let shift = (degrees % 360.0 + 360.0) % 360.0;
+            if shift.abs() < 1e-4 {
+                return Ok(());
+            }
+
+            for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+                let alpha = pixel[3] as f32;
+                if alpha == 0.0 {
+                    continue;
+                }
+                let r_u = pixel[0] as f32 / alpha;
+                let g_u = pixel[1] as f32 / alpha;
+                let b_u = pixel[2] as f32 / alpha;
+
+                let max = r_u.max(g_u).max(b_u);
+                let min = r_u.min(g_u).min(b_u);
+                let delta = max - min;
+                let v = max;
+                let s = if max > 0.0 { delta / max } else { 0.0 };
+                let mut h = if delta.abs() < 1e-6 {
+                    0.0
+                } else if (max - r_u).abs() < 1e-6 {
+                    60.0 * (((g_u - b_u) / delta) % 6.0)
+                } else if (max - g_u).abs() < 1e-6 {
+                    60.0 * (((b_u - r_u) / delta) + 2.0)
+                } else {
+                    60.0 * (((r_u - g_u) / delta) + 4.0)
+                };
+                if h < 0.0 {
+                    h += 360.0;
+                }
+
+                h = (h + shift) % 360.0;
+
+                let c = v * s;
+                let x = c * (1.0 - (((h / 60.0) % 2.0) - 1.0).abs());
+                let m = v - c;
+
+                let (r_norm, g_norm, b_norm) = match (h / 60.0) as u32 {
+                    0 => (c, x, 0.0),
+                    1 => (x, c, 0.0),
+                    2 => (0.0, c, x),
+                    3 => (0.0, x, c),
+                    4 => (x, 0.0, c),
+                    _ => (c, 0.0, x),
+                };
+
+                pixel[0] = ((r_norm + m) * alpha).round().clamp(0.0, alpha) as u8;
+                pixel[1] = ((g_norm + m) * alpha).round().clamp(0.0, alpha) as u8;
+                pixel[2] = ((b_norm + m) * alpha).round().clamp(0.0, alpha) as u8;
+            }
+        }
+        SceneFilter::Invert { amount } => {
+            if !amount.is_finite() || !(0.0..=1.0).contains(&amount) {
+                return Err(RasterError::Scene(format!(
+                    "invert amount must be finite and between 0 and 1, got {amount}"
+                )));
+            }
+            for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+                let alpha = pixel[3] as f32;
+                if alpha == 0.0 {
+                    continue;
+                }
+                for channel in &mut pixel[..3] {
+                    let unpre = (*channel as f32 / alpha) * 255.0;
+                    let inverted = unpre + (255.0 - 2.0 * unpre) * amount;
+                    *channel = ((inverted / 255.0) * alpha).round().clamp(0.0, alpha) as u8;
+                }
+            }
+        }
+        SceneFilter::Tint { color, amount } => {
+            if !amount.is_finite() || !(0.0..=1.0).contains(&amount) {
+                return Err(RasterError::Scene(format!(
+                    "tint amount must be finite and between 0 and 1, got {amount}"
+                )));
+            }
+            let tr = color[0] as f32;
+            let tg = color[1] as f32;
+            let tb = color[2] as f32;
+            let ta = (color[3] as f32 / 255.0) * amount;
+
+            for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+                let alpha = pixel[3] as f32;
+                if alpha == 0.0 {
+                    continue;
+                }
+                let r_unpre = (pixel[0] as f32 / alpha) * 255.0;
+                let g_unpre = (pixel[1] as f32 / alpha) * 255.0;
+                let b_unpre = (pixel[2] as f32 / alpha) * 255.0;
+
+                let r_tint = r_unpre * (1.0 - ta) + tr * ta;
+                let g_tint = g_unpre * (1.0 - ta) + tg * ta;
+                let b_tint = b_unpre * (1.0 - ta) + tb * ta;
+
+                pixel[0] = ((r_tint / 255.0) * alpha).round().clamp(0.0, alpha) as u8;
+                pixel[1] = ((g_tint / 255.0) * alpha).round().clamp(0.0, alpha) as u8;
+                pixel[2] = ((b_tint / 255.0) * alpha).round().clamp(0.0, alpha) as u8;
+            }
+        }
+        SceneFilter::Duotone { primary, secondary } => {
+            let pr = primary[0] as f32;
+            let pg = primary[1] as f32;
+            let pb = primary[2] as f32;
+            let sr = secondary[0] as f32;
+            let sg = secondary[1] as f32;
+            let sb = secondary[2] as f32;
+
+            for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+                let alpha = pixel[3] as f32;
+                if alpha == 0.0 {
+                    continue;
+                }
+                let r_unpre = (pixel[0] as f32 / alpha) * 255.0;
+                let g_unpre = (pixel[1] as f32 / alpha) * 255.0;
+                let b_unpre = (pixel[2] as f32 / alpha) * 255.0;
+
+                let luma = (0.299 * r_unpre + 0.587 * g_unpre + 0.114 * b_unpre) / 255.0;
+                let luma = luma.clamp(0.0, 1.0);
+
+                let r_duo = pr * (1.0 - luma) + sr * luma;
+                let g_duo = pg * (1.0 - luma) + sg * luma;
+                let b_duo = pb * (1.0 - luma) + sb * luma;
+
+                pixel[0] = ((r_duo / 255.0) * alpha).round().clamp(0.0, alpha) as u8;
+                pixel[1] = ((g_duo / 255.0) * alpha).round().clamp(0.0, alpha) as u8;
+                pixel[2] = ((b_duo / 255.0) * alpha).round().clamp(0.0, alpha) as u8;
+            }
+        }
+        SceneFilter::ColorGrading {
+            contrast,
+            saturation,
+            gamma,
+            tint,
+        } => {
+            if !contrast.is_finite()
+                || !saturation.is_finite()
+                || !gamma.is_finite()
+                || gamma <= 0.0
+                || contrast < 0.0
+                || saturation < 0.0
+            {
+                return Err(RasterError::Scene(
+                    "color grading parameters must be positive/finite".into(),
+                ));
+            }
+            let inv_gamma = 1.0 / gamma;
+
+            for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+                let alpha = pixel[3] as f32;
+                if alpha == 0.0 {
+                    continue;
+                }
+                let r_unpre = (pixel[0] as f32 / alpha) * 255.0;
+                let g_unpre = (pixel[1] as f32 / alpha) * 255.0;
+                let b_unpre = (pixel[2] as f32 / alpha) * 255.0;
+
+                // 1. Gamma
+                let mut r = 255.0 * (r_unpre / 255.0).clamp(0.0, 1.0).powf(inv_gamma);
+                let mut g = 255.0 * (g_unpre / 255.0).clamp(0.0, 1.0).powf(inv_gamma);
+                let mut b = 255.0 * (b_unpre / 255.0).clamp(0.0, 1.0).powf(inv_gamma);
+
+                // 2. Contrast
+                r = (r - 128.0) * contrast + 128.0;
+                g = (g - 128.0) * contrast + 128.0;
+                b = (b - 128.0) * contrast + 128.0;
+
+                // 3. Saturation (Rec.601)
+                let luma = 0.299 * r + 0.587 * g + 0.114 * b;
+                r = luma + (r - luma) * saturation;
+                g = luma + (g - luma) * saturation;
+                b = luma + (b - luma) * saturation;
+
+                // 4. Tint
+                if let Some(tint_col) = tint {
+                    let tr = tint_col[0] as f32;
+                    let tg = tint_col[1] as f32;
+                    let tb = tint_col[2] as f32;
+                    let ta = (tint_col[3] as f32) / 255.0;
+                    r = r * (1.0 - ta) + tr * ta;
+                    g = g * (1.0 - ta) + tg * ta;
+                    b = b * (1.0 - ta) + tb * ta;
+                }
+
+                pixel[0] = ((r.clamp(0.0, 255.0) / 255.0) * alpha)
+                    .round()
+                    .clamp(0.0, alpha) as u8;
+                pixel[1] = ((g.clamp(0.0, 255.0) / 255.0) * alpha)
+                    .round()
+                    .clamp(0.0, alpha) as u8;
+                pixel[2] = ((b.clamp(0.0, 255.0) / 255.0) * alpha)
+                    .round()
+                    .clamp(0.0, alpha) as u8;
+            }
+        }
+        SceneFilter::ColorKey {
+            key_color,
+            similarity,
+            smoothness,
+            spill_suppression,
+        } => {
+            if !similarity.is_finite()
+                || !smoothness.is_finite()
+                || !spill_suppression.is_finite()
+                || similarity < 0.0
+                || smoothness < 0.0
+            {
+                return Err(RasterError::Scene(
+                    "color key parameters must be non-negative and finite".into(),
+                ));
+            }
+            let kr = key_color[0] as f32 / 255.0;
+            let kg = key_color[1] as f32 / 255.0;
+            let kb = key_color[2] as f32 / 255.0;
+            let sqrt3 = 3.0f32.sqrt();
+
+            let edge0 = (similarity - smoothness).max(0.0);
+            let edge1 = (similarity + smoothness).min(1.0);
+            let ss = spill_suppression.clamp(0.0, 1.0);
+
+            for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+                let alpha = pixel[3] as f32;
+                if alpha <= 0.25 {
+                    continue;
+                }
+                let mut r_u = pixel[0] as f32 / alpha;
+                let mut g_u = pixel[1] as f32 / alpha;
+                let mut b_u = pixel[2] as f32 / alpha;
+
+                let dr = r_u - kr;
+                let dg = g_u - kg;
+                let db = b_u - kb;
+                let dist = ((dr * dr + dg * dg + db * db).sqrt() / sqrt3).clamp(0.0, 1.0);
+
+                let mask = if edge1 > edge0 {
+                    let t = ((dist - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+                    t * t * (3.0 - 2.0 * t)
+                } else if dist >= similarity {
+                    1.0
+                } else {
+                    0.0
+                };
+
+                if ss > 0.0 {
+                    if kg > kr && kg > kb {
+                        let max_g = (r_u + b_u) / 2.0;
+                        if g_u > max_g {
+                            g_u = g_u * (1.0 - ss) + max_g * ss;
+                        }
+                    } else if kb > kr && kb > kg {
+                        let max_b = (r_u + g_u) / 2.0;
+                        if b_u > max_b {
+                            b_u = b_u * (1.0 - ss) + max_b * ss;
+                        }
+                    } else if kr > kg && kr > kb {
+                        let max_r = (g_u + b_u) / 2.0;
+                        if r_u > max_r {
+                            r_u = r_u * (1.0 - ss) + max_r * ss;
+                        }
+                    }
+                }
+
+                let new_alpha = (alpha * mask).round().clamp(0.0, 255.0);
+                pixel[0] = (r_u * new_alpha).round().clamp(0.0, new_alpha) as u8;
+                pixel[1] = (g_u * new_alpha).round().clamp(0.0, new_alpha) as u8;
+                pixel[2] = (b_u * new_alpha).round().clamp(0.0, new_alpha) as u8;
+                pixel[3] = new_alpha as u8;
+            }
+        }
     }
     Ok(())
 }

@@ -3,10 +3,10 @@
 mod scene_emitter;
 
 pub use scene_emitter::{
-    SceneEmitter, SceneEmitterComposition, SceneFrameContext, SceneFreeze, SceneGroup, SceneLayer,
-    SceneLinearGradient, SceneLoop, SceneRect, SceneSequence, SceneStack, SceneText,
-    SceneTextBlock, SceneTrail, SceneTrailOpacity, SceneTransitionSeries, TransitionKind,
-    TransitionTiming,
+    FlipDirection, LinearWipeDirection, SceneEmitter, SceneEmitterComposition, SceneFrameContext,
+    SceneFreeze, SceneGroup, SceneLayer, SceneLinearGradient, SceneLoop, SceneRect, SceneSequence,
+    SceneStack, SceneText, SceneTextBlock, SceneTrail, SceneTrailOpacity, SceneTransitionSeries,
+    TransitionKind, TransitionTiming,
 };
 
 use dioxuscut_rasterizer::{Color, GradientStop, Scene, SceneNode};
