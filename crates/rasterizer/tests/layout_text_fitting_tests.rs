@@ -19,7 +19,7 @@ fn test_fill_text_box_greedy_wrapping() {
     let text = "First second third fourth fifth sixth";
 
     // Width that fits ~2 words per line
-    let lines = fill_text_box(text, &font, 20.0, 150.0);
+    let lines = fill_text_box(text, &font, 20.0, 100.0);
     assert!(
         lines.len() >= 3,
         "Expected at least 3 lines, got {:?}",
@@ -28,8 +28,8 @@ fn test_fill_text_box_greedy_wrapping() {
     for line in &lines {
         let width = measure_text_width_with_font(line, &font, 20.0);
         assert!(
-            width <= 150.0 + 1.0,
-            "Line '{}' width {} > 150.0",
+            width <= 100.0 + 1.0,
+            "Line '{}' width {} > 100.0",
             line,
             width
         );
