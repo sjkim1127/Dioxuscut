@@ -972,7 +972,7 @@ mod tests {
     #[test]
     fn test_sequential_renders_correct_count() {
         let backend = TinySkiaBackend::headless();
-        let tmp = std::env::temp_dir().join("dioxuscut_test_seq");
+        let tmp = unique_temp_dir("sequential");
         let _ = std::fs::remove_dir_all(&tmp);
 
         let config = NativeRenderConfig::new(64, 64, 30.0, 5, &tmp);
@@ -1002,8 +1002,9 @@ mod tests {
     #[test]
     fn test_parallel_renders_same_count_as_sequential() {
         let backend = TinySkiaBackend::headless();
-        let tmp = std::env::temp_dir().join("dioxuscut_test_par");
+        let tmp = unique_temp_dir("parallel");
         let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("create test tmp dir");
 
         let config = NativeRenderConfig::new(64, 64, 30.0, 10, &tmp).with_concurrency(4);
 
@@ -1022,8 +1023,9 @@ mod tests {
     #[test]
     fn test_parallel_pixel_values_correct() {
         let backend = TinySkiaBackend::headless();
-        let tmp = std::env::temp_dir().join("dioxuscut_test_par_px");
+        let tmp = unique_temp_dir("parallel_px");
         let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("create test tmp dir");
 
         let config = NativeRenderConfig::new(64, 64, 30.0, 4, &tmp);
         let paths = render_parallel(&backend, &config, |frame| {
