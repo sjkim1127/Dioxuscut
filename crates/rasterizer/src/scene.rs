@@ -237,6 +237,20 @@ pub enum SceneFilter {
         smoothness: f32,
         spill_suppression: f32,
     },
+    /// Shutter-angle motion blur.
+    ///
+    /// Equivalent to Remotion's `<CameraMotionBlur shutterAngle={180} samples={10}>`.
+    /// Accumulates `samples` renders at sub-frame time offsets determined by `shutter_angle`
+    /// and `shutter_phase`, blending them together with equal opacity weights.
+    CameraMotionBlur {
+        /// Opening angle of the virtual camera shutter in degrees (0–360).
+        /// 180° = half-frame exposure (cinematic standard). 360° = maximum blur.
+        shutter_angle: f32,
+        /// Number of sub-frame samples to accumulate. Higher = smoother blur.
+        samples: u32,
+        /// Phase offset as a fraction of the shutter interval (-0.5 centres on current frame).
+        shutter_phase: f32,
+    },
 }
 
 /// Drop shadow generated from the filtered and masked layer alpha.
