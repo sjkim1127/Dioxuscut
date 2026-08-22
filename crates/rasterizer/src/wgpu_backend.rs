@@ -847,6 +847,7 @@ fn compile_nodes(
             SceneNode::Text { .. }
             | SceneNode::Image { .. }
             | SceneNode::Video { .. }
+            | SceneNode::Gif { .. }
             | SceneNode::Layer { .. } => return None,
         }
     }

@@ -372,6 +372,32 @@ impl FontCache {
         self.path.as_deref()
     }
 
+    /// Register a font from raw bytes under a named key/family.
+    pub fn register_font_bytes(&self, name: &str, bytes: Vec<u8>) -> Result<(), RasterError> {
+        let loaded = LoadedFont::from_bytes(bytes)
+            .map_err(|e| RasterError::Scene(format!("failed to parse font '{name}': {e:?}")))?;
+        self.assets
+            .lock()
+            .expect("font cache lock poisoned")
+            .insert(name.to_string(), Arc::new(loaded));
+        Ok(())
+    }
+
+    /// Load and register a font from a local file path into the cache.
+    pub fn register_font_from_path(
+        &self,
+        name: &str,
+        path: &std::path::Path,
+    ) -> Result<(), RasterError> {
+        let bytes = std::fs::read(path).map_err(|e| {
+            RasterError::Scene(format!(
+                "failed to read font from '{}': {e}",
+                path.display()
+            ))
+        })?;
+        self.register_font_bytes(name, bytes)
+    }
+
     /// Rasterize text with ordered explicit local fonts followed by the system fallback.
     pub(crate) fn rasterize(
         &self,
@@ -1929,5 +1955,17 @@ mod tests {
         // Empty lines produces empty path
         let empty_path = create_rounded_text_box(&[], &font, 20.0, &options);
         assert_eq!(empty_path, "");
+    }
+
+    #[test]
+    fn test_font_cache_register_font_bytes() {
+        let cache = FontCache::bundled();
+        let res = cache.register_font_bytes("custom_noto", BUNDLED_FONT.to_vec());
+        assert!(res.is_ok());
+        assert_eq!(cache.asset_count(), 1);
+
+        // Invalid font bytes should fail gracefully
+        let err_res = cache.register_font_bytes("bad_font", vec![0, 1, 2, 3]);
+        assert!(err_res.is_err());
     }
 }

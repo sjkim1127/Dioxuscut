@@ -420,6 +420,40 @@ pub enum SceneNode {
         shadow: Option<SceneShadow>,
         children: Vec<SceneNode>,
     },
+
+    /// Animated GIF scene node.
+    ///
+    /// Equivalent to Remotion's `<Gif>` from `@remotion/gif`.
+    /// The appropriate GIF frame is selected based on `time` (seconds into the
+    /// animation, already scaled by `playback_rate` by the caller).
+    Gif {
+        /// File path of the GIF asset.
+        src: String,
+        /// Time in seconds into the GIF playback (caller scales by playback_rate).
+        #[serde(default)]
+        time: f64,
+        x: f32,
+        y: f32,
+        /// Rendered width in pixels.
+        w: f32,
+        /// Rendered height in pixels.
+        h: f32,
+        /// Playback speed multiplier (`1.0` = normal speed, `2.0` = double speed).
+        #[serde(default = "default_playback_rate")]
+        playback_rate: f32,
+        /// Behaviour when the animation reaches its last frame.
+        #[serde(default)]
+        loop_behavior: crate::gif_cache::LoopBehavior,
+        /// How the image fits within the bounding box.
+        #[serde(default)]
+        fit: ImageFit,
+        #[serde(default = "default_opacity")]
+        opacity: f32,
+    },
+}
+
+const fn default_playback_rate() -> f32 {
+    1.0
 }
 
 /// Affine 2D transform (scale + rotation + translation).

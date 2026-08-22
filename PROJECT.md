@@ -48,6 +48,12 @@ Dioxuscut is a high-performance programmatic video composition and rendering eng
 | 15 | Unified Public APIs & Re-exports | Clean public exports in `crates/core`, `crates/rasterizer`, `crates/noise`, etc. | M3 | ORIGINAL_REQUEST §R3 |
 | 16 | E2E Requirements Verification | 4-tier opaque-box test suite derivation and execution across all features | M4 | ORIGINAL_REQUEST §Acceptance Criteria |
 | 17 | Adversarial Hardening & Final Gate | White-box stress testing, coverage gap elimination, zero warnings, 100% tests | M5 | ORIGINAL_REQUEST §Acceptance Criteria |
+| 18 | `makeTransform` & `interpolateStyles` | CSS transform chain builder & style interpolation (`crates/animation`) | M6 | Remotion animation-utils parity |
+| 19 | `CameraMotionBlur` Filter | Shutter-angle sub-frame accumulation blur filter in `crates/rasterizer` | M7 | Remotion motion-blur parity |
+| 20 | Audio Waveform Visualization | Audio waveform decoding, DFT frequency spectrum, and SVG path generator in `crates/media` | M8 | Remotion media-utils parity |
+| 21 | GIF Animation Support | Animated GIF decode cache & frame synchronization (`crates/rasterizer`, `crates/media`) | M9 | Remotion gif parity |
+| 22 | Dynamic Font Registry | Dynamic TTF/OTF font registration from bytes/file path (`crates/rasterizer`) | M10 | Remotion fonts parity |
+| 23 | Render Cancellation Signal | `make_cancel_signal` and `CancelSignal` token support in `crates/rasterizer` | M11 | Remotion renderer parity |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
@@ -57,6 +63,13 @@ Dioxuscut is a high-performance programmatic video composition and rendering eng
 | M3 | Typography, Text Fitting & Rounded Boxes | `crates/rasterizer/src/font.rs`, `crates/shapes`, `crates/core` re-exports, formatting | none | DONE |
 | M4 | E2E Testing Suite (Tiers 1-4) | Independent E2E test harness & test suite creating `TEST_READY.md` | none | DONE |
 | M5 | Final Integration & Adversarial Hardening | Pass 100% of E2E suite, Tier 5 white-box challenger hardening, full workspace check | M1, M2, M3, M4 | DONE |
+| M6 | Transform Builder & Style Interpolation | `crates/animation` (`make_transform`, `TransformOp`, `interpolate_styles`) | none | DONE |
+| M7 | Camera Motion Blur Filter | `crates/rasterizer` (`SceneFilter::CameraMotionBlur`, `tiny_skia_backend`) | none | DONE |
+| M8 | Audio Waveform Visualization | `crates/media` (`AudioData`, `visualize_audio`, `create_smooth_svg_path`) | none | DONE |
+| M9 | GIF Media Component & Frame Cache | `crates/rasterizer/src/gif_cache.rs`, `crates/media/src/gif.rs`, `SceneNode::Gif` | none | DONE |
+| M10 | Dynamic Font Registration | `crates/rasterizer/src/font.rs` (`register_font_bytes`, `register_font_from_path`) | none | DONE |
+| M11 | Render Cancellation Signal | `crates/rasterizer/src/render.rs` (`make_cancel_signal`, `CancelSignal`) | none | DONE |
+
 
 ## Interface Contracts
 

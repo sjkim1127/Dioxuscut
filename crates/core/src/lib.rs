@@ -43,8 +43,11 @@ pub use dioxuscut_rasterizer as rasterizer;
 
 // Core animation primitives
 pub use dioxuscut_animation::{
-    bezier, interpolate, interpolate_colors, spring, EasingFn, ExtrapolateType, InterpolateOptions,
-    SpringConfig,
+    bezier, interpolate, interpolate_colors, interpolate_styles, make_transform, matrix, matrix3d,
+    perspective, rotate, rotate3d, rotate_x, rotate_y, rotate_z, scale, scale3d, scale_x, scale_y,
+    scale_z, skew, skew_x, skew_y, spring, translate, translate3d, translate_x, translate_y,
+    translate_z, EasingFn, ExtrapolateType, InterpolateOptions, SpringConfig, StyleMap, StyleValue,
+    TransformOp,
 };
 
 // Composition primitives & emitters
@@ -56,10 +59,12 @@ pub use dioxuscut_composition::{
 // Typography, layout & rasterizer primitives
 pub use dioxuscut_rasterizer::{
     create_rounded_text_box, create_rounded_text_box_from_measurements, fill_text_box, fit_text,
-    fit_text_on_n_lines, layout_text_box, measure_text_width, measure_text_width_with_font,
-    AudioTrack, BlendMode, ClipRegion, Color, FitTextOnNLinesOptions, FontCache, FrameConfig,
-    GradientStop, ImageFit, LayoutError, MaskMode, PositionedTextLine, RasterError,
-    RasterizerBackend, RoundedTextBoxOptions, Scene, SceneFilter, SceneNode, SceneShadow,
-    TextAlign, TextBox, TextBoxLayout, TextFitResult, TextHorizontalAlign, TextLineDimension,
-    TextOverflow, TextVerticalAlign, TinySkiaBackend, Transform2D,
+    fit_text_on_n_lines, layout_text_box, make_cancel_signal, measure_text_width,
+    measure_text_width_with_font, AudioTrack, BlendMode, CancelSignal, ClipRegion, Color,
+    FitTextOnNLinesOptions, FontCache, FrameConfig, GifFrame, GifFrameCache, GradientStop,
+    ImageFit, LayoutError, LoopBehavior, MaskMode, PositionedTextLine, RasterError,
+    RasterizerBackend, RenderCancellationToken, RenderControl, RenderProgress,
+    RoundedTextBoxOptions, Scene, SceneFilter, SceneNode, SceneShadow, TextAlign, TextBox,
+    TextBoxLayout, TextFitResult, TextHorizontalAlign, TextLineDimension, TextOverflow,
+    TextVerticalAlign, TinySkiaBackend, Transform2D,
 };

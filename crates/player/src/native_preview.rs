@@ -512,6 +512,29 @@ fn SceneNodeView(props: SceneNodeViewProps) -> Element {
                 }
             }
         }
+        SceneNode::Gif {
+            src,
+            x,
+            y,
+            w,
+            h,
+            fit,
+            opacity,
+            ..
+        } => {
+            let preserve_aspect_ratio = image_preserve_aspect_ratio(fit);
+            rsx! {
+                image {
+                    x,
+                    y,
+                    width: w,
+                    height: h,
+                    href: src,
+                    opacity,
+                    preserve_aspect_ratio,
+                }
+            }
+        }
     }
 }
 

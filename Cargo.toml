@@ -62,6 +62,9 @@ unicode-segmentation = "1.13.3"
 taffy             = "0.12.2"
 lyon_tessellation = "1.0.20"
 
+# Audio decoding
+hound             = "3.5"
+
 # Error handling
 anyhow            = "1"
 thiserror         = "1"

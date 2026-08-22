@@ -101,6 +101,16 @@ pub struct RenderProgress {
 #[derive(Clone, Default)]
 pub struct RenderCancellationToken(Arc<AtomicBool>);
 
+/// Alias for [`RenderCancellationToken`] for Remotion `makeCancelSignal` API parity.
+pub type CancelSignal = RenderCancellationToken;
+
+/// Create a cancel signal for stopping renders asynchronously.
+///
+/// Remotion `@remotion/renderer` `makeCancelSignal()` parity.
+pub fn make_cancel_signal() -> CancelSignal {
+    RenderCancellationToken::default()
+}
+
 impl RenderCancellationToken {
     pub fn cancel(&self) {
         self.0.store(true, Ordering::Release);

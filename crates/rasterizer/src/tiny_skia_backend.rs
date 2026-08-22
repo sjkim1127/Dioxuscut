@@ -4,7 +4,9 @@
 
 use crate::backend::{FrameConfig, RasterError, RasterizerBackend};
 use crate::font::FontCache;
+use crate::gif_cache::GifFrameCache;
 use crate::image_cache::ImageCache;
+
 use crate::scene::{
     BlendMode, ClipRegion, Color, ImageFit, MaskMode, Scene, SceneFilter, SceneNode, SceneShadow,
 };
@@ -26,6 +28,7 @@ pub struct TinySkiaBackend {
     font: FontCache,
     images: ImageCache,
     videos: VideoFrameCache,
+    gifs: GifFrameCache,
 }
 
 impl TinySkiaBackend {
@@ -35,6 +38,7 @@ impl TinySkiaBackend {
             font: FontCache::load(),
             images: ImageCache::default(),
             videos: VideoFrameCache::default(),
+            gifs: GifFrameCache::new(),
         }
     }
 
@@ -44,6 +48,7 @@ impl TinySkiaBackend {
             font: FontCache::headless(),
             images: ImageCache::default(),
             videos: VideoFrameCache::default(),
+            gifs: GifFrameCache::new(),
         }
     }
 
@@ -74,6 +79,7 @@ impl RasterizerBackend for TinySkiaBackend {
             font: &self.font,
             images: &self.images,
             videos: &self.videos,
+            gifs: &self.gifs,
             sampling_fps: config.fps,
         };
         render_nodes(
@@ -96,6 +102,7 @@ struct RenderResources<'a> {
     font: &'a FontCache,
     images: &'a ImageCache,
     videos: &'a VideoFrameCache,
+    gifs: &'a GifFrameCache,
     sampling_fps: f64,
 }
 
@@ -276,6 +283,39 @@ fn render_node(
         }
 
         SceneNode::Audio { .. } => {}
+
+        SceneNode::Gif {
+            src,
+            time,
+            x,
+            y,
+            w,
+            h,
+            playback_rate,
+            loop_behavior,
+            fit,
+            opacity: node_opacity,
+        } => {
+            let frames = resources.gifs.load_frames(src)?;
+            // Convert composition time to GIF playback time in milliseconds.
+            // `time` is already the composition time in seconds; scale by playback_rate.
+            let time_ms = *time * *playback_rate as f64 * 1000.0;
+            let maybe_frame = GifFrameCache::frame_at_time_ms(&frames, time_ms, *loop_behavior);
+            if let Some(frame_image) = maybe_frame {
+                draw_media(
+                    pixmap,
+                    frame_image,
+                    src,
+                    *x,
+                    *y,
+                    *w,
+                    *h,
+                    *fit,
+                    opacity * node_opacity,
+                    transform,
+                )?;
+            }
+        }
 
         SceneNode::LinearGradient {
             x,

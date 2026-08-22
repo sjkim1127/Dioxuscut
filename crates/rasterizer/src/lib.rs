@@ -28,6 +28,7 @@
 pub mod backend;
 pub mod font;
 pub mod frame_cache;
+pub mod gif_cache;
 mod image_cache;
 pub mod render;
 pub mod scene;
@@ -49,11 +50,13 @@ pub use frame_cache::{
     DEFAULT_MAX_CACHE_BYTES,
 };
 pub use render::{
-    build_pipe_ffmpeg_args, render_all_frames, render_frame_timed, render_parallel,
-    render_still_fallible, render_to_ffmpeg_pipe, render_to_ffmpeg_pipe_fallible, save_frame,
-    NativeRenderConfig, PipeConfig, RenderCancellationToken, RenderControl, RenderProgress,
-    StillImageFormat, VideoCodec,
+    build_pipe_ffmpeg_args, make_cancel_signal, render_all_frames, render_frame_timed,
+    render_parallel, render_still_fallible, render_to_ffmpeg_pipe, render_to_ffmpeg_pipe_fallible,
+    save_frame, CancelSignal, NativeRenderConfig, PipeConfig, RenderCancellationToken,
+    RenderControl, RenderProgress, StillImageFormat, VideoCodec,
 };
+
+pub use gif_cache::{GifFrame, GifFrameCache, LoopBehavior};
 pub use scene::{
     AudioTrack, BlendMode, ClipRegion, Color, GradientStop, ImageFit, MaskMode, Scene, SceneFilter,
     SceneNode, SceneShadow, Transform2D,
