@@ -57,9 +57,9 @@ pub use dioxuscut_composition::{
 pub use dioxuscut_rasterizer::{
     create_rounded_text_box, create_rounded_text_box_from_measurements, fill_text_box, fit_text,
     fit_text_on_n_lines, layout_text_box, measure_text_width, measure_text_width_with_font,
-    BlendMode, ClipRegion, Color, FitTextOnNLinesOptions, FontCache, FrameConfig, GradientStop,
-    ImageFit, LayoutError, MaskMode, PositionedTextLine, RasterError, RasterizerBackend,
-    RoundedTextBoxOptions, Scene, SceneFilter, SceneNode, SceneShadow, TextAlign, TextBox,
-    TextBoxLayout, TextFitResult, TextHorizontalAlign, TextLineDimension, TextOverflow,
-    TextVerticalAlign, TinySkiaBackend, Transform2D,
+    AudioTrack, BlendMode, ClipRegion, Color, FitTextOnNLinesOptions, FontCache, FrameConfig,
+    GradientStop, ImageFit, LayoutError, MaskMode, PositionedTextLine, RasterError,
+    RasterizerBackend, RoundedTextBoxOptions, Scene, SceneFilter, SceneNode, SceneShadow,
+    TextAlign, TextBox, TextBoxLayout, TextFitResult, TextHorizontalAlign, TextLineDimension,
+    TextOverflow, TextVerticalAlign, TinySkiaBackend, Transform2D,
 };
