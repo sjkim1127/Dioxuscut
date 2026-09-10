@@ -9,6 +9,7 @@ pub mod audio;
 pub mod audio_viz;
 pub mod gif;
 pub mod img;
+pub mod metadata;
 pub mod scene;
 pub mod video;
 
@@ -19,5 +20,9 @@ pub use audio_viz::{
 };
 pub use gif::{Gif, GifProps};
 pub use img::{ImageFit, Img, ImgProps};
+pub use metadata::{
+    get_audio_metadata, get_video_metadata, static_file, AudioMetadata, MediaMetadataError,
+    VideoMetadata,
+};
 pub use scene::{SceneAudio, SceneImage, SceneVideo};
 pub use video::{Video, VideoProps};

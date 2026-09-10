@@ -25,17 +25,23 @@
 //! img.save("frame_000001.png").unwrap();
 //! ```
 
+#![allow(unknown_lints)]
+#![allow(clippy::chunks_exact_to_as_chunks)]
+
 pub mod backend;
 pub mod font;
 pub mod frame_cache;
 pub mod gif_cache;
 mod image_cache;
+pub mod mesh3d;
 pub mod render;
 pub mod scene;
 pub mod tiny_skia_backend;
 mod video_cache;
 #[cfg(feature = "gpu")]
 pub mod wgpu_backend;
+
+pub use mesh3d::{Mesh3D, Vec3};
 
 pub use backend::{FrameConfig, RasterError, RasterizerBackend};
 pub use font::{

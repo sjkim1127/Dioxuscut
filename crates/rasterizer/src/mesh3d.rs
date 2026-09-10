@@ -1,0 +1,364 @@
+//! Native 3D procedural geometry & perspective rasterizer (Blender/SOP style).
+//!
+//! Renders 3D meshes (Cube, Sphere, Torus, 3D Particle Cloud) directly into
+//! the 2D scene graph with perspective projection, backface culling, and Lambertian lighting.
+
+use crate::scene::{Color, Scene, SceneNode};
+use std::f32::consts::PI;
+
+/// 3D Vector with basic geometric operations.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Vec3 {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
+impl Vec3 {
+    pub const fn new(x: f32, y: f32, z: f32) -> Self {
+        Self { x, y, z }
+    }
+
+    pub fn dot(self, other: Self) -> f32 {
+        self.x * other.x + self.y * other.y + self.z * other.z
+    }
+
+    pub fn cross(self, other: Self) -> Self {
+        Self {
+            x: self.y * other.z - self.z * other.y,
+            y: self.z * other.x - self.x * other.z,
+            z: self.x * other.y - self.y * other.x,
+        }
+    }
+
+    pub fn length(self) -> f32 {
+        self.dot(self).sqrt()
+    }
+
+    pub fn normalize(self) -> Self {
+        let len = self.length();
+        if len > 1e-6 {
+            Self {
+                x: self.x / len,
+                y: self.y / len,
+                z: self.z / len,
+            }
+        } else {
+            Self::new(0.0, 1.0, 0.0)
+        }
+    }
+
+    pub fn rotate_x(self, angle_rad: f32) -> Self {
+        let cos = angle_rad.cos();
+        let sin = angle_rad.sin();
+        Self {
+            x: self.x,
+            y: self.y * cos - self.z * sin,
+            z: self.y * sin + self.z * cos,
+        }
+    }
+
+    pub fn rotate_y(self, angle_rad: f32) -> Self {
+        let cos = angle_rad.cos();
+        let sin = angle_rad.sin();
+        Self {
+            x: self.x * cos + self.z * sin,
+            y: self.y,
+            z: -self.x * sin + self.z * cos,
+        }
+    }
+
+    pub fn rotate_z(self, angle_rad: f32) -> Self {
+        let cos = angle_rad.cos();
+        let sin = angle_rad.sin();
+        Self {
+            x: self.x * cos - self.y * sin,
+            y: self.x * sin + self.y * cos,
+            z: self.z,
+        }
+    }
+
+    pub fn rotate(self, pitch: f32, yaw: f32, roll: f32) -> Self {
+        self.rotate_x(pitch).rotate_y(yaw).rotate_z(roll)
+    }
+}
+
+/// A 3D procedural mesh (SOP - Surface Operator).
+#[derive(Debug, Clone, Default)]
+pub struct Mesh3D {
+    pub vertices: Vec<Vec3>,
+    pub faces: Vec<Vec<usize>>,
+}
+
+impl Mesh3D {
+    pub fn new(vertices: Vec<Vec3>, faces: Vec<Vec<usize>>) -> Self {
+        Self { vertices, faces }
+    }
+
+    /// Construct a 3D Cube with the given edge length.
+    pub fn cube(size: f32) -> Self {
+        let h = size * 0.5;
+        let vertices = vec![
+            Vec3::new(-h, -h, -h), // 0
+            Vec3::new(h, -h, -h),  // 1
+            Vec3::new(h, h, -h),   // 2
+            Vec3::new(-h, h, -h),  // 3
+            Vec3::new(-h, -h, h),  // 4
+            Vec3::new(h, -h, h),   // 5
+            Vec3::new(h, h, h),    // 6
+            Vec3::new(-h, h, h),   // 7
+        ];
+
+        let faces = vec![
+            vec![0, 1, 2, 3], // front (-Z)
+            vec![5, 4, 7, 6], // back (+Z)
+            vec![4, 0, 3, 7], // left (-X)
+            vec![1, 5, 6, 2], // right (+X)
+            vec![3, 2, 6, 7], // top (+Y)
+            vec![4, 5, 1, 0], // bottom (-Y)
+        ];
+
+        Self { vertices, faces }
+    }
+
+    /// Construct a UV Sphere with the given radius and resolution.
+    pub fn sphere(radius: f32, rings: usize, sectors: usize) -> Self {
+        let mut vertices = Vec::new();
+        let mut faces = Vec::new();
+
+        let r_step = PI / rings.max(2) as f32;
+        let s_step = (2.0 * PI) / sectors.max(3) as f32;
+
+        for i in 0..=rings {
+            let phi = i as f32 * r_step;
+            let y = radius * phi.cos();
+            let ring_r = radius * phi.sin();
+
+            for j in 0..=sectors {
+                let theta = j as f32 * s_step;
+                let x = ring_r * theta.sin();
+                let z = ring_r * theta.cos();
+                vertices.push(Vec3::new(x, y, z));
+            }
+        }
+
+        let stride = sectors + 1;
+        for i in 0..rings {
+            for j in 0..sectors {
+                let first = i * stride + j;
+                let second = first + stride;
+                faces.push(vec![first, second, second + 1, first + 1]);
+            }
+        }
+
+        Self { vertices, faces }
+    }
+
+    /// Construct a 3D Torus (donut) with major and minor radii.
+    pub fn torus(r_major: f32, r_minor: f32, segs_major: usize, segs_minor: usize) -> Self {
+        let mut vertices = Vec::new();
+        let mut faces = Vec::new();
+
+        let u_step = (2.0 * PI) / segs_major.max(3) as f32;
+        let v_step = (2.0 * PI) / segs_minor.max(3) as f32;
+
+        for i in 0..=segs_major {
+            let u = i as f32 * u_step;
+            let cos_u = u.cos();
+            let sin_u = u.sin();
+
+            for j in 0..=segs_minor {
+                let v = j as f32 * v_step;
+                let cos_v = v.cos();
+                let sin_v = v.sin();
+
+                let x = (r_major + r_minor * cos_v) * cos_u;
+                let y = r_minor * sin_v;
+                let z = (r_major + r_minor * cos_v) * sin_u;
+                vertices.push(Vec3::new(x, y, z));
+            }
+        }
+
+        let stride = segs_minor + 1;
+        for i in 0..segs_major {
+            for j in 0..segs_minor {
+                let first = i * stride + j;
+                let second = first + stride;
+                faces.push(vec![first, second, second + 1, first + 1]);
+            }
+        }
+
+        Self { vertices, faces }
+    }
+
+    /// Apply 3D Euler rotation (pitch, yaw, roll) in radians.
+    pub fn rotate(&mut self, pitch: f32, yaw: f32, roll: f32) {
+        for v in &mut self.vertices {
+            *v = v.rotate(pitch, yaw, roll);
+        }
+    }
+
+    /// Scale all vertex coordinates.
+    pub fn scale(&mut self, factor: f32) {
+        for v in &mut self.vertices {
+            v.x *= factor;
+            v.y *= factor;
+            v.z *= factor;
+        }
+    }
+
+    /// Render this 3D mesh into a [`Scene`] with perspective projection and Lambertian diffuse shading.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_to_scene(
+        &self,
+        scene: &mut Scene,
+        center_x: f32,
+        center_y: f32,
+        camera_dist: f32,
+        base_color: Color,
+        light_dir: Vec3,
+        wireframe: bool,
+    ) {
+        let light = light_dir.normalize();
+        let cam_dist = camera_dist.max(100.0);
+
+        // Project vertices
+        let mut projected: Vec<(f32, f32, f32)> = Vec::with_capacity(self.vertices.len());
+        for v in &self.vertices {
+            let z_eye = v.z + cam_dist;
+            let scale = if z_eye > 1.0 { cam_dist / z_eye } else { 1.0 };
+            let sx = center_x + v.x * scale;
+            let sy = center_y - v.y * scale; // Flip Y for screen space
+            projected.push((sx, sy, z_eye));
+        }
+
+        // Sort faces by depth (Painter's algorithm: farthest first)
+        struct ProjectedFace {
+            depth: f32,
+            indices: Vec<usize>,
+            color: Color,
+        }
+
+        let mut sorted_faces: Vec<ProjectedFace> = Vec::new();
+
+        for face in &self.faces {
+            if face.len() < 3 {
+                continue;
+            }
+
+            let v0 = self.vertices[face[0]];
+            let v1 = self.vertices[face[1]];
+            let v2 = self.vertices[face[2]];
+
+            let edge1 = Vec3::new(v1.x - v0.x, v1.y - v0.y, v1.z - v0.z);
+            let edge2 = Vec3::new(v2.x - v0.x, v2.y - v0.y, v2.z - v0.z);
+            let normal = edge1.cross(edge2).normalize();
+
+            // Backface culling: if normal faces away from camera (+Z towards viewer), skip
+            if !wireframe && normal.z <= 0.0 {
+                continue;
+            }
+
+            // Lambertian diffuse shading
+            let diffuse = normal.dot(light).max(0.0);
+            let ambient = 0.25f32;
+            let intensity = (ambient + diffuse * 0.75).clamp(0.0, 1.0);
+
+            let shaded_color = Color::rgba(
+                (base_color.r as f32 * intensity).round() as u8,
+                (base_color.g as f32 * intensity).round() as u8,
+                (base_color.b as f32 * intensity).round() as u8,
+                base_color.a,
+            );
+
+            // Average depth
+            let depth: f32 =
+                face.iter().map(|&idx| projected[idx].2).sum::<f32>() / face.len() as f32;
+
+            sorted_faces.push(ProjectedFace {
+                depth,
+                indices: face.clone(),
+                color: shaded_color,
+            });
+        }
+
+        // Sort descending by depth
+        sorted_faces.sort_by(|a, b| {
+            b.depth
+                .partial_cmp(&a.depth)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Emit SVG path polygons for each face
+        for face in sorted_faces {
+            let mut d = String::new();
+            for (i, &idx) in face.indices.iter().enumerate() {
+                let (px, py, _) = projected[idx];
+                if i == 0 {
+                    d.push_str(&format!("M {px:.1} {py:.1} "));
+                } else {
+                    d.push_str(&format!("L {px:.1} {py:.1} "));
+                }
+            }
+            d.push('Z');
+
+            if wireframe {
+                scene.push(SceneNode::Path {
+                    d,
+                    fill: None,
+                    stroke: Some(face.color),
+                    stroke_width: 1.5,
+                    opacity: 1.0,
+                });
+            } else {
+                scene.push(SceneNode::Path {
+                    d,
+                    fill: Some(face.color),
+                    stroke: Some(Color::rgba(0, 0, 0, 40)),
+                    stroke_width: 0.5,
+                    opacity: 1.0,
+                });
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cube_construction_and_rotation() {
+        let mut cube = Mesh3D::cube(100.0);
+        assert_eq!(cube.vertices.len(), 8);
+        assert_eq!(cube.faces.len(), 6);
+
+        cube.rotate(PI * 0.25, PI * 0.25, 0.0);
+        let mut scene = Scene::default();
+        cube.render_to_scene(
+            &mut scene,
+            640.0,
+            360.0,
+            500.0,
+            Color::rgb(255, 120, 0),
+            Vec3::new(0.5, 1.0, 1.0),
+            false,
+        );
+
+        assert!(
+            !scene.nodes.is_empty(),
+            "Scene should contain projected faces"
+        );
+    }
+
+    #[test]
+    fn test_sphere_and_torus_construction() {
+        let sphere = Mesh3D::sphere(50.0, 8, 8);
+        assert!(!sphere.vertices.is_empty());
+        assert!(!sphere.faces.is_empty());
+
+        let torus = Mesh3D::torus(60.0, 20.0, 8, 8);
+        assert!(!torus.vertices.is_empty());
+        assert!(!torus.faces.is_empty());
+    }
+}

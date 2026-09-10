@@ -23,4 +23,5 @@ dioxuscut-animation = { workspace = true }
 dioxuscut-cli = { workspace = true, features = ["rhai"] }
 dioxuscut-composition = { workspace = true }
 dioxuscut-core = { workspace = true }
+dioxuscut-media = { workspace = true }
 dioxuscut-rasterizer = { workspace = true }

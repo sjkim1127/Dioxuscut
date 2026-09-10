@@ -141,12 +141,12 @@ mod tests {
         let r1 = random("remotion-seed");
         let r2 = random("remotion-seed");
         assert_eq!(r1, r2);
-        assert!(r1 >= 0.0 && r1 < 1.0);
+        assert!((0.0..1.0).contains(&r1));
 
         let n1 = random(42);
         let n2 = random(42);
         assert_eq!(n1, n2);
-        assert!(n1 >= 0.0 && n1 < 1.0);
+        assert!((0.0..1.0).contains(&n1));
         assert_ne!(r1, n1);
     }
 

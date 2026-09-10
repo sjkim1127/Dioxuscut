@@ -1,4 +1,5 @@
 //! Cyberpunk Motion Graphic Benchmark — Text Auto-Fitting, Offscreen Layer Filters, Vignette & Chromatic Aberration.
+#![allow(clippy::manual_is_multiple_of)]
 use dioxuscut_animation::{spring_with_options, SpringConfig, SpringOptions};
 use dioxuscut_rasterizer::{
     layout_text_box, render_to_ffmpeg_pipe, BlendMode, Color, FrameConfig, MaskMode, PipeConfig,

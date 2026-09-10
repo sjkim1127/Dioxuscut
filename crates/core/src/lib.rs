@@ -45,14 +45,15 @@ pub use dioxuscut_animation as animation;
 pub use dioxuscut_composition as native_composition;
 pub use dioxuscut_rasterizer as rasterizer;
 
-// Core animation primitives
+// Core animation & TouchDesigner-style CHOP primitives
 pub use dioxuscut_animation::{
     bezier, interpolate, interpolate_colors, interpolate_colors_range, interpolate_styles,
     make_transform, matrix, matrix3d, measure_spring, perspective, random, rotate, rotate3d,
     rotate_x, rotate_y, rotate_z, scale, scale3d, scale_x, scale_y, scale_z, skew, skew_x, skew_y,
     spring, spring_with_options, translate, translate3d, translate_x, translate_y, translate_z,
-    EasingFn, ExtrapolateType, InterpolateOptions, RandomSeed, SpringConfig, SpringError,
-    SpringOptions, StyleMap, StyleValue, TransformOp,
+    AudioEnvelopeChop, EasingFn, ExtrapolateType, InterpolateOptions, LagChop, LfoChop, LfoWave,
+    MathChop, MathOp, RandomSeed, SpringConfig, SpringError, SpringOptions, StyleMap, StyleValue,
+    TransformOp,
 };
 
 // Composition primitives & emitters

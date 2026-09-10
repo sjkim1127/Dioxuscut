@@ -1,4 +1,5 @@
 //! Python native bindings for Dioxuscut using PyO3.
+#![allow(clippy::useless_conversion)]
 use dioxuscut_cli::{
     built_in_registry, execute_render_command, RenderBackend, RenderCodec, RenderRequest,
 };
@@ -298,6 +299,31 @@ fn spring(
     .map_err(|e| PyValueError::new_err(format!("Spring error: {e}")))
 }
 
+/// Resolve a static asset file relative to project public or asset directories.
+#[pyfunction]
+fn static_file(path: &str) -> PyResult<String> {
+    dioxuscut_media::static_file(path)
+        .map(|p| p.to_string_lossy().to_string())
+        .map_err(|e| PyValueError::new_err(format!("static_file error: {e}")))
+}
+
+/// Probe video metadata including resolution, fps, duration, and aspect ratio.
+#[pyfunction]
+fn get_video_metadata(py: Python<'_>, path: &str) -> PyResult<PyObject> {
+    let meta = dioxuscut_media::get_video_metadata(path)
+        .map_err(|e| PyValueError::new_err(format!("get_video_metadata error: {e}")))?;
+
+    let dict = pyo3::types::PyDict::new_bound(py);
+    dict.set_item("width", meta.width)?;
+    dict.set_item("height", meta.height)?;
+    dict.set_item("fps", meta.fps)?;
+    dict.set_item("duration_in_seconds", meta.duration_in_seconds)?;
+    dict.set_item("duration_in_frames", meta.duration_in_frames)?;
+    dict.set_item("aspect_ratio", meta.aspect_ratio)?;
+    dict.set_item("is_landscape", meta.is_landscape)?;
+    Ok(dict.into())
+}
+
 /// Python module initialization.
 #[pymodule]
 fn _dioxuscut(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -308,5 +334,7 @@ fn _dioxuscut(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(interpolate, m)?)?;
     m.add_function(wrap_pyfunction!(interpolate_colors, m)?)?;
     m.add_function(wrap_pyfunction!(spring, m)?)?;
+    m.add_function(wrap_pyfunction!(static_file, m)?)?;
+    m.add_function(wrap_pyfunction!(get_video_metadata, m)?)?;
     Ok(())
 }

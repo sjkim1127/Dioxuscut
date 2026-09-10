@@ -62,6 +62,54 @@ async fn main() -> anyhow::Result<()> {
             signal_task.abort();
             result?;
         }
+        Commands::Migrate {
+            input,
+            target,
+            output,
+        } => {
+            let target_mode: dioxuscut_cli::MigrationTarget =
+                target.parse().map_err(|e: String| anyhow::anyhow!("{e}"))?;
+            let source = std::fs::read_to_string(input)
+                .map_err(|e| anyhow::anyhow!("Failed to read '{input:?}': {e}"))?;
+
+            let (code, stats) = dioxuscut_cli::transpile_remotion(&source, target_mode)
+                .map_err(|e| anyhow::anyhow!("Migration failed: {e}"))?;
+
+            if let Some(out_path) = output {
+                std::fs::write(out_path, &code)
+                    .map_err(|e| anyhow::anyhow!("Failed to write to '{out_path:?}': {e}"))?;
+                println!("✨ Successfully migrated {input:?} -> {out_path:?}");
+            } else {
+                println!("{code}");
+            }
+
+            eprintln!(
+                "📊 Migration summary: {} hooks, {} interpolations, {} springs, {} sequences, {} loops converted",
+                stats.hooks_converted,
+                stats.interpolations_converted,
+                stats.springs_converted,
+                stats.sequences_converted,
+                stats.loops_converted
+            );
+        }
+        Commands::Probe { path } => {
+            match dioxuscut_cli::get_video_metadata(path) {
+                Ok(meta) => {
+                    println!("{}", serde_json::to_string_pretty(&meta)?);
+                }
+                Err(e) => {
+                    // Try audio probe
+                    match dioxuscut_cli::get_audio_metadata(path, 30.0) {
+                        Ok(audio_meta) => {
+                            println!("{}", serde_json::to_string_pretty(&audio_meta)?);
+                        }
+                        Err(_) => {
+                            anyhow::bail!("Probe failed for {path:?}: {e}");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     Ok(())

@@ -8,12 +8,12 @@ fn test_random_parity_with_remotion() {
     let r1 = random("hello");
     let r2 = random("hello");
     assert_eq!(r1, r2);
-    assert!(r1 >= 0.0 && r1 < 1.0);
+    assert!((0.0..1.0).contains(&r1));
 
     let n1 = random(100);
     let n2 = random(100);
     assert_eq!(n1, n2);
-    assert!(n1 >= 0.0 && n1 < 1.0);
+    assert!((0.0..1.0).contains(&n1));
     assert_ne!(r1, n1);
 }
 

@@ -9,6 +9,7 @@
 //! - [`interpolate_colors`] — color interpolation
 //! - [`transform`]    — CSS transform builder (`makeTransform`, `interpolateStyles`)
 
+pub mod chop;
 pub mod easing;
 pub mod interpolate;
 pub mod interpolate_colors;
@@ -16,6 +17,7 @@ pub mod random;
 pub mod spring;
 pub mod transform;
 
+pub use chop::{AudioEnvelopeChop, LagChop, LfoChop, LfoWave, MathChop, MathOp};
 pub use easing::{bezier, EasingFn};
 pub use interpolate::{interpolate, ExtrapolateType, InterpolateOptions};
 pub use interpolate_colors::{interpolate_colors, interpolate_colors_range};

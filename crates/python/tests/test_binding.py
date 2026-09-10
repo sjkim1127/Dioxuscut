@@ -64,6 +64,10 @@ def test_animation_primitives():
     assert abs(s0 - 0.0) < 1e-4, f"spring(0) should start near 0: {s0}"
     assert abs(s_end - 1.0) < 0.05, f"spring(60) should settle near 1: {s_end}"
 
+    # 5. static_file()
+    resolved = dioxuscut.static_file("Cargo.toml")
+    assert "Cargo.toml" in resolved
+
     print("[✓] Animation primitives test passed.")
 
 
@@ -110,7 +114,15 @@ def test_render_video():
     file_size = out_mp4.stat().st_size
     print(f"[+] Rendered MP4 size: {file_size} bytes")
     assert file_size > 5000, "MP4 file is suspiciously small"
-    print("[✓] Video render test passed.")
+
+    meta = dioxuscut.get_video_metadata(str(out_mp4))
+    print(f"[+] Probed video metadata: {meta}")
+    assert meta["width"] == 640
+    assert meta["height"] == 360
+    assert meta["duration_in_frames"] == 60
+    assert meta["is_landscape"] is True
+
+    print("[✓] Video render and probe test passed.")
 
 
 def test_render_script():

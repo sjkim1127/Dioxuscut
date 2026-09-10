@@ -358,6 +358,85 @@ impl SceneBuilder {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn cube_3d(
+        &mut self,
+        x: FLOAT,
+        y: FLOAT,
+        size: FLOAT,
+        pitch: FLOAT,
+        yaw: FLOAT,
+        roll: FLOAT,
+        color: &str,
+    ) -> RhaiResult<()> {
+        let mut mesh = dioxuscut_rasterizer::Mesh3D::cube(non_negative_f32("size", size)?);
+        mesh.rotate(pitch as f32, yaw as f32, roll as f32);
+        mesh.render_to_scene(
+            &mut self.scene,
+            finite_f32("x", x)?,
+            finite_f32("y", y)?,
+            500.0,
+            parse_color(color)?,
+            dioxuscut_rasterizer::Vec3::new(0.6, 1.0, 0.8),
+            false,
+        );
+        Ok(())
+    }
+
+    fn sphere_3d(
+        &mut self,
+        x: FLOAT,
+        y: FLOAT,
+        radius: FLOAT,
+        pitch: FLOAT,
+        yaw: FLOAT,
+        color: &str,
+    ) -> RhaiResult<()> {
+        let mut mesh =
+            dioxuscut_rasterizer::Mesh3D::sphere(non_negative_f32("radius", radius)?, 12, 16);
+        mesh.rotate(pitch as f32, yaw as f32, 0.0);
+        mesh.render_to_scene(
+            &mut self.scene,
+            finite_f32("x", x)?,
+            finite_f32("y", y)?,
+            500.0,
+            parse_color(color)?,
+            dioxuscut_rasterizer::Vec3::new(0.6, 1.0, 0.8),
+            false,
+        );
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn torus_3d(
+        &mut self,
+        x: FLOAT,
+        y: FLOAT,
+        r_major: FLOAT,
+        r_minor: FLOAT,
+        pitch: FLOAT,
+        yaw: FLOAT,
+        color: &str,
+    ) -> RhaiResult<()> {
+        let mut mesh = dioxuscut_rasterizer::Mesh3D::torus(
+            non_negative_f32("major radius", r_major)?,
+            non_negative_f32("minor radius", r_minor)?,
+            16,
+            12,
+        );
+        mesh.rotate(pitch as f32, yaw as f32, 0.0);
+        mesh.render_to_scene(
+            &mut self.scene,
+            finite_f32("x", x)?,
+            finite_f32("y", y)?,
+            500.0,
+            parse_color(color)?,
+            dioxuscut_rasterizer::Vec3::new(0.6, 1.0, 0.8),
+            false,
+        );
+        Ok(())
+    }
+
     fn push_text(
         &mut self,
         x: FLOAT,
@@ -511,46 +590,78 @@ fn register_scene_api(engine: &mut Engine) {
     engine.register_fn(
         "interpolate_colors",
         |from: ImmutableString, to: ImmutableString, t: FLOAT| -> ImmutableString {
-            dioxuscut_animation::interpolate_colors(from.as_str(), to.as_str(), t as f64).into()
+            dioxuscut_animation::interpolate_colors(from.as_str(), to.as_str(), t).into()
         },
     );
     engine.register_fn("random", |seed: ImmutableString| -> FLOAT {
-        dioxuscut_animation::random(seed.as_str()) as FLOAT
+        dioxuscut_animation::random(seed.as_str())
     });
     engine.register_fn("random", |seed: INT| -> FLOAT {
-        dioxuscut_animation::random(seed as f64) as FLOAT
+        dioxuscut_animation::random(seed as f64)
     });
     engine.register_fn("random", |seed: FLOAT| -> FLOAT {
-        dioxuscut_animation::random(seed as f64) as FLOAT
+        dioxuscut_animation::random(seed)
     });
     engine.register_fn("spring", |frame: FLOAT, fps: FLOAT| -> FLOAT {
         let config = dioxuscut_animation::SpringConfig::default();
         dioxuscut_animation::spring_with_options(
-            frame as f64,
-            fps as f64,
+            frame,
+            fps,
             config,
             dioxuscut_animation::SpringOptions::default(),
         )
-        .unwrap_or(1.0) as FLOAT
+        .unwrap_or(1.0)
     });
     engine.register_fn(
         "spring",
         |frame: FLOAT, fps: FLOAT, damping: FLOAT, mass: FLOAT, stiffness: FLOAT| -> FLOAT {
             let config = dioxuscut_animation::SpringConfig {
-                damping: damping as f64,
-                mass: mass as f64,
-                stiffness: stiffness as f64,
+                damping,
+                mass,
+                stiffness,
                 overshoot_clamping: false,
             };
             dioxuscut_animation::spring_with_options(
-                frame as f64,
-                fps as f64,
+                frame,
+                fps,
                 config,
                 dioxuscut_animation::SpringOptions::default(),
             )
-            .unwrap_or(1.0) as FLOAT
+            .unwrap_or(1.0)
         },
     );
+    engine.register_fn("static_file", |path: ImmutableString| -> ImmutableString {
+        dioxuscut_media::static_file(path.as_str())
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| path.to_string())
+            .into()
+    });
+    engine.register_fn("cube_3d", SceneBuilder::cube_3d);
+    engine.register_fn("sphere_3d", SceneBuilder::sphere_3d);
+    engine.register_fn("torus_3d", SceneBuilder::torus_3d);
+    engine.register_fn(
+        "lfo",
+        |frame: FLOAT, fps: FLOAT, freq_hz: FLOAT, amp: FLOAT| -> FLOAT {
+            let lfo =
+                dioxuscut_animation::LfoChop::new(dioxuscut_animation::LfoWave::Sine, freq_hz)
+                    .with_amplitude(amp);
+            lfo.sample(frame, fps)
+        },
+    );
+    engine.register_fn(
+        "lag",
+        |current: FLOAT, target: FLOAT, dt: FLOAT, lag_sec: FLOAT| -> FLOAT {
+            let filter = dioxuscut_animation::LagChop::new(lag_sec, lag_sec);
+            filter.filter(current, target, dt)
+        },
+    );
+    engine.register_fn("clamp", |val: FLOAT, min: FLOAT, max: FLOAT| -> FLOAT {
+        if val.is_nan() {
+            min
+        } else {
+            val.clamp(min, max)
+        }
+    });
 }
 
 fn context_map(frame: u32, context: NativeCompositionContext) -> Map {
@@ -882,5 +993,31 @@ mod tests {
         } else {
             panic!("Expected Rect node");
         }
+    }
+
+    #[test]
+    fn script_renders_3d_mesh_and_chop() {
+        let script = r##"
+            fn render(ctx, props) {
+                let frame = ctx.frame.to_float();
+                let osc = lfo(frame, ctx.fps, 1.0, 50.0);
+                let smoothed = lag(0.0, osc, 0.033, 0.1);
+
+                let output = scene();
+                output.cube_3d(320.0, 180.0, 80.0, frame * 0.05, frame * 0.05, 0.0, "#ff8800");
+                output.sphere_3d(500.0, 180.0, 40.0, frame * 0.02, frame * 0.03, "#00f0ff");
+                output.torus_3d(150.0, 180.0, 50.0, 15.0, frame * 0.03, frame * 0.04, "#ff0088");
+                output
+            }
+        "##;
+        let composition = RhaiComposition::from_source("mesh3d", script).unwrap();
+        let prepared = composition
+            .prepare(&serde_json::json!({}), context())
+            .unwrap();
+        let scene = prepared.render(10).unwrap();
+        assert!(
+            !scene.nodes.is_empty(),
+            "3D meshes should emit projected Path nodes into the scene"
+        );
     }
 }

@@ -1,6 +1,7 @@
 //! CLI options, validation, native composition registry, and render execution.
 
 pub mod composition;
+pub mod migrate;
 #[cfg(feature = "rhai")]
 pub mod rhai_runtime;
 
@@ -9,6 +10,10 @@ pub use composition::{
     CompositionRegistryError, HelloWorldComposition, NativeComposition, NativeCompositionContext,
     PreparedComposition,
 };
+pub use dioxuscut_media::{
+    get_audio_metadata, get_video_metadata, static_file, AudioMetadata, VideoMetadata,
+};
+pub use migrate::{transpile_remotion, MigrationStats, MigrationTarget};
 #[cfg(feature = "rhai")]
 pub use rhai_runtime::{RhaiComposition, SceneBuilder};
 
@@ -213,6 +218,26 @@ pub enum Commands {
         /// Hardware acceleration mode for video encoding.
         #[arg(long, value_enum, default_value_t = HwAccelArg::Auto)]
         hw_accel: HwAccelArg,
+    },
+
+    /// Automatically migrate Remotion (.tsx) components to Dioxuscut (Rust, Rhai, or Python).
+    Migrate {
+        /// Path to the Remotion .tsx file.
+        input: PathBuf,
+
+        /// Target language ('rust', 'rhai', or 'python').
+        #[arg(long, short, default_value = "rust")]
+        target: String,
+
+        /// Destination output file path (optional, prints to stdout if omitted).
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+    },
+
+    /// Inspect video or audio metadata (resolution, fps, duration, aspect ratio).
+    Probe {
+        /// Media file path to inspect.
+        path: PathBuf,
     },
 }
 

@@ -1,0 +1,279 @@
+//! Media metadata and asset resolution utilities — Remotion parity (`getVideoMetadata`, `staticFile`).
+
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+/// Error during media inspection or asset resolution.
+#[derive(Debug, thiserror::Error)]
+pub enum MediaMetadataError {
+    #[error("File not found: {0}")]
+    FileNotFound(String),
+    #[error("Failed to execute ffprobe: {0}")]
+    FfprobeExecution(String),
+    #[error("Failed to parse ffprobe output: {0}")]
+    FfprobeParse(String),
+    #[error("Audio decode error: {0}")]
+    AudioDecode(String),
+}
+
+/// Video stream and container metadata matching Remotion's `getVideoMetadata()`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VideoMetadata {
+    pub width: u32,
+    pub height: u32,
+    pub fps: f64,
+    pub duration_in_seconds: f64,
+    pub duration_in_frames: u32,
+    pub aspect_ratio: f64,
+    pub is_landscape: bool,
+}
+
+/// Audio track metadata matching Remotion's `getAudioData()`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AudioMetadata {
+    pub channels: u16,
+    pub sample_rate: u32,
+    pub duration_in_seconds: f64,
+    pub duration_in_frames: u32,
+}
+
+/// Resolves an asset path relative to the public/assets directory, matching Remotion's `staticFile()`.
+///
+/// Looks in:
+/// 1. `DIOXUSCUT_PUBLIC_DIR` environment variable if set.
+/// 2. `./public/<path>`
+/// 3. `./assets/<path>`
+/// 4. `./<path>`
+pub fn static_file(relative_path: impl AsRef<Path>) -> Result<PathBuf, MediaMetadataError> {
+    let rel = relative_path.as_ref();
+    if rel.is_absolute() && rel.exists() {
+        return Ok(rel.to_path_buf());
+    }
+
+    let candidates = [
+        std::env::var("DIOXUSCUT_PUBLIC_DIR")
+            .ok()
+            .map(PathBuf::from),
+        Some(PathBuf::from("public")),
+        Some(PathBuf::from("assets")),
+        Some(PathBuf::from(".")),
+    ];
+
+    for candidate in candidates.into_iter().flatten() {
+        let joined = candidate.join(rel);
+        if joined.exists() {
+            return Ok(joined);
+        }
+    }
+
+    Err(MediaMetadataError::FileNotFound(rel.display().to_string()))
+}
+
+/// Probe a video file using `ffprobe` to extract width, height, fps, and duration.
+pub fn get_video_metadata(path: impl AsRef<Path>) -> Result<VideoMetadata, MediaMetadataError> {
+    let path_ref = path.as_ref();
+    if !path_ref.exists() {
+        return Err(MediaMetadataError::FileNotFound(
+            path_ref.display().to_string(),
+        ));
+    }
+
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,r_frame_rate,duration",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "json",
+        ])
+        .arg(path_ref)
+        .output()
+        .map_err(|e| MediaMetadataError::FfprobeExecution(e.to_string()))?;
+
+    if !output.status.success() {
+        return Err(MediaMetadataError::FfprobeExecution(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+
+    let json_val: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| MediaMetadataError::FfprobeParse(e.to_string()))?;
+
+    let stream = json_val
+        .get("streams")
+        .and_then(|s| s.as_array())
+        .and_then(|arr| arr.first())
+        .ok_or_else(|| MediaMetadataError::FfprobeParse("No video stream found".into()))?;
+
+    let width = stream.get("width").and_then(|w| w.as_u64()).unwrap_or(1920) as u32;
+
+    let height = stream
+        .get("height")
+        .and_then(|h| h.as_u64())
+        .unwrap_or(1080) as u32;
+
+    let fps = stream
+        .get("r_frame_rate")
+        .and_then(|r| r.as_str())
+        .and_then(parse_r_frame_rate)
+        .unwrap_or(30.0);
+
+    let duration_in_seconds = stream
+        .get("duration")
+        .and_then(|d| d.as_str())
+        .and_then(|s| s.parse::<f64>().ok())
+        .or_else(|| {
+            json_val
+                .get("format")
+                .and_then(|f| f.get("duration"))
+                .and_then(|d| d.as_str())
+                .and_then(|s| s.parse::<f64>().ok())
+        })
+        .unwrap_or(0.0);
+
+    let duration_in_frames = (duration_in_seconds * fps).round() as u32;
+    let aspect_ratio = if height > 0 {
+        width as f64 / height as f64
+    } else {
+        16.0 / 9.0
+    };
+
+    Ok(VideoMetadata {
+        width,
+        height,
+        fps,
+        duration_in_seconds,
+        duration_in_frames,
+        aspect_ratio,
+        is_landscape: width >= height,
+    })
+}
+
+/// Probe an audio file using `hound` or `ffprobe`.
+pub fn get_audio_metadata(
+    path: impl AsRef<Path>,
+    fps: f64,
+) -> Result<AudioMetadata, MediaMetadataError> {
+    let path_ref = path.as_ref();
+    if !path_ref.exists() {
+        return Err(MediaMetadataError::FileNotFound(
+            path_ref.display().to_string(),
+        ));
+    }
+
+    // Try hound for WAV first
+    if let Ok(reader) = hound::WavReader::open(path_ref) {
+        let spec = reader.spec();
+        let samples = reader.duration();
+        let duration_secs = if spec.sample_rate > 0 {
+            samples as f64 / spec.sample_rate as f64
+        } else {
+            0.0
+        };
+        return Ok(AudioMetadata {
+            channels: spec.channels,
+            sample_rate: spec.sample_rate,
+            duration_in_seconds: duration_secs,
+            duration_in_frames: (duration_secs * fps).round() as u32,
+        });
+    }
+
+    // Fallback to ffprobe
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=channels,sample_rate,duration",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "json",
+        ])
+        .arg(path_ref)
+        .output()
+        .map_err(|e| MediaMetadataError::FfprobeExecution(e.to_string()))?;
+
+    if !output.status.success() {
+        return Err(MediaMetadataError::FfprobeExecution(
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
+    }
+
+    let json_val: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| MediaMetadataError::FfprobeParse(e.to_string()))?;
+
+    let stream = json_val
+        .get("streams")
+        .and_then(|s| s.as_array())
+        .and_then(|arr| arr.first())
+        .ok_or_else(|| MediaMetadataError::FfprobeParse("No audio stream found".into()))?;
+
+    let channels = stream.get("channels").and_then(|c| c.as_u64()).unwrap_or(2) as u16;
+
+    let sample_rate = stream
+        .get("sample_rate")
+        .and_then(|s| s.as_str())
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(44100);
+
+    let duration_in_seconds = stream
+        .get("duration")
+        .and_then(|d| d.as_str())
+        .and_then(|s| s.parse::<f64>().ok())
+        .or_else(|| {
+            json_val
+                .get("format")
+                .and_then(|f| f.get("duration"))
+                .and_then(|d| d.as_str())
+                .and_then(|s| s.parse::<f64>().ok())
+        })
+        .unwrap_or(0.0);
+
+    Ok(AudioMetadata {
+        channels,
+        sample_rate,
+        duration_in_seconds,
+        duration_in_frames: (duration_in_seconds * fps).round() as u32,
+    })
+}
+
+fn parse_r_frame_rate(s: &str) -> Option<f64> {
+    if let Some((num, den)) = s.split_once('/') {
+        let n: f64 = num.parse().ok()?;
+        let d: f64 = den.parse().ok()?;
+        if d > 0.0 {
+            Some(n / d)
+        } else {
+            None
+        }
+    } else {
+        s.parse().ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_r_frame_rate() {
+        assert!((parse_r_frame_rate("30/1").unwrap() - 30.0).abs() < 1e-4);
+        assert!((parse_r_frame_rate("60000/1001").unwrap() - 59.94).abs() < 0.01);
+        assert!((parse_r_frame_rate("24").unwrap() - 24.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_static_file_resolution() {
+        let res = static_file("Cargo.toml");
+        assert!(res.is_ok());
+    }
+}

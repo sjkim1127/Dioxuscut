@@ -50,6 +50,7 @@ fn test_cli_flag_defaults() {
             assert_eq!(preset, "fast");
             assert_eq!(hw_accel, dioxuscut_cli::HwAccelArg::Auto);
         }
+        _ => panic!("Expected Commands::Render"),
     }
 }
 
@@ -58,18 +59,18 @@ fn test_cli_flag_custom_values() {
     let args = vec![
         "dioxuscut",
         "render",
-        "-c",
+        "--composition",
         "CustomComposition",
-        "-p",
+        "--props",
         "input_data.json",
-        "-o",
+        "--output",
         "result_video.mp4",
         "--width",
         "1280",
         "--height",
         "720",
         "--fps",
-        "60.0",
+        "60",
         "--duration",
         "300",
         "--audio",
@@ -116,6 +117,7 @@ fn test_cli_flag_custom_values() {
             assert_eq!(preset, "fast");
             assert_eq!(hw_accel, dioxuscut_cli::HwAccelArg::Auto);
         }
+        _ => panic!("Expected Commands::Render"),
     }
 }
 
@@ -160,6 +162,7 @@ fn test_cli_parses_codec_range_quality_and_timeout() {
             assert_eq!(crf, 28);
             assert_eq!(preset, "medium");
         }
+        _ => panic!("Expected Commands::Render"),
     }
 }
 
@@ -189,6 +192,7 @@ fn test_cli_short_flags() {
             assert_eq!(props, Some(PathBuf::from("props.json")));
             assert_eq!(output, PathBuf::from("out_short.mp4"));
         }
+        _ => panic!("Expected Commands::Render"),
     }
 }
 
@@ -206,6 +210,7 @@ fn test_cli_accepts_rhai_script_as_the_composition_source() {
             assert_eq!(composition, None);
             assert_eq!(script, Some(PathBuf::from("composition.rhai")));
         }
+        _ => panic!("Expected Commands::Render"),
     }
 }
 
@@ -230,4 +235,42 @@ fn test_cli_missing_required_composition() {
         result.is_err(),
         "Expected parsing error when --composition is missing"
     );
+}
+
+#[test]
+fn test_cli_migrate_subcommand() {
+    let args = vec![
+        "dioxuscut",
+        "migrate",
+        "input.tsx",
+        "--target",
+        "python",
+        "-o",
+        "output.py",
+    ];
+    let cli = Cli::try_parse_from(args).expect("Failed to parse migrate command");
+    match cli.command {
+        Commands::Migrate {
+            input,
+            target,
+            output,
+        } => {
+            assert_eq!(input, PathBuf::from("input.tsx"));
+            assert_eq!(target, "python");
+            assert_eq!(output, Some(PathBuf::from("output.py")));
+        }
+        _ => panic!("Expected Commands::Migrate"),
+    }
+}
+
+#[test]
+fn test_cli_probe_subcommand() {
+    let args = vec!["dioxuscut", "probe", "sample.mp4"];
+    let cli = Cli::try_parse_from(args).expect("Failed to parse probe command");
+    match cli.command {
+        Commands::Probe { path } => {
+            assert_eq!(path, PathBuf::from("sample.mp4"));
+        }
+        _ => panic!("Expected Commands::Probe"),
+    }
 }
