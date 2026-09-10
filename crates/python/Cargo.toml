@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+description = "Python native bindings for Dioxuscut programmatic video engine"
+repository = "https://github.com/sjkim1127/Dioxuscut"
+readme = "README.md"
 
 [lib]
 name = "_dioxuscut"
