@@ -15,7 +15,7 @@
 ///
 /// Source: Google Fonts, licensed under the SIL Open Font License 1.1.
 /// The font is always available regardless of the host operating system or installed fonts.
-const BUNDLED_FONT: &[u8] = include_bytes!("../../../assets/fonts/NotoSans-Regular.ttf");
+const BUNDLED_FONT: &[u8] = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
 
 use crate::backend::RasterError;
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
