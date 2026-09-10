@@ -12,7 +12,7 @@
 use dioxus::prelude::*;
 use dioxuscut_animation::{
     interpolate::{interpolate, ExtrapolateType, InterpolateOptions},
-    spring::{spring, SpringConfig},
+    spring::{spring, spring_with_options, SpringConfig, SpringOptions},
 };
 use dioxuscut_core::{
     hooks::{use_current_frame, use_input_props, use_video_config},
@@ -131,30 +131,37 @@ fn TitleScene() -> Element {
     let frame = use_current_frame();
     let config = use_video_config();
 
-    // Animated title scale: spring from 0.8 → 1.0
-    let spring_val = spring(frame, config.fps, SpringConfig::default());
-    let scale = interpolate(
-        spring_val,
-        &[0.0, 1.0],
-        &[0.8, 1.0],
-        InterpolateOptions {
-            extrapolate_left: ExtrapolateType::Clamp,
-            extrapolate_right: ExtrapolateType::Clamp,
-            ..Default::default()
-        },
-    );
-
-    // Subtitle slides up
-    let subtitle_y = interpolate(
+    // Settle the title over 24 frames, independent of its natural spring duration.
+    let scale = spring_with_options(
         frame as f64,
-        &[0.0, 25.0],
-        &[30.0, 0.0],
-        InterpolateOptions {
-            extrapolate_left: ExtrapolateType::Clamp,
-            extrapolate_right: ExtrapolateType::Clamp,
+        config.fps,
+        SpringConfig {
+            overshoot_clamping: true,
             ..Default::default()
         },
-    );
+        SpringOptions {
+            from: 0.8,
+            to: 1.0,
+            duration_in_frames: Some(24.0),
+            ..Default::default()
+        },
+    )
+    .expect("valid title spring");
+
+    // Delay the subtitle by 8 frames, then spring from 30px to its resting position.
+    let subtitle_y = spring_with_options(
+        frame as f64,
+        config.fps,
+        SpringConfig::default(),
+        SpringOptions {
+            from: 30.0,
+            to: 0.0,
+            delay: 8.0,
+            duration_in_frames: Some(20.0),
+            ..Default::default()
+        },
+    )
+    .expect("valid subtitle spring");
 
     let props = use_input_props::<ExampleProps>(ExampleProps::default);
 

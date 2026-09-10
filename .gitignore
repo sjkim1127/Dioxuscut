@@ -18,9 +18,19 @@ target/
 # Vendor (참고용 소스 — 커밋하지 않음)
 vendor/
 
-# RustRover
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+*.whl
+
+# Video/Image render outputs in root/benchmarks
+*.mp4
+*.webm
+*.mov
+

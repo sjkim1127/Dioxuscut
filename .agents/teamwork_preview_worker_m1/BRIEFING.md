@@ -1,57 +1,61 @@
-# BRIEFING — 2026-07-21T22:20:39Z
+# BRIEFING — 2026-08-21T06:40:15Z
 
 ## Mission
-Milestone 1: Automated Web Server Lifecycle (Requirement R1) implemented and verified.
+Implement native procedural Simplex noise (2D, 3D, 4D), Mulberry32 PRNG / hash seeding, Fractional Brownian Motion (fBm), turbulence domain warping, and Dioxus NoiseBackground component in `crates/noise/`.
 
 ## 🔒 My Identity
-- Archetype: implementer, qa, specialist
+- Archetype: implementer / qa / specialist
 - Roles: implementer, qa, specialist
 - Working directory: /Users/sjkim1127/Dioxuscut/.agents/teamwork_preview_worker_m1
-- Original parent: 6b7529bf-ea50-4734-a7a5-137537c7d5d7
-- Milestone: Milestone 1 - Automated Web Server Lifecycle
+- Original parent: 97ae64f8-7479-47fe-922a-dc7157cfe230
+- Milestone: Milestone 1 - Native Procedural Noise & Shader Patterns (crates/noise)
 
 ## 🔒 Key Constraints
-- Minimal-change principle.
-- Genuine implementation — no hardcoded test results, facade implementations, or cheating.
-- Provide clean public API in `crates/renderer::server::ServerHandle` or `spawn_server(port, root_dir)`.
-- Support clean termination on Drop or `.stop()`.
-- Verify with `cargo check -p dioxuscut-renderer` and `cargo test -p dioxuscut-renderer`.
+- Exclusive write ownership: `crates/noise/` and `.agents/teamwork_preview_worker_m1/` only.
+- Mandatory integrity: Genuine mathematical implementation of Stefan Gustavson Simplex Noise (2D, 3D, 4D), Mulberry32 PRNG, String & numeric seeds via 32-bit hash code.
+- Zero fake stubs or hardcoded test values.
+- Must pass `cargo check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, `cargo fmt -- --check`.
 
 ## Current Parent
-- Conversation ID: 6b7529bf-ea50-4734-a7a5-137537c7d5d7
-- Updated: 2026-07-21T22:20:39Z
+- Conversation ID: 97ae64f8-7479-47fe-922a-dc7157cfe230
+- Updated: 2026-08-21T06:40:15Z
 
 ## Task Summary
-- **What to build**: Web server lifecycle in `crates/renderer` (`server.rs`) and CLI (`crates/cli/src/main.rs`). Dynamic port selection, readiness health check polling, Axum static directory server & external command server support, clean termination via `ServerHandle` Drop / `.stop()`.
-- **Success criteria**: Clean public API, 4 unit tests passing, zero compilation warnings/errors.
-- **Interface contracts**: `crates/renderer/src/server.rs`, `crates/renderer/src/lib.rs`
-- **Code layout**: Workspace crates `dioxuscut-renderer`, `dioxuscut-cli`.
+- **What to build**: Full Remotion-compatible `@remotion/noise` native Rust equivalent in `crates/noise/`: Stefan Gustavson 2D/3D/4D Simplex noise, Mulberry32 PRNG + hash seeding (`NoiseSeed`), fBm multi-octave synthesis (`fbm_2d`, `fbm_3d`, `FbmOptions`), turbulence domain warping (`turbulence_warp_2d`, `domain_warp_2d`, `warp_points_2d`), Dioxus `<NoiseBackground />` component.
+- **Success criteria**: 100% genuine math parity, comprehensive unit & integration tests, clean clippy & formatting, all targets passing.
+- **Interface contracts**: `crates/noise/src/lib.rs`, `PROJECT.md`, Remotion `@remotion/noise` API specification.
 
 ## Key Decisions Made
-- Used `axum` + `tower-http` (ServeDir, CorsLayer) for embedded static web server.
-- Used `reqwest` for HTTP readiness polling to `/health` and `/` endpoints with configurable timeout/interval.
-- Implemented `ServerHandle` with `Drop` implementation and explicit `stop(self)` method to prevent orphan server processes or hanging listener tasks.
-- Supported both dynamic port binding (port 0) and explicit port assignment.
+- Implemented exact Stefan Gustavson Simplex 2D, 3D, 4D algorithms using skewing/unskewing factors ($F_2, G_2, F_3, G_3, F_4, G_4$) and 12/32 gradient tables.
+- Implemented Remotion-matching Mulberry32 PRNG and UTF-16 Java string hash code generator (`hash_code`).
+- Implemented `NoiseSeed` supporting generic conversion (`impl Into<NoiseSeed>`) from `&str`, `String`, integer types, and float types.
+- Structured fBm multi-octave synthesis with `FbmOptions` (octaves, lacunarity, persistence).
+- Upgraded `<NoiseBackground />` with procedural SVG multi-harmonic contour wave paths and SVG data URL generator.
+
+## Artifact Index
+- `.agents/teamwork_preview_worker_m1/DISPATCH.md` — Dispatch requirements
+- `.agents/teamwork_preview_worker_m1/BRIEFING.md` — Situational awareness
+- `.agents/teamwork_preview_worker_m1/progress.md` — Progress tracker and heartbeat
+- `.agents/teamwork_preview_worker_m1/handoff.md` — Final handoff report
 
 ## Change Tracker
 - **Files modified**:
-  - `Cargo.toml`: Added workspace dependencies for `axum`, `tower-http`, `reqwest`.
-  - `crates/renderer/Cargo.toml`: Added `axum`, `tower-http`, `reqwest`.
-  - `crates/renderer/src/server.rs`: Implemented web server lifecycle, health check polling, dynamic port binding, `ServerHandle`, and unit tests.
-  - `crates/renderer/src/lib.rs`: Exported `server` module and re-exported public API (`ServerHandle`, `spawn_server`, etc.).
-  - `crates/renderer/src/render_frames.rs`: Added `ServerError` variant to `RenderError`.
-  - `crates/cli/src/main.rs`: Integrated `spawn_server` into CLI render command with `--port`, `--web-dir`, and `--server-url` flags.
+  - `crates/noise/src/seed.rs`: `NoiseSeed`, `hash_code`, `mulberry32`, `random`, `hash_seed`, `seed_to_float`
+  - `crates/noise/src/simplex.rs`: `SimplexNoise`, `noise2d`, `noise3d`, `noise4d`, `noise_2d`, `noise_3d`, `noise_4d`
+  - `crates/noise/src/fbm.rs`: `FbmOptions`, `fbm_2d`, `fbm_3d`, `turbulence_2d`, `turbulence_warp_2d`, `domain_warp_2d`, `warp_points_2d`
+  - `crates/noise/src/noise_bg.rs`: `<NoiseBackground />`, `WavePathOptions`, `generate_noise_wave_path`, `generate_noise_svg_data_url`
+  - `crates/noise/src/lib.rs`: Full module exports
+  - `crates/noise/tests/simplex_parity_tests.rs`: Integration tests for Simplex noise parity, bounds, determinism, continuity
+  - `crates/noise/tests/fbm_turbulence_tests.rs`: Integration tests for fBm and turbulence domain warping
+  - `crates/noise/tests/mulberry_seed_tests.rs`: Integration tests for Mulberry32 PRNG and seed conversions
+  - `crates/noise/tests/noise_bg_tests.rs`: Integration tests for SVG wave paths and background props
+- **Build status**: PASS (all checks, lints, tests, format check)
+- **Pending issues**: None
 
 ## Quality Status
-- **Build/test result**: Pass (`cargo check -p dioxuscut-renderer`, `cargo test -p dioxuscut-renderer` 4/4 passed).
-- **Lint status**: Pass.
-- **Tests added/modified**: 4 unit tests added to `crates/renderer/src/server.rs` covering dynamic port binding, health check endpoint, static asset serving, explicit port binding, configuration builder, and Drop cleanup.
+- **Build/test result**: PASS (29 tests passing across unit and integration suites)
+- **Lint status**: 0 warnings (`cargo clippy -p dioxuscut-noise --all-targets -- -D warnings`)
+- **Tests added/modified**: 21 integration tests in `tests/`, 8 unit tests in `src/`
 
 ## Loaded Skills
-- None
-
-## Artifact Index
-- /Users/sjkim1127/Dioxuscut/.agents/teamwork_preview_worker_m1/ORIGINAL_REQUEST.md — Original request
-- /Users/sjkim1127/Dioxuscut/.agents/teamwork_preview_worker_m1/BRIEFING.md — Briefing file
-- /Users/sjkim1127/Dioxuscut/.agents/teamwork_preview_worker_m1/progress.md — Progress tracking log
-- /Users/sjkim1127/Dioxuscut/.agents/teamwork_preview_worker_m1/handoff.md — Final handoff report
+- None required.

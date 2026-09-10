@@ -37,6 +37,7 @@ fn request(output: &Path, codec: RenderCodec) -> RenderRequest {
         timeout_seconds: None,
         crf: 18,
         preset: "fast".into(),
+        hw_accel: dioxuscut_rasterizer::HwAccel::Disabled,
     }
 }
 

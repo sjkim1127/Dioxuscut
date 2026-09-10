@@ -383,6 +383,7 @@ fn TopBar(mut props: TopBarProps) -> Element {
             timeout_seconds: Some(300),
             crf: 18,
             preset: "fast".into(),
+            hw_accel: dioxuscut_rasterizer::HwAccel::Auto,
         });
 
         let mut jobs_signal = props.jobs;

@@ -15,6 +15,7 @@ members = [
     "crates/noise",
     "crates/rasterizer",
     "crates/vdom",
+    "crates/python",
     "apps/studio",
     "apps/example",
 ]

@@ -1,0 +1,31 @@
+# Remotion Container Image (Headless Chrome + Node.js + X11/Mesa/Fonts)
+FROM node:24-bookworm-slim
+
+WORKDIR /app
+
+# Required system libraries for Headless Chromium, GPU rendering & FFmpeg
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium \
+    ffmpeg \
+    fonts-liberation \
+    fonts-noto-color-emoji \
+    libnss3 \
+    libxss1 \
+    libasound2 \
+    libgbm1 \
+    libgl1-mesa-dri \
+    libgl1-mesa-glx \
+    xvfb \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV CHROME_PATH=/usr/bin/chromium
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
+COPY package*.json ./
+RUN npm install --ignore-scripts --no-audit --no-fund
+
+COPY . .
+
+CMD ["node", "render.js"]

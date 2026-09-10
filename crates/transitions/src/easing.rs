@@ -5,7 +5,9 @@ pub use dioxuscut_animation::easing::{
     ease_in_out_sine, ease_in_quad, ease_in_sine, ease_out, ease_out_cubic, ease_out_quad,
     ease_out_sine, linear, EasingFn,
 };
-pub use dioxuscut_animation::spring::{spring, SpringConfig};
+pub use dioxuscut_animation::spring::{
+    measure_spring, spring, spring_with_options, SpringConfig, SpringError, SpringOptions,
+};
 
 /// Timing strategy determining how progress advances over frames.
 pub trait TransitionTiming: Send + Sync {
@@ -65,7 +67,7 @@ impl TransitionTiming for LinearTiming {
     }
 }
 
-/// Damped harmonic oscillator physics timing.
+/// Damped harmonic oscillator timing, stretched to the requested duration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpringTiming {
     pub config: SpringConfig,
@@ -97,7 +99,16 @@ impl TransitionTiming for SpringTiming {
         if self.duration_in_frames == 0 {
             return 1.0;
         }
-        let val = spring(frame, self.fps, self.config.clone());
+        let val = spring_with_options(
+            frame as f64,
+            self.fps,
+            self.config.clone(),
+            SpringOptions {
+                duration_in_frames: Some(self.duration_in_frames as f64),
+                ..Default::default()
+            },
+        )
+        .expect("invalid spring transition parameters");
         val.clamp(0.0, 1.0) as f32
     }
 }
@@ -120,6 +131,17 @@ mod tests {
     fn linear_timing_with_easing() {
         let timing = LinearTiming::new(10).with_easing(ease_in_quad);
         assert!((timing.progress(5) - 0.25).abs() < 1e-5);
+    }
+
+    #[test]
+    fn spring_timing_scales_the_curve_to_the_overlap_duration() {
+        let short = SpringTiming::new(30.0, 10);
+        let long = SpringTiming::new(30.0, 40);
+        // Equal relative positions must sample the same physics time.
+        assert!((short.progress(2) - long.progress(8)).abs() < 1e-6);
+        assert!(short.progress(10) > 0.995);
+        assert_eq!(short.progress(11), 1.0);
+        assert_eq!(SpringTiming::new(30.0, 0).progress(0), 1.0);
     }
 
     #[test]

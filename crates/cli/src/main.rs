@@ -29,6 +29,7 @@ async fn main() -> anyhow::Result<()> {
             timeout_seconds,
             crf,
             preset,
+            hw_accel,
         } => {
             let request = RenderRequest {
                 composition: composition.clone(),
@@ -47,6 +48,7 @@ async fn main() -> anyhow::Result<()> {
                 timeout_seconds: *timeout_seconds,
                 crf: *crf,
                 preset: preset.clone(),
+                hw_accel: (*hw_accel).into(),
             };
             let control = default_render_control(&request);
             let cancellation = control.cancellation_token();

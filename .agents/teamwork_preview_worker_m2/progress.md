@@ -1,10 +1,15 @@
-# Progress Log
+# Progress Tracker - Worker 2 Milestone 2
 
-Last visited: 2026-07-21T13:24:00Z
+Last visited: 2026-08-21T06:56:00Z
+Status: Completed all Milestone 2 tasks. All 296 tests passing across target crates.
 
-- Implemented `crates/renderer/src/browser.rs` with `capture_frames`.
-- Updated `crates/renderer/src/lib.rs` to expose `capture_frames`.
-- Updated `crates/renderer/src/render_frames.rs` and `encode.rs`.
-- Added unit test `test_capture_frames_headless_chrome` in `browser.rs`.
-- Ran `cargo check -p dioxuscut-renderer` (PASS).
-- Running `cargo test -p dioxuscut-renderer`.
+## Tasks
+- [x] Read authoritative files (`ORIGINAL_REQUEST.md`, `PROJECT.md`, `TEST_INFRA.md`, `remotion_spec.md`, `effects_layout_integration.md`)
+- [x] Inspect existing `crates/rasterizer/`, `crates/transitions/`, `crates/composition/` code
+- [x] Implement `SceneFilter` variants in `crates/rasterizer/src/scene.rs`
+- [x] Implement filter pixel processing in `crates/rasterizer/src/tiny_skia_backend.rs`
+- [x] Implement transition engine in `crates/transitions/` (easing curves, spring timing, presentation transitions)
+- [x] Integrate transitions & filters into `crates/composition/src/scene_emitter.rs`
+- [x] Write unit & integration tests in `crates/transitions/tests/` and `crates/rasterizer/tests/`
+- [x] Run cargo check, clippy, test, fmt
+- [x] Generate handoff.md and report to parent

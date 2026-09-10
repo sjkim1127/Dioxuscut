@@ -1,13 +1,15 @@
-# Progress - Milestone 4
+# Progress - Milestone 4 (R5: Text Measurement & Fitting API)
 
-Last visited: 2026-07-21T13:34:30Z
+Last visited: 2026-08-19T14:48:50Z
 
 ## Status
-- [x] Initialized BRIEFING.md and ORIGINAL_REQUEST.md
-- [x] Ran `cargo check --workspace` (passed)
-- [/] Running `cargo test --workspace`
-- [ ] Review Requirement R4 and CLI flags / logging requirements
-- [ ] Implement & verify CLI command interface, logging, full pipeline integration
-- [ ] Execute `cargo run -p dioxuscut-cli -- render -c HelloWorld -p data.json -o output.mp4 --width 1280 --height 720 --fps 30 --duration 60` and verify output.mp4
-- [ ] Verify 100% tests pass (`cargo test --workspace` and `cargo check --workspace`)
-- [ ] Generate handoff report
+- [x] Initialized BRIEFING.md and DISPATCH.md
+- [x] Investigated `crates/rasterizer/src/font.rs` and `crates/rasterizer/src/lib.rs`
+- [x] Ran baseline `cargo check` and `cargo clippy` (identified `manual-range-contains` lint on `font.rs:817`)
+- [x] Harden `fit_text` input validation and binary search
+- [x] Fix clippy warning in `crates/rasterizer/src/font.rs`
+- [x] Add comprehensive unit tests for `fit_text` and text measurement
+- [x] Run `cargo check`, `cargo clippy`, `cargo test`, `cargo fmt`
+- [x] Write handoff.md and notify parent
+
+

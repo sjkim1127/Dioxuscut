@@ -209,7 +209,33 @@ pub enum Commands {
         /// FFmpeg encoder preset for H.264 and H.265.
         #[arg(long, default_value = "fast")]
         preset: String,
+
+        /// Hardware acceleration mode for video encoding.
+        #[arg(long, value_enum, default_value_t = HwAccelArg::Auto)]
+        hw_accel: HwAccelArg,
     },
+}
+
+/// Hardware acceleration selection for the CLI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
+pub enum HwAccelArg {
+    #[default]
+    Auto,
+    Disabled,
+    #[value(name = "videotoolbox", alias = "vt")]
+    VideoToolbox,
+    Nvenc,
+}
+
+impl From<HwAccelArg> for dioxuscut_rasterizer::HwAccel {
+    fn from(arg: HwAccelArg) -> Self {
+        match arg {
+            HwAccelArg::Auto => dioxuscut_rasterizer::HwAccel::Auto,
+            HwAccelArg::Disabled => dioxuscut_rasterizer::HwAccel::Disabled,
+            HwAccelArg::VideoToolbox => dioxuscut_rasterizer::HwAccel::VideoToolbox,
+            HwAccelArg::Nvenc => dioxuscut_rasterizer::HwAccel::Nvenc,
+        }
+    }
 }
 
 /// A validated render request independent from argument parsing.
@@ -231,6 +257,7 @@ pub struct RenderRequest {
     pub timeout_seconds: Option<u64>,
     pub crf: u32,
     pub preset: String,
+    pub hw_accel: dioxuscut_rasterizer::HwAccel,
 }
 
 /// Validates that a render request selects exactly one available composition source.
@@ -577,6 +604,7 @@ pub async fn execute_render_command_with_registry_and_control(
                 )
                 .with_frame_start(frame_start)
                 .with_codec(request.codec.video_codec().expect("video codec validated"))
+                .with_hw_accel(request.hw_accel)
                 .with_quality(request.crf, &request.preset)
                 .with_audio_tracks(audio_tracks.clone())
                 .with_control(control.clone());
@@ -622,6 +650,7 @@ pub async fn execute_render_command_with_registry_and_control(
                     )
                     .with_frame_start(frame_start)
                     .with_codec(request.codec.video_codec().expect("video codec validated"))
+                    .with_hw_accel(request.hw_accel)
                     .with_quality(request.crf, &request.preset)
                     .with_audio_tracks(audio_tracks.clone())
                     .with_control(control.clone());

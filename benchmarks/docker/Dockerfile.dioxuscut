@@ -1,0 +1,13 @@
+# Dioxuscut Ultra-Light Container Image (Zero Browser, Single Binary + FFmpeg)
+FROM alpine:3.20
+
+WORKDIR /app
+
+# Only lightweight system FFmpeg and CA certs are required
+RUN apk add --no-cache ffmpeg ca-certificates libgcc libstdc++
+
+# Copy the pre-built single static Rust binary (typically 15-30MB)
+COPY target/release/dioxuscut /usr/local/bin/dioxuscut
+
+ENTRYPOINT ["dioxuscut"]
+CMD ["render", "--help"]

@@ -1,0 +1,113 @@
+{
+  "scene": "32 opaque spring-animated rectangles, no fonts/media/effects",
+  "width": 1280,
+  "height": 720,
+  "fps": 30,
+  "frames": 180,
+  "concurrency": 4,
+  "codec": "h264",
+  "crf": 18,
+  "preset": "fast",
+  "imageFormat": "png",
+  "repeats": 3,
+  "platform": "darwin",
+  "arch": "arm64",
+  "cpu": "Apple M4 Pro",
+  "node": "v24.11.1",
+  "chrome": "Google Chrome 152.0.7977.83",
+  "validation": {
+    "pixel_checks": [
+      {
+        "frame": 0,
+        "identical": true,
+        "rgba_bytes": 3686400
+      },
+      {
+        "frame": 1,
+        "identical": true,
+        "rgba_bytes": 3686400
+      },
+      {
+        "frame": 7,
+        "identical": true,
+        "rgba_bytes": 3686400
+      },
+      {
+        "frame": 15,
+        "identical": true,
+        "rgba_bytes": 3686400
+      },
+      {
+        "frame": 30,
+        "identical": true,
+        "rgba_bytes": 3686400
+      },
+      {
+        "frame": 59,
+        "identical": true,
+        "rgba_bytes": 3686400
+      },
+      {
+        "frame": 60,
+        "identical": true,
+        "rgba_bytes": 3686400
+      },
+      {
+        "frame": 179,
+        "identical": true,
+        "rgba_bytes": 3686400
+      }
+    ],
+    "probes": {
+      "native": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 720,
+        "pix_fmt": "yuv420p",
+        "r_frame_rate": "30/1",
+        "nb_read_frames": "180"
+      },
+      "remotion": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 720,
+        "pix_fmt": "yuv420p",
+        "r_frame_rate": "30/1",
+        "nb_read_frames": "180"
+      }
+    },
+    "decoded_ssim": {
+      "frames": 180,
+      "min": 1,
+      "mean": 1
+    }
+  },
+  "ffmpeg_shared": "ffmpeg version 8.1.1 Copyright (c) 2000-2026 the FFmpeg developers",
+  "bundle_ms": 919.8704169999999,
+  "browser_ms": 1456.185709,
+  "warmup": {
+    "dioxuscut": {
+      "process_ms": 1528.841,
+      "render_ms": 1516.000791
+    },
+    "remotion_ms": 11425.990167
+  },
+  "samples_ms": {
+    "dioxuscut": [
+      2717.4518340000013,
+      2022.612000000001,
+      2191.539417
+    ],
+    "remotion": [
+      11236.893791999999,
+      11041.082750000001,
+      10915.738707999997
+    ]
+  },
+  "median_ms": {
+    "dioxuscut": 2191.539417,
+    "remotion": 11041.082750000001
+  },
+  "speedup": 5.038048900399952,
+  "scope": "warm render plus encoding; reused Chrome; native includes process startup; bundling/browser startup excluded; PNG pixels and all decoded MP4 frames verified"
+}

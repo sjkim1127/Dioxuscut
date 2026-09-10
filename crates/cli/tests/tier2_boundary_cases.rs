@@ -146,6 +146,7 @@ async fn test_boundary_malformed_props_fail_before_rendering() {
         timeout_seconds: None,
         crf: 18,
         preset: "fast".into(),
+        hw_accel: dioxuscut_rasterizer::HwAccel::Disabled,
     };
 
     let error = execute_render_command(&request).await.unwrap_err();
@@ -174,6 +175,7 @@ async fn test_boundary_missing_audio_fails_before_rendering() {
         timeout_seconds: None,
         crf: 18,
         preset: "fast".into(),
+        hw_accel: dioxuscut_rasterizer::HwAccel::Disabled,
     };
 
     let error = execute_render_command(&request).await.unwrap_err();

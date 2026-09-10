@@ -91,6 +91,20 @@ pub enum StillImageFormat {
     WebP,
 }
 
+/// Hardware-accelerated video encoder selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HwAccel {
+    /// Automatically choose the best hardware encoder for the platform (VideoToolbox on macOS, NVENC on Linux).
+    #[default]
+    Auto,
+    /// Force software encoding (libx264, libx265).
+    Disabled,
+    /// Force Apple VideoToolbox hardware encoder (macOS).
+    VideoToolbox,
+    /// Force NVIDIA NVENC hardware encoder (Linux/Windows).
+    Nvenc,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RenderProgress {
     pub completed_frames: u32,
@@ -193,6 +207,8 @@ pub struct PipeConfig {
     /// FFmpeg preset: "ultrafast", "fast", "medium", etc.
     pub preset: String,
     pub codec: VideoCodec,
+    /// Hardware acceleration mode for video encoding.
+    pub hw_accel: HwAccel,
     /// Audio tracks mixed and trimmed to the rendered video duration.
     pub audio_tracks: Vec<AudioTrack>,
     pub control: RenderControl,
@@ -217,6 +233,7 @@ impl PipeConfig {
             crf: 18,
             preset: "fast".to_string(),
             codec: VideoCodec::H264,
+            hw_accel: HwAccel::default(),
             audio_tracks: Vec::new(),
             control: RenderControl::default(),
         }
@@ -224,6 +241,11 @@ impl PipeConfig {
 
     pub fn with_concurrency(mut self, n: usize) -> Self {
         self.concurrency = Some(n);
+        self
+    }
+
+    pub fn with_hw_accel(mut self, hw_accel: HwAccel) -> Self {
+        self.hw_accel = hw_accel;
         self
     }
 
@@ -718,33 +740,107 @@ pub fn build_pipe_ffmpeg_args(config: &PipeConfig) -> Vec<String> {
         }
     }
 
+    let effective_hw = match config.hw_accel {
+        HwAccel::Auto => {
+            if cfg!(target_os = "macos") {
+                HwAccel::VideoToolbox
+            } else {
+                HwAccel::Disabled
+            }
+        }
+        other => other,
+    };
+
+    let auto_bitrate = {
+        let pixels = (config.width as u64) * (config.height as u64);
+        if pixels >= 3840 * 2160 {
+            "30M"
+        } else if pixels >= 1920 * 1080 {
+            "10M"
+        } else {
+            "4M"
+        }
+    };
+
     match config.codec {
-        VideoCodec::H264 => args.extend([
-            "-c:v".into(),
-            "libx264".into(),
-            "-pix_fmt".into(),
-            "yuv420p".into(),
-            "-crf".into(),
-            config.crf.to_string(),
-            "-preset".into(),
-            config.preset.clone(),
-            "-movflags".into(),
-            "+faststart".into(),
-        ]),
-        VideoCodec::H265 => args.extend([
-            "-c:v".into(),
-            "libx265".into(),
-            "-tag:v".into(),
-            "hvc1".into(),
-            "-pix_fmt".into(),
-            "yuv420p".into(),
-            "-crf".into(),
-            config.crf.to_string(),
-            "-preset".into(),
-            config.preset.clone(),
-            "-movflags".into(),
-            "+faststart".into(),
-        ]),
+        VideoCodec::H264 => match effective_hw {
+            HwAccel::VideoToolbox => args.extend([
+                "-c:v".into(),
+                "h264_videotoolbox".into(),
+                "-pix_fmt".into(),
+                "yuv420p".into(),
+                "-b:v".into(),
+                auto_bitrate.into(),
+                "-movflags".into(),
+                "+faststart".into(),
+            ]),
+            HwAccel::Nvenc => args.extend([
+                "-c:v".into(),
+                "h264_nvenc".into(),
+                "-pix_fmt".into(),
+                "yuv420p".into(),
+                "-cq".into(),
+                config.crf.to_string(),
+                "-preset".into(),
+                "p4".into(),
+                "-movflags".into(),
+                "+faststart".into(),
+            ]),
+            _ => args.extend([
+                "-c:v".into(),
+                "libx264".into(),
+                "-pix_fmt".into(),
+                "yuv420p".into(),
+                "-crf".into(),
+                config.crf.to_string(),
+                "-preset".into(),
+                config.preset.clone(),
+                "-movflags".into(),
+                "+faststart".into(),
+            ]),
+        },
+        VideoCodec::H265 => match effective_hw {
+            HwAccel::VideoToolbox => args.extend([
+                "-c:v".into(),
+                "hevc_videotoolbox".into(),
+                "-tag:v".into(),
+                "hvc1".into(),
+                "-pix_fmt".into(),
+                "yuv420p".into(),
+                "-b:v".into(),
+                auto_bitrate.into(),
+                "-movflags".into(),
+                "+faststart".into(),
+            ]),
+            HwAccel::Nvenc => args.extend([
+                "-c:v".into(),
+                "hevc_nvenc".into(),
+                "-tag:v".into(),
+                "hvc1".into(),
+                "-pix_fmt".into(),
+                "yuv420p".into(),
+                "-cq".into(),
+                config.crf.to_string(),
+                "-preset".into(),
+                "p4".into(),
+                "-movflags".into(),
+                "+faststart".into(),
+            ]),
+            _ => args.extend([
+                "-c:v".into(),
+                "libx265".into(),
+                "-tag:v".into(),
+                "hvc1".into(),
+                "-pix_fmt".into(),
+                "yuv420p".into(),
+                "-crf".into(),
+                config.crf.to_string(),
+                "-preset".into(),
+                config.preset.clone(),
+                "-movflags".into(),
+                "+faststart".into(),
+            ]),
+        },
         VideoCodec::Vp9 => args.extend([
             "-c:v".into(),
             "libvpx-vp9".into(),
@@ -1096,10 +1192,27 @@ mod tests {
             (VideoCodec::ProRes, "out.mov", "prores_ks"),
         ];
         for (codec, output, encoder) in cases {
-            let config = PipeConfig::new(64, 64, 30.0, 2, output).with_codec(codec);
+            let config = PipeConfig::new(64, 64, 30.0, 2, output)
+                .with_codec(codec)
+                .with_hw_accel(HwAccel::Disabled);
             let args = build_pipe_ffmpeg_args(&config);
             assert!(args.contains(&encoder.to_string()), "missing {encoder}");
             assert_eq!(args.last(), Some(&output.to_string()));
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let config = PipeConfig::new(64, 64, 30.0, 2, "out.mp4")
+                .with_codec(VideoCodec::H264)
+                .with_hw_accel(HwAccel::VideoToolbox);
+            let args = build_pipe_ffmpeg_args(&config);
+            assert!(args.contains(&"h264_videotoolbox".to_string()));
+
+            let config_hevc = PipeConfig::new(64, 64, 30.0, 2, "out.mp4")
+                .with_codec(VideoCodec::H265)
+                .with_hw_accel(HwAccel::VideoToolbox);
+            let args_hevc = build_pipe_ffmpeg_args(&config_hevc);
+            assert!(args_hevc.contains(&"hevc_videotoolbox".to_string()));
         }
 
         let av1 = build_pipe_ffmpeg_args(

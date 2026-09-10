@@ -1,0 +1,56 @@
+{
+  "command": [
+    "/Users/sjkim1127/Dioxuscut/target/release/examples/render_bench",
+    "/Users/sjkim1127/Dioxuscut/target/native_bench.mp4"
+  ],
+  "exit_code": 0,
+  "duration_sec": 0.347,
+  "peak_rss_mb": 405.94,
+  "avg_rss_mb": 186.17,
+  "sample_count": 6,
+  "concurrency_capacity": {
+    "server_4gb_ram": 7,
+    "server_8gb_ram": 17,
+    "server_16gb_ram": 37
+  },
+  "timeline": [
+    {
+      "time_sec": 0.006,
+      "rss_mb": 0.36,
+      "vms_mb": 400455.8,
+      "process_count": 1
+    },
+    {
+      "time_sec": 0.065,
+      "rss_mb": 43.55,
+      "vms_mb": 850284.36,
+      "process_count": 2
+    },
+    {
+      "time_sec": 0.124,
+      "rss_mb": 235.42,
+      "vms_mb": 850591.97,
+      "process_count": 2
+    },
+    {
+      "time_sec": 0.178,
+      "rss_mb": 398.89,
+      "vms_mb": 850647.38,
+      "process_count": 2
+    },
+    {
+      "time_sec": 0.234,
+      "rss_mb": 405.94,
+      "vms_mb": 850647.38,
+      "process_count": 2
+    },
+    {
+      "time_sec": 0.293,
+      "rss_mb": 32.86,
+      "vms_mb": 425140.73,
+      "process_count": 2
+    }
+  ],
+  "stdout": "{\"render_ms\":287.576625}\n",
+  "stderr": ""
+}

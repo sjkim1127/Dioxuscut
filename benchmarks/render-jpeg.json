@@ -1,0 +1,180 @@
+{
+  "scene": "32 opaque spring-animated rectangles, no fonts/media/effects",
+  "width": 1280,
+  "height": 720,
+  "fps": 30,
+  "frames": 180,
+  "concurrency": 4,
+  "codec": "h264",
+  "crf": 18,
+  "preset": "fast",
+  "imageFormat": "jpeg",
+  "repeats": 3,
+  "platform": "darwin",
+  "arch": "arm64",
+  "cpu": "Apple M4 Pro",
+  "node": "v24.11.1",
+  "chrome": "Google Chrome 152.0.7977.83",
+  "validation": {
+    "pixel_checks": [
+      {
+        "frame": 0,
+        "identical": true,
+        "rgba_bytes": 3686400
+      },
+      {
+        "frame": 1,
+        "identical": true,
+        "rgba_bytes": 3686400
+      },
+      {
+        "frame": 7,
+        "identical": true,
+        "rgba_bytes": 3686400
+      },
+      {
+        "frame": 15,
+        "identical": true,
+        "rgba_bytes": 3686400
+      },
+      {
+        "frame": 30,
+        "identical": true,
+        "rgba_bytes": 3686400
+      },
+      {
+        "frame": 59,
+        "identical": true,
+        "rgba_bytes": 3686400
+      },
+      {
+        "frame": 60,
+        "identical": true,
+        "rgba_bytes": 3686400
+      },
+      {
+        "frame": 179,
+        "identical": true,
+        "rgba_bytes": 3686400
+      }
+    ],
+    "probes": {
+      "native": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 720,
+        "pix_fmt": "yuv420p",
+        "r_frame_rate": "30/1",
+        "nb_read_frames": "180"
+      },
+      "remotion": {
+        "codec_name": "h264",
+        "width": 1280,
+        "height": 720,
+        "pix_fmt": "yuvj420p",
+        "color_range": "pc",
+        "color_space": "bt470bg",
+        "r_frame_rate": "30/1",
+        "nb_read_frames": "180",
+        "side_data_list": [
+          {}
+        ]
+      }
+    },
+    "decoded_ssim": {
+      "normalized_to": "limited-range yuv420p",
+      "frames": 180,
+      "min": 0.997984,
+      "mean": 0.9981656666666663
+    }
+  },
+  "ffmpeg_shared": "ffmpeg version 8.1.1 Copyright (c) 2000-2026 the FFmpeg developers",
+  "bundle_ms": 445.77033400000005,
+  "browser_ms": 617.999084,
+  "warmup": {
+    "dioxuscut": {
+      "process_ms": 528.44875,
+      "render_ms": 524.903334
+    },
+    "remotion_ms": 10132.815958
+  },
+  "samples_ms": {
+    "dioxuscut": [
+      247.96408299999894,
+      267.4004169999971,
+      231.36670800000138
+    ],
+    "remotion": [
+      10328.633791999999,
+      10100.421792000001,
+      10147.893749999996
+    ]
+  },
+  "native_render_ms": [
+    244.097125,
+    263.8165,
+    228.16883299999998
+  ],
+  "host_load_before_samples": [
+    {
+      "engine": "dioxuscut",
+      "run": 0,
+      "load": [
+        5.92724609375,
+        11.16455078125,
+        11.369140625
+      ]
+    },
+    {
+      "engine": "remotion",
+      "run": 0,
+      "load": [
+        5.92724609375,
+        11.16455078125,
+        11.369140625
+      ]
+    },
+    {
+      "engine": "remotion",
+      "run": 1,
+      "load": [
+        7.673828125,
+        11.26171875,
+        11.39794921875
+      ]
+    },
+    {
+      "engine": "dioxuscut",
+      "run": 1,
+      "load": [
+        7.42236328125,
+        11.08837890625,
+        11.33447265625
+      ]
+    },
+    {
+      "engine": "dioxuscut",
+      "run": 2,
+      "load": [
+        7.42236328125,
+        11.08837890625,
+        11.33447265625
+      ]
+    },
+    {
+      "engine": "remotion",
+      "run": 2,
+      "load": [
+        7.42236328125,
+        11.08837890625,
+        11.33447265625
+      ]
+    }
+  ],
+  "median_ms": {
+    "dioxuscut": 247.96408299999894,
+    "remotion": 10147.893749999996
+  },
+  "speedup": 40.92485341919474,
+  "scope": "warm render plus encoding; reused Chrome; native includes process startup; bundling/browser startup excluded; PNG pixels and all decoded MP4 frames verified"
+}

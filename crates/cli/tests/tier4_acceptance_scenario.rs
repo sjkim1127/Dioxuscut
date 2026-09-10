@@ -48,6 +48,7 @@ async fn test_tier4_real_world_acceptance_scenario() {
         timeout_seconds: None,
         crf: 18,
         preset: "fast".into(),
+        hw_accel: dioxuscut_rasterizer::HwAccel::Disabled,
     };
     let result = execute_render_command(&request).await;
 

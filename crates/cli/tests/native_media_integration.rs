@@ -205,6 +205,7 @@ async fn rhai_media_nodes_flow_through_the_cli_renderer() {
         timeout_seconds: None,
         crf: 18,
         preset: "fast".into(),
+        hw_accel: dioxuscut_rasterizer::HwAccel::Disabled,
     })
     .await
     .unwrap();

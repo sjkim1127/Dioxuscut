@@ -30,6 +30,7 @@ fn test_cli_flag_defaults() {
             timeout_seconds,
             crf,
             preset,
+            hw_accel,
         } => {
             assert_eq!(composition, Some("HelloWorld".into()));
             assert_eq!(script, None);
@@ -47,6 +48,7 @@ fn test_cli_flag_defaults() {
             assert_eq!(timeout_seconds, None);
             assert_eq!(crf, 18);
             assert_eq!(preset, "fast");
+            assert_eq!(hw_accel, dioxuscut_cli::HwAccelArg::Auto);
         }
     }
 }
@@ -94,6 +96,7 @@ fn test_cli_flag_custom_values() {
             timeout_seconds,
             crf,
             preset,
+            hw_accel,
         } => {
             assert_eq!(composition, Some("CustomComposition".into()));
             assert_eq!(script, None);
@@ -111,6 +114,7 @@ fn test_cli_flag_custom_values() {
             assert_eq!(timeout_seconds, None);
             assert_eq!(crf, 18);
             assert_eq!(preset, "fast");
+            assert_eq!(hw_accel, dioxuscut_cli::HwAccelArg::Auto);
         }
     }
 }

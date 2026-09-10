@@ -1,0 +1,12 @@
+{
+  "name": "dioxuscut-remotion-benchmark",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@remotion/bundler": "4.0.495",
+    "@remotion/renderer": "4.0.495",
+    "remotion": "4.0.495",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  }
+}

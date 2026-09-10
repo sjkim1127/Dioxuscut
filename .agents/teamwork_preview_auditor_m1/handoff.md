@@ -1,65 +1,46 @@
-# Handoff Report — Forensic Audit of Milestone 1
+# Handoff Report: Forensic Integrity Audit — Milestone 1 (`crates/noise`)
 
 ## 1. Observation
-
-- **Target Files Inspected**:
-  - `crates/renderer/src/server.rs`: Lines 1–433
-  - `crates/cli/src/main.rs`: Lines 1–43
-  - `crates/cli/src/lib.rs`: Lines 1–194
-  - `crates/cli/tests/tier3_subsystem_integration.rs`: Lines 1–142
-
-- **Key Implementation Details**:
-  - `crates/renderer/src/server.rs`: Uses `tokio::net::TcpListener::bind(&bind_addr)` (lines 217–219) for actual TCP socket binding on `127.0.0.1`.
-  - `crates/renderer/src/server.rs`: Spawns `axum::serve(listener, app)` with `tower_http::services::ServeDir` and `/health` GET handler (lines 228–244).
-  - `crates/renderer/src/server.rs`: Implements `poll_health_check` using `reqwest::Client` (lines 303–335) to issue HTTP GET requests to `http://127.0.0.1:<port>/health`.
-  - `crates/renderer/src/server.rs`: `ServerHandle` implements `stop()` and `Drop` sending a Tokio `oneshot::channel` shutdown signal (lines 144–187).
-  - `crates/cli/src/lib.rs`: `execute_render_command` (lines 113–193) validates parameters, spawns the server via `spawn_server`, triggers rendering/encoding, and calls `handle.stop().await?`.
-
-- **Test Execution Results**:
-  - `cargo test -p dioxuscut-renderer --lib server::tests`:
-    ```text
-    running 4 tests
-    test server::tests::test_server_config_builder ... ok
-    test server::tests::test_server_explicit_port ... ok
-    test server::tests::test_spawn_static_server_dynamic_port ... ok
-    test server::tests::test_server_drop_cleanup ... ok
-
-    test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.17s
-    ```
-  - `cargo test -p dioxuscut-cli --test tier3_subsystem_integration test_subsystem_http_server_lifecycle`:
-    ```text
-    running 1 test
-    test test_subsystem_http_server_lifecycle ... ok
-
-    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.02s
-    ```
+- **Inspected Files**:
+  - `crates/noise/Cargo.toml` (lines 1-15): Production dependencies are strictly `dioxus`, `dioxuscut-core`, `serde`. No vendor or external noise crates.
+  - `crates/noise/src/seed.rs` (lines 1-171): Implements genuine Mulberry32 PRNG (32-bit state, `0x6D2B79F5`, bit-shifts) and UTF-16 Java `hashCode` generator (`hash = hash * 31 + code_unit`).
+  - `crates/noise/src/simplex.rs` (lines 1-534): Implements authentic Stefan Gustavson Simplex noise with constants $F_2, G_2, F_3, G_3, F_4, G_4$, `GRAD3` (12 vectors), `GRAD4` (32 vectors), Fisher-Yates PRNG permutation shuffle, and quartic radial kernel evaluation ($t^4 \cdot (\vec{g} \cdot \vec{d})$).
+  - `crates/noise/src/fbm.rs` (lines 1-207): Genuine multi-octave harmonic loops (`fbm_2d`, `fbm_3d`), absolute harmonic turbulence (`turbulence_2d`), and Inigo Quilez domain warping (`domain_warp_2d`, `warp_points_2d`).
+  - `crates/noise/src/noise_bg.rs` (lines 1-248): Dioxus `<NoiseBackground />` component rendering procedural SVG paths and data URLs driven by `use_current_frame()`.
+- **Static Analysis & Anti-Cheat Grep**:
+  - Search for `if seed ==`: 0 matches in `crates/noise/src/`.
+  - Search for `unimplemented!`, `todo!`: 0 matches in `crates/noise/src/`.
+  - Search for `vendor`: 0 matches in `crates/noise/`.
+  - Exact reference constants (`0.3071565136272162`) appear only within test files (`simplex.rs:514`, `e2e_noise_tier1_tier2.rs:104`, `simplex_parity_tests.rs:15`).
+- **Empirical Execution**:
+  - `cargo test -p dioxuscut-noise`: 94 tests passed, 0 failed across unit tests, adversarial stress tests, E2E tiers 1-4, global extrema searches, PRNG distribution checks, and SVG generation tests.
 
 ## 2. Logic Chain
-
-1. **Step 1 (Observation: `server.rs` lines 217-244)**: The server implementation invokes Tokio's `TcpListener::bind` and `axum::serve`, binding an actual OS TCP socket rather than providing a fake handle or constant port value.
-2. **Step 2 (Observation: `server.rs` lines 303-335)**: `spawn_static_server` executes `poll_health_check`, which sends real HTTP GET requests over local loopback using `reqwest::Client`. The handle is returned only after receiving an HTTP 200 response from the `/health` endpoint.
-3. **Step 3 (Observation: `server.rs` lines 144-187)**: `ServerHandle` holds a `oneshot::Sender<()>` shutdown trigger. Stopping or dropping the handle terminates `axum::serve`, closing the socket.
-4. **Step 4 (Observation: Unit & Integration Test Outputs)**: Executing `cargo test -p dioxuscut-renderer --lib server::tests` and `cargo test -p dioxuscut-cli --test tier3_subsystem_integration test_subsystem_http_server_lifecycle` resulted in all 4 unit tests and 1 integration lifecycle test passing cleanly with real HTTP requests and socket binding.
-5. **Conclusion**: The Milestone 1 server lifecycle implementation contains no hardcoded test shortcuts, facade mocks, or circumvention of `axum`/`tower-http`.
+1. *Observation*: Source code in `crates/noise/src/` performs direct mathematical calculations using PRNG permutation tables, skew transforms, gradient dot products, harmonic loops, and SVG path formatting.
+2. *Inference*: The implementation contains genuine mathematical algorithms rather than facade returns or lookup tables.
+3. *Observation*: `crates/noise/Cargo.toml` contains zero external math/noise dependencies or references to `vendor/`.
+4. *Inference*: The deliverable satisfies the requirement for 100% native Rust procedural noise with zero vendor dependencies.
+5. *Observation*: 94 tests independently evaluate numeric ranges, mathematical continuity across grid boundaries, multi-threading concurrency, non-finite input resilience, and Remotion v4.0.495 parity.
+6. *Inference*: All acceptance criteria for Milestone 1 are met authentically.
 
 ## 3. Caveats
-
-- `headless_chrome` CDP frame capture tests (`browser::tests::test_capture_frames_headless_chrome`) encountered CDP event wait timeouts when executed in this environment, which is an external browser navigation environment behavior and outside the scope of web server TCP/HTTP binding integrity.
+- `cargo clippy -p dioxuscut-noise --all-targets --all-features -- -D warnings` flags unused imports in two test harness files (`tests/global_extrema_search.rs:3:23`, `tests/adversarial_stress_tests.rs:12:5`). The production library target (`--lib`) passes with 0 warnings.
+- `cargo fmt --check` flags minor formatting in `crates/noise/src/simplex.rs:180, 277`.
 
 ## 4. Conclusion
+**Verdict: CLEAN**
 
-- **Verdict**: **CLEAN**
-- The Milestone 1 web server lifecycle and CLI integration in `crates/renderer/src/server.rs` and `crates/cli/src/main.rs` passed all forensic integrity checks.
+Milestone 1 (`crates/noise`) contains genuine, native, pure-Rust implementations of Simplex 2D/3D/4D noise, Mulberry32 PRNG, fBm harmonic synthesis, turbulent domain warping, and `<NoiseBackground />`. Zero integrity violations detected.
 
 ## 5. Verification Method
+To independently verify this audit:
+```bash
+# 1. Run full test suite for crates/noise
+cargo test -p dioxuscut-noise
 
-- **Audit Report Path**: `/Users/sjkim1127/Dioxuscut/.agents/teamwork_preview_auditor_m1/audit.md`
-- **Handoff Report Path**: `/Users/sjkim1127/Dioxuscut/.agents/teamwork_preview_auditor_m1/handoff.md`
-- **Command to verify server unit tests**:
-  ```bash
-  cargo test -p dioxuscut-renderer --lib server::tests
-  ```
-- **Command to verify HTTP server lifecycle integration test**:
-  ```bash
-  cargo test -p dioxuscut-cli --test tier3_subsystem_integration test_subsystem_http_server_lifecycle
-  ```
+# 2. Verify zero vendor references
+grep -rn "vendor" crates/noise/
+
+# 3. Check for hardcoded seed bypasses
+grep -rn "seed ==" crates/noise/src/
+```

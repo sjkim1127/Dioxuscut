@@ -44,9 +44,10 @@ pub use dioxuscut_rasterizer as rasterizer;
 // Core animation primitives
 pub use dioxuscut_animation::{
     bezier, interpolate, interpolate_colors, interpolate_styles, make_transform, matrix, matrix3d,
-    perspective, rotate, rotate3d, rotate_x, rotate_y, rotate_z, scale, scale3d, scale_x, scale_y,
-    scale_z, skew, skew_x, skew_y, spring, translate, translate3d, translate_x, translate_y,
-    translate_z, EasingFn, ExtrapolateType, InterpolateOptions, SpringConfig, StyleMap, StyleValue,
+    measure_spring, perspective, rotate, rotate3d, rotate_x, rotate_y, rotate_z, scale, scale3d,
+    scale_x, scale_y, scale_z, skew, skew_x, skew_y, spring, spring_with_options, translate,
+    translate3d, translate_x, translate_y, translate_z, EasingFn, ExtrapolateType,
+    InterpolateOptions, SpringConfig, SpringError, SpringOptions, StyleMap, StyleValue,
     TransformOp,
 };
 

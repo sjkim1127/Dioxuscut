@@ -1,0 +1,171 @@
+{
+  "scope": "spring kernel only; excludes process startup/import/build",
+  "platform": "macOS-26.5.1-arm64-arm-64bit",
+  "node": "v24.11.1",
+  "rust": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+  "repeats": 5,
+  "results": [
+    {
+      "scenario": "cold",
+      "calls": 300,
+      "warmup_calls": 0,
+      "samples_ns": {
+        "dioxuscut": [
+          118.47333333333333,
+          21.946666666666665,
+          21.25,
+          19.44333333333333,
+          17.916666666666668
+        ],
+        "remotion": [
+          66544.30666666667,
+          66838.61333333333,
+          63522.776666666665,
+          63400.833333333336,
+          64945.276666666665
+        ]
+      },
+      "median_ns": {
+        "dioxuscut": 21.25,
+        "remotion": 64945.276666666665
+      },
+      "speedup": 3056.2483137254903,
+      "checksum_max_difference": 0.0
+    },
+    {
+      "scenario": "repeat",
+      "calls": 100000,
+      "warmup_calls": 10000,
+      "samples_ns": {
+        "dioxuscut": [
+          11.34542,
+          11.7175,
+          11.53083,
+          11.49292,
+          19.415
+        ],
+        "remotion": [
+          117.99209,
+          119.82083,
+          121.29917,
+          119.51458,
+          136.23042
+        ]
+      },
+      "median_ns": {
+        "dioxuscut": 11.53083,
+        "remotion": 119.82083
+      },
+      "speedup": 10.391344768763394,
+      "checksum_max_difference": 0.0
+    },
+    {
+      "scenario": "sequential",
+      "calls": 100000,
+      "warmup_calls": 10000,
+      "samples_ns": {
+        "dioxuscut": [
+          16.51042,
+          14.16208,
+          15.64166,
+          13.68667,
+          14.91208
+        ],
+        "remotion": [
+          174.82417,
+          175.74166,
+          175.26917,
+          174.82458,
+          174.90875
+        ]
+      },
+      "median_ns": {
+        "dioxuscut": 14.91208,
+        "remotion": 174.90875
+      },
+      "speedup": 11.72933286302112,
+      "checksum_max_difference": 0.0
+    },
+    {
+      "scenario": "duration",
+      "calls": 100000,
+      "warmup_calls": 10000,
+      "samples_ns": {
+        "dioxuscut": [
+          10.63708,
+          10.77166,
+          10.6325,
+          11.14083,
+          10.66209
+        ],
+        "remotion": [
+          198.21917,
+          202.00167,
+          227.02875,
+          204.16125,
+          203.39875
+        ]
+      },
+      "median_ns": {
+        "dioxuscut": 10.66209,
+        "remotion": 203.39875
+      },
+      "speedup": 19.07681795970584,
+      "checksum_max_difference": 0.0
+    },
+    {
+      "scenario": "seek",
+      "calls": 100000,
+      "warmup_calls": 10000,
+      "samples_ns": {
+        "dioxuscut": [
+          14.77709,
+          15.11792,
+          14.73708,
+          15.19791,
+          15.27417
+        ],
+        "remotion": [
+          232.55292,
+          225.23292,
+          233.37333,
+          232.93541,
+          228.96708
+        ]
+      },
+      "median_ns": {
+        "dioxuscut": 15.11792,
+        "remotion": 232.55292
+      },
+      "speedup": 15.382600251886503,
+      "checksum_max_difference": 0.0
+    },
+    {
+      "scenario": "measure",
+      "calls": 100000,
+      "warmup_calls": 10000,
+      "samples_ns": {
+        "dioxuscut": [
+          7.205,
+          7.33917,
+          7.60875,
+          7.97667,
+          7.2075
+        ],
+        "remotion": [
+          123.77792,
+          123.74834,
+          123.54958,
+          123.30791,
+          123.11
+        ]
+      },
+      "median_ns": {
+        "dioxuscut": 7.33917,
+        "remotion": 123.54958
+      },
+      "speedup": 16.834271450313864,
+      "checksum_max_difference": 0
+    }
+  ]
+}

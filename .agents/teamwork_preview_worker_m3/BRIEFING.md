@@ -1,56 +1,58 @@
-# BRIEFING — 2026-07-21T22:33:30+09:00
+# BRIEFING — 2026-08-21T06:57:12Z
 
 ## Mission
-Implement FFmpeg MP4 Encoding & Cleanup (Requirement R3) in `crates/renderer`.
+Implement Milestone 3: Advanced Layout & Text Fitting Utilities (crates/rasterizer, crates/core, crates/shapes, crates/player).
 
 ## 🔒 My Identity
 - Archetype: implementer
 - Roles: implementer, qa, specialist
 - Working directory: /Users/sjkim1127/Dioxuscut/.agents/teamwork_preview_worker_m3
-- Original parent: 6b7529bf-ea50-4734-a7a5-137537c7d5d7
-- Milestone: Milestone 3 - FFmpeg MP4 Encoding & Cleanup
+- Original parent: 97ae64f8-7479-47fe-922a-dc7157cfe230
+- Milestone: Milestone 3
 
 ## 🔒 Key Constraints
-- Implement FFmpeg CLI process invocation for encoding sequential PNG screenshots into H.264 MP4.
-- Command spec: `ffmpeg -y -framerate <fps> -i <frames_dir>/frame_%06d.png -c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -s <width>x<height> -movflags +faststart <output_mp4>`
-- Log FFmpeg invocation and capture stderr output with `tracing::info!` / `tracing::error!`.
-- Implement temporary frame directory removal upon completion (or cleanup helper).
-- Expose `pub fn encode_mp4(...)` and `pub fn cleanup_frames(...)` in `crates/renderer`.
-- Add unit test in `encode.rs`.
-- DO NOT CHEAT. Genuine implementation only.
+- Exclusive write ownership: `crates/rasterizer/src/font.rs`, `crates/shapes/`, `crates/core/src/lib.rs`, `crates/player/src/native_preview.rs`, and related tests in `crates/rasterizer/tests/`.
+- Must satisfy all verification: cargo check, cargo clippy, cargo test, cargo fmt with zero errors/warnings.
+- No dummy/facade implementations or hardcoded shortcuts.
 
 ## Current Parent
-- Conversation ID: 6b7529bf-ea50-4734-a7a5-137537c7d5d7
-- Updated: 2026-07-21T22:33:30+09:00
+- Conversation ID: 97ae64f8-7479-47fe-922a-dc7157cfe230
+- Updated: not yet
 
 ## Task Summary
-- **What to build**: FFmpeg MP4 encoding module and cleanup functions in `crates/renderer`.
-- **Success criteria**: All renderer tests pass, FFmpeg process invocation is properly formatted and logged, cleanup helper works.
+- **What to build**:
+  1. `crates/rasterizer/src/font.rs`:
+     - `fit_text_on_n_lines`
+     - `fill_text_box`
+     - `create_rounded_text_box`
+     - Accompanying options structs and layout errors.
+  2. `crates/shapes/`:
+     - Expose rounded text box helper APIs (`create_rounded_text_box`, `RoundedTextBoxOptions`, `make_rounded_text_box`).
+  3. `crates/core/src/lib.rs`:
+     - Re-export all key public APIs, types, and noise/transitions/layout items so users can access them cleanly.
+  4. `crates/player/src/native_preview.rs`:
+     - Update `&SceneFilter` match pattern to exhaustively handle all 10 new filter variants (`ChromaticAberration`, `Vignette`, `Contrast`, `Saturation`, `HueRotate`, `Invert`, `Tint`, `Duotone`, `ColorGrading`, `ColorKey`) in Player preview CSS generation.
+  5. `crates/rasterizer/`:
+     - Fix baseline formatting differences so `cargo fmt --all -- --check` passes cleanly across the workspace.
+- **Success criteria**: All tests pass, cargo clippy clean, cargo fmt clean.
+- **Interface contracts**: Remotion spec & explorer survey 3.
 
 ## Change Tracker
-- **Files modified**:
-  - `crates/renderer/src/encode.rs`: Added `EncodeConfig` builder helpers, `build_ffmpeg_args`, `encode_mp4`, `encode_frames`, `cleanup_frames`, process logging via `tracing::info!`/`tracing::error!`, and unit tests for command args construction, synthetic frame encoding, and cleanup.
-  - `crates/renderer/src/lib.rs`: Exported `encode_mp4`, `cleanup_frames`, `build_ffmpeg_args`, `encode_frames`, `EncodeConfig`.
-  - `crates/renderer/src/browser.rs`: Cleaned up navigation logic and tab timeout setting.
-- **Build status**: PASS
+- **Files modified**: None yet
+- **Build status**: Untested
 - **Pending issues**: None
 
 ## Quality Status
-- **Build/test result**: PASS (`cargo check -p dioxuscut-renderer`, `cargo test -p dioxuscut-renderer`, `cargo test --workspace`)
-- **Lint status**: 0 warnings in `dioxuscut-renderer` (`cargo clippy -p dioxuscut-renderer`)
-- **Tests added/modified**: 4 unit tests in `encode.rs` (`test_build_ffmpeg_args_default`, `test_build_ffmpeg_args_with_resolution`, `test_cleanup_frames`, `test_encode_mp4_synthetic_frames`).
+- **Build/test result**: Untested
+- **Lint status**: Untested
+- **Tests added/modified**: TBD
 
 ## Loaded Skills
-- None
+- None requested specifically
 
 ## Key Decisions Made
-- `encode_mp4` executes `ffmpeg` CLI with exact parameters required (`-y`, `-framerate`, `-i`, `-c:v libx264`, `-crf`, `-preset`, `-pix_fmt`, optional `-s <w>x<h>`, `-vf scale=trunc(iw/2)*2:trunc(ih/2)*2`, `-movflags`).
-- Captured `stderr` output from FFmpeg process is logged with `tracing::info!` on success and `tracing::error!` on failure.
-- `cleanup_frames` is exposed publicly and integrated into `EncodeConfig.cleanup_after_encode`.
-- All functions exposed in `crates/renderer/src/lib.rs`.
+- Starting task analysis and reading authoritative files.
 
 ## Artifact Index
-- `/Users/sjkim1127/Dioxuscut/.agents/teamwork_preview_worker_m3/ORIGINAL_REQUEST.md` — Original user request
-- `/Users/sjkim1127/Dioxuscut/.agents/teamwork_preview_worker_m3/BRIEFING.md` — Briefing document
-- `/Users/sjkim1127/Dioxuscut/.agents/teamwork_preview_worker_m3/progress.md` — Progress tracker
-- `/Users/sjkim1127/Dioxuscut/.agents/teamwork_preview_worker_m3/handoff.md` — Handoff report
+- `.agents/teamwork_preview_worker_m3/DISPATCH.md` — Task instructions
+- `.agents/teamwork_preview_worker_m3/progress.md` — Progress tracker
