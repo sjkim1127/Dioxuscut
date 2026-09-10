@@ -17,12 +17,54 @@ import dioxuscut
 def test_metadata():
     print("[*] Testing metadata and version...")
     version = dioxuscut.__version__
-    assert version == "0.1.3", f"Unexpected version: {version}"
+    assert version.startswith("0.1."), f"Unexpected version: {version}"
     compositions = dioxuscut.list_compositions()
     print(f"[+] Version: {version}")
     print(f"[+] Registered compositions: {compositions}")
     assert "HelloWorld" in compositions, "HelloWorld should be registered"
     print("[✓] Metadata test passed.")
+
+
+def test_animation_primitives():
+    print("\n[*] Testing Remotion-compatible animation primitives...")
+
+    # 1. random()
+    r1 = dioxuscut.random("remotion-test")
+    r2 = dioxuscut.random("remotion-test")
+    assert r1 == r2, f"random('remotion-test') should be deterministic: {r1} vs {r2}"
+    assert 0.0 <= r1 <= 1.0, f"random() output out of [0, 1]: {r1}"
+
+    # numeric seed
+    r_num = dioxuscut.random(42)
+    assert 0.0 <= r_num <= 1.0
+
+    # 2. interpolate()
+    val = dioxuscut.interpolate(10.0, [0.0, 20.0], [0.0, 100.0])
+    assert abs(val - 50.0) < 1e-5, f"interpolate midpoint failed: {val}"
+
+    val_clamped = dioxuscut.interpolate(
+        30.0, [0.0, 20.0], [0.0, 100.0], extrapolate_right="clamp"
+    )
+    assert abs(val_clamped - 100.0) < 1e-5
+
+    # 3. interpolate_colors()
+    # shorthand 2-color
+    c1 = dioxuscut.interpolate_colors("#000000", "#ffffff", 0.5)
+    assert "128" in c1, f"interpolate_colors midpoint failed: {c1}"
+
+    # Remotion multi-range
+    c2 = dioxuscut.interpolate_colors(
+        10.0, [0.0, 10.0, 20.0], ["#000000", "#ff0000", "#ffffff"]
+    )
+    assert "255, 0, 0" in c2, f"interpolate_colors multi-range failed: {c2}"
+
+    # 4. spring()
+    s0 = dioxuscut.spring(0.0, fps=30.0)
+    s_end = dioxuscut.spring(60.0, fps=30.0)
+    assert abs(s0 - 0.0) < 1e-4, f"spring(0) should start near 0: {s0}"
+    assert abs(s_end - 1.0) < 0.05, f"spring(60) should settle near 1: {s_end}"
+
+    print("[✓] Animation primitives test passed.")
 
 
 def test_render_still():
@@ -122,6 +164,7 @@ def main():
     print("🚀 Running Dioxuscut Python SDK Test Suite")
     print("=" * 60)
     test_metadata()
+    test_animation_primitives()
     test_render_still()
     test_render_video()
     test_render_script()

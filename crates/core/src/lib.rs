@@ -21,8 +21,10 @@ pub mod absolute_fill;
 pub mod composition;
 pub mod freeze;
 pub mod hooks;
+pub mod loop_component;
 pub mod scene;
 pub mod sequence;
+pub mod series;
 pub mod timeline;
 pub mod types;
 
@@ -31,8 +33,10 @@ pub use absolute_fill::AbsoluteFill;
 pub use composition::{Composition, CompositionProps};
 pub use freeze::Freeze;
 pub use hooks::{use_current_frame, use_video_config};
+pub use loop_component::{Loop, LoopProps};
 pub use scene::SceneAbsoluteFill;
-pub use sequence::{Sequence, SequenceProps};
+pub use sequence::{Sequence, SequenceLayout, SequenceProps};
+pub use series::{Series, SeriesCoordinator, SeriesProps, SeriesSequence, SeriesSequenceProps};
 pub use timeline::context::{TimelineContext, VideoConfigContext};
 pub use types::VideoConfig;
 
@@ -43,18 +47,18 @@ pub use dioxuscut_rasterizer as rasterizer;
 
 // Core animation primitives
 pub use dioxuscut_animation::{
-    bezier, interpolate, interpolate_colors, interpolate_styles, make_transform, matrix, matrix3d,
-    measure_spring, perspective, rotate, rotate3d, rotate_x, rotate_y, rotate_z, scale, scale3d,
-    scale_x, scale_y, scale_z, skew, skew_x, skew_y, spring, spring_with_options, translate,
-    translate3d, translate_x, translate_y, translate_z, EasingFn, ExtrapolateType,
-    InterpolateOptions, SpringConfig, SpringError, SpringOptions, StyleMap, StyleValue,
-    TransformOp,
+    bezier, interpolate, interpolate_colors, interpolate_colors_range, interpolate_styles,
+    make_transform, matrix, matrix3d, measure_spring, perspective, random, rotate, rotate3d,
+    rotate_x, rotate_y, rotate_z, scale, scale3d, scale_x, scale_y, scale_z, skew, skew_x, skew_y,
+    spring, spring_with_options, translate, translate3d, translate_x, translate_y, translate_z,
+    EasingFn, ExtrapolateType, InterpolateOptions, RandomSeed, SpringConfig, SpringError,
+    SpringOptions, StyleMap, StyleValue, TransformOp,
 };
 
 // Composition primitives & emitters
 pub use dioxuscut_composition::{
     CompositionError, NativeComposition, NativeCompositionContext, SceneEmitter, SceneFrameContext,
-    SceneLoop, SceneSequence, SceneStack, SceneTransitionSeries,
+    SceneLoop, SceneSequence, SceneSeries, SceneSeriesEntry, SceneStack, SceneTransitionSeries,
 };
 
 // Typography, layout & rasterizer primitives

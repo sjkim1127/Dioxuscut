@@ -508,6 +508,49 @@ fn register_scene_api(engine: &mut Engine) {
             output_start + (output_end - output_start) * t
         },
     );
+    engine.register_fn(
+        "interpolate_colors",
+        |from: ImmutableString, to: ImmutableString, t: FLOAT| -> ImmutableString {
+            dioxuscut_animation::interpolate_colors(from.as_str(), to.as_str(), t as f64).into()
+        },
+    );
+    engine.register_fn("random", |seed: ImmutableString| -> FLOAT {
+        dioxuscut_animation::random(seed.as_str()) as FLOAT
+    });
+    engine.register_fn("random", |seed: INT| -> FLOAT {
+        dioxuscut_animation::random(seed as f64) as FLOAT
+    });
+    engine.register_fn("random", |seed: FLOAT| -> FLOAT {
+        dioxuscut_animation::random(seed as f64) as FLOAT
+    });
+    engine.register_fn("spring", |frame: FLOAT, fps: FLOAT| -> FLOAT {
+        let config = dioxuscut_animation::SpringConfig::default();
+        dioxuscut_animation::spring_with_options(
+            frame as f64,
+            fps as f64,
+            config,
+            dioxuscut_animation::SpringOptions::default(),
+        )
+        .unwrap_or(1.0) as FLOAT
+    });
+    engine.register_fn(
+        "spring",
+        |frame: FLOAT, fps: FLOAT, damping: FLOAT, mass: FLOAT, stiffness: FLOAT| -> FLOAT {
+            let config = dioxuscut_animation::SpringConfig {
+                damping: damping as f64,
+                mass: mass as f64,
+                stiffness: stiffness as f64,
+                overshoot_clamping: false,
+            };
+            dioxuscut_animation::spring_with_options(
+                frame as f64,
+                fps as f64,
+                config,
+                dioxuscut_animation::SpringOptions::default(),
+            )
+            .unwrap_or(1.0) as FLOAT
+        },
+    );
 }
 
 fn context_map(frame: u32, context: NativeCompositionContext) -> Map {
@@ -576,9 +619,9 @@ fn validate_media_source(value: &str) -> RhaiResult<()> {
 }
 
 fn parse_color(value: &str) -> RhaiResult<Color> {
-    Color::from_hex(value).ok_or_else(|| {
+    Color::from_css(value).ok_or_else(|| {
         runtime_error(format!(
-            "invalid color '{value}'; expected #rrggbb or #rrggbbaa"
+            "invalid color '{value}'; expected CSS color (#rrggbb, #rrggbbaa, rgba(...), or name)"
         ))
     })
 }
@@ -812,5 +855,32 @@ mod tests {
             error.to_string().contains("Module not found"),
             "unexpected import error: {error}"
         );
+    }
+
+    #[test]
+    fn script_uses_animation_primitives() {
+        let script = r##"
+            fn render(ctx, props) {
+                let rnd = random("seed-42");
+                let col = interpolate_colors("#000000", "#ffffff", 0.5);
+                let sp = spring(ctx.frame.to_float(), ctx.fps);
+                let output = scene();
+                output.rect(rnd * 100.0, sp * 50.0, 200.0, 100.0, col);
+                output
+            }
+        "##;
+        let composition = RhaiComposition::from_source("anim", script).unwrap();
+        let prepared = composition
+            .prepare(&serde_json::json!({}), context())
+            .unwrap();
+        let scene = prepared.render(15).unwrap();
+        assert_eq!(scene.nodes.len(), 1);
+        if let SceneNode::Rect { fill, .. } = &scene.nodes[0] {
+            assert_eq!(fill.r, 128);
+            assert_eq!(fill.g, 128);
+            assert_eq!(fill.b, 128);
+        } else {
+            panic!("Expected Rect node");
+        }
     }
 }

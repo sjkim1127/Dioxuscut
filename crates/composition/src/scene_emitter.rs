@@ -173,6 +173,77 @@ impl<E: SceneEmitter> SceneEmitter for SceneSequence<E> {
     }
 }
 
+/// An entry inside a [`SceneSeries`].
+pub struct SceneSeriesEntry<E> {
+    pub duration_in_frames: u32,
+    pub offset: i32,
+    pub emitter: E,
+}
+
+/// Native equivalent of Remotion's `<Series>`, chaining sub-emitters sequentially in time.
+pub struct SceneSeries<E> {
+    pub entries: Vec<SceneSeriesEntry<E>>,
+}
+
+impl<E> Default for SceneSeries<E> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<E> SceneSeries<E> {
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+
+    pub fn sequence(mut self, duration_in_frames: u32, emitter: E) -> Self {
+        self.entries.push(SceneSeriesEntry {
+            duration_in_frames,
+            offset: 0,
+            emitter,
+        });
+        self
+    }
+
+    pub fn sequence_with_offset(
+        mut self,
+        duration_in_frames: u32,
+        offset: i32,
+        emitter: E,
+    ) -> Self {
+        self.entries.push(SceneSeriesEntry {
+            duration_in_frames,
+            offset,
+            emitter,
+        });
+        self
+    }
+}
+
+impl<E: SceneEmitter> SceneEmitter for SceneSeries<E> {
+    fn emit(
+        &self,
+        context: SceneFrameContext,
+        props: &Value,
+        scene: &mut Scene,
+    ) -> Result<(), CompositionError> {
+        let mut current_start: i64 = 0;
+        for entry in &self.entries {
+            let from = (current_start + entry.offset as i64).max(0) as u32;
+            let end = from.saturating_add(entry.duration_in_frames);
+            if context.frame >= from && context.frame < end {
+                entry
+                    .emitter
+                    .emit(context.with_local_frame(context.frame - from), props, scene)?;
+            }
+            current_start = from as i64 + entry.duration_in_frames as i64;
+        }
+        Ok(())
+    }
+}
+
 /// Native equivalent of `<Freeze>`.
 pub struct SceneFreeze<E> {
     pub frame: u32,

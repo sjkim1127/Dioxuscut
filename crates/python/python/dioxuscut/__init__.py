@@ -9,16 +9,28 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 # Import native PyO3 module
-from ._dioxuscut import get_version, list_compositions, render_native
+from ._dioxuscut import (
+    get_version,
+    interpolate,
+    interpolate_colors,
+    list_compositions,
+    random,
+    render_native,
+    spring,
+)
 
 __version__ = get_version()
 __all__ = [
     "__version__",
     "Composition",
+    "interpolate",
+    "interpolate_colors",
     "list_compositions",
+    "random",
     "render",
     "render_script",
     "render_still",
+    "spring",
 ]
 
 

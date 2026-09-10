@@ -159,11 +159,154 @@ fn render_native(
     result
 }
 
+/// Deterministic pseudo-random number generator matching Remotion's random(seed).
+#[pyfunction]
+fn random(seed: &Bound<'_, PyAny>) -> PyResult<f64> {
+    if let Ok(s) = seed.extract::<String>() {
+        Ok(dioxuscut_animation::random(s))
+    } else if let Ok(n) = seed.extract::<f64>() {
+        Ok(dioxuscut_animation::random(n))
+    } else if let Ok(i) = seed.extract::<i64>() {
+        Ok(dioxuscut_animation::random(i as f64))
+    } else {
+        Err(PyValueError::new_err(
+            "random() seed must be a string or number",
+        ))
+    }
+}
+
+/// Map an input value from an input range to an output range, matching Remotion interpolate().
+#[pyfunction]
+#[pyo3(signature = (
+    input,
+    input_range,
+    output_range,
+    extrapolate_left = "extend",
+    extrapolate_right = "extend"
+))]
+fn interpolate(
+    input: f64,
+    input_range: Vec<f64>,
+    output_range: Vec<f64>,
+    extrapolate_left: &str,
+    extrapolate_right: &str,
+) -> PyResult<f64> {
+    let parse_extrapolate = |s: &str| match s.to_ascii_lowercase().as_str() {
+        "extend" => Ok(dioxuscut_animation::ExtrapolateType::Extend),
+        "identity" => Ok(dioxuscut_animation::ExtrapolateType::Identity),
+        "clamp" => Ok(dioxuscut_animation::ExtrapolateType::Clamp),
+        other => Err(PyValueError::new_err(format!(
+            "Unsupported extrapolate '{other}'. Supported: extend, identity, clamp"
+        ))),
+    };
+
+    let left = parse_extrapolate(extrapolate_left)?;
+    let right = parse_extrapolate(extrapolate_right)?;
+
+    let opts = dioxuscut_animation::InterpolateOptions {
+        extrapolate_left: left,
+        extrapolate_right: right,
+        easing: None,
+    };
+
+    if input_range.len() != output_range.len() {
+        return Err(PyValueError::new_err(
+            "input_range and output_range must have the same length",
+        ));
+    }
+    if input_range.len() < 2 {
+        return Err(PyValueError::new_err(
+            "input_range must have at least 2 elements",
+        ));
+    }
+
+    Ok(dioxuscut_animation::interpolate(
+        input,
+        &input_range,
+        &output_range,
+        opts,
+    ))
+}
+
+/// Interpolate colors, supporting both:
+/// 1) Remotion multi-range: `interpolate_colors(input, input_range, output_range)`
+/// 2) 2-color shorthand: `interpolate_colors(from, to, progress)`
+#[pyfunction]
+fn interpolate_colors(
+    arg1: &Bound<'_, PyAny>,
+    arg2: &Bound<'_, PyAny>,
+    arg3: &Bound<'_, PyAny>,
+) -> PyResult<String> {
+    if let Ok(input) = arg1.extract::<f64>() {
+        if let (Ok(in_range), Ok(out_range)) =
+            (arg2.extract::<Vec<f64>>(), arg3.extract::<Vec<String>>())
+        {
+            let str_slices: Vec<&str> = out_range.iter().map(|s| s.as_str()).collect();
+            return Ok(dioxuscut_animation::interpolate_colors_range(
+                input,
+                &in_range,
+                &str_slices,
+            ));
+        }
+    }
+
+    if let (Ok(from), Ok(to), Ok(progress)) = (
+        arg1.extract::<String>(),
+        arg2.extract::<String>(),
+        arg3.extract::<f64>(),
+    ) {
+        return Ok(dioxuscut_animation::interpolate_colors(
+            &from, &to, progress,
+        ));
+    }
+
+    Err(PyValueError::new_err(
+        "interpolate_colors requires either (input: float, input_range: list[float], output_range: list[str]) or (from_color: str, to_color: str, progress: float)",
+    ))
+}
+
+/// Physics-based spring oscillation curve, matching Remotion spring().
+#[pyfunction]
+#[pyo3(signature = (
+    frame,
+    fps = 30.0,
+    damping = 10.0,
+    mass = 1.0,
+    stiffness = 100.0,
+    overshoot_clamping = false
+))]
+fn spring(
+    frame: f64,
+    fps: f64,
+    damping: f64,
+    mass: f64,
+    stiffness: f64,
+    overshoot_clamping: bool,
+) -> PyResult<f64> {
+    let config = dioxuscut_animation::SpringConfig {
+        damping,
+        mass,
+        stiffness,
+        overshoot_clamping,
+    };
+    dioxuscut_animation::spring_with_options(
+        frame,
+        fps,
+        config,
+        dioxuscut_animation::SpringOptions::default(),
+    )
+    .map_err(|e| PyValueError::new_err(format!("Spring error: {e}")))
+}
+
 /// Python module initialization.
 #[pymodule]
 fn _dioxuscut(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(get_version, m)?)?;
     m.add_function(wrap_pyfunction!(list_compositions, m)?)?;
     m.add_function(wrap_pyfunction!(render_native, m)?)?;
+    m.add_function(wrap_pyfunction!(random, m)?)?;
+    m.add_function(wrap_pyfunction!(interpolate, m)?)?;
+    m.add_function(wrap_pyfunction!(interpolate_colors, m)?)?;
+    m.add_function(wrap_pyfunction!(spring, m)?)?;
     Ok(())
 }

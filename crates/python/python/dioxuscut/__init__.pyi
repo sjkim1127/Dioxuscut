@@ -1,7 +1,44 @@
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, overload
 
 __version__: str
+
+def random(seed: Union[str, int, float]) -> float: ...
+
+def interpolate(
+    input: float,
+    input_range: List[float],
+    output_range: List[float],
+    extrapolate_left: str = "extend",
+    extrapolate_right: str = "extend",
+) -> float: ...
+
+@overload
+def interpolate_colors(
+    input: float,
+    input_range: List[float],
+    output_range: List[str],
+) -> str: ...
+
+@overload
+def interpolate_colors(
+    from_color: str,
+    to_color: str,
+    progress: float,
+) -> str: ...
+
+def interpolate_colors(
+    *args: Any,
+) -> str: ...
+
+def spring(
+    frame: float,
+    fps: float = 30.0,
+    damping: float = 10.0,
+    mass: float = 1.0,
+    stiffness: float = 100.0,
+    overshoot_clamping: bool = False,
+) -> float: ...
 
 def list_compositions() -> List[str]: ...
 

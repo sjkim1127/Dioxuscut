@@ -12,12 +12,14 @@
 pub mod easing;
 pub mod interpolate;
 pub mod interpolate_colors;
+pub mod random;
 pub mod spring;
 pub mod transform;
 
 pub use easing::{bezier, EasingFn};
 pub use interpolate::{interpolate, ExtrapolateType, InterpolateOptions};
-pub use interpolate_colors::interpolate_colors;
+pub use interpolate_colors::{interpolate_colors, interpolate_colors_range};
+pub use random::{random, RandomSeed};
 pub use spring::{
     measure_spring, spring, spring_with_options, SpringConfig, SpringError, SpringOptions,
 };
