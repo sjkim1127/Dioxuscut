@@ -363,6 +363,8 @@ class ShortsVideo:
         codec: str = "h264",
         crf: int = 18,
         preset: str = "fast",
+        sandbox_roots: Optional[List[Union[str, Path]]] = None,
+        permissive: bool = False,
     ) -> None:
         """
         Renders the complete short-form video to an output MP4/WebM file.
@@ -374,6 +376,23 @@ class ShortsVideo:
         temp_dir = Path(std_env_temp_dir())
         script_file = temp_dir / f"shorts_{output_path.stem}_{id(self)}.rhai"
         script_file.write_text(rhai_code, encoding="utf-8")
+
+        # Automatically collect roots for declared media assets
+        roots: List[str] = []
+        if sandbox_roots:
+            roots.extend(str(Path(r).resolve()) for r in sandbox_roots)
+        if self.bg_video:
+            roots.append(str(Path(self.bg_video).resolve().parent))
+        if self.bg_image:
+            roots.append(str(Path(self.bg_image).resolve().parent))
+        for track in self.audio_tracks:
+            roots.append(str(Path(track.src).resolve().parent))
+        for viz in self.visualizers:
+            roots.append(str(Path(viz.src).resolve().parent))
+        for lottie in self.lottie_stickers:
+            roots.append(str(Path(lottie.src).resolve().parent))
+        roots.append(str(output_path.parent))
+        roots.append(str(temp_dir.resolve()))
 
         try:
             render_native(
@@ -392,6 +411,8 @@ class ShortsVideo:
                 crf=crf,
                 preset=preset,
                 hw_accel=hw_accel,
+                sandbox_roots=roots if roots else None,
+                permissive=permissive,
             )
         finally:
             if script_file.exists():
