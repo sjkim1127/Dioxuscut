@@ -425,29 +425,19 @@ impl GpuContext {
     }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Per-resolution GPU resource pool
-// ────────────────────────────────────────────────────────────────────────────
+const RING_BUFFER_SIZE: usize = 2;
 
-/// Cached GPU resources for a specific frame resolution.
-///
-/// Re-creating textures and readback buffers on every frame is expensive.
-/// `GpuFrameResources` keeps one set per `(width, height)` pair alive for the
-/// lifetime of the backend, so subsequent calls with the same resolution reuse
-/// the GPU allocations.
-struct GpuFrameResources {
-    /// Resolve target (1x MSAA, COPY_SRC). Pixels are read back from here.
+/// A single buffered set of GPU render resources (MSAA texture, resolve target, readback buffer).
+struct GpuFrameSlot {
     texture: wgpu::Texture,
     texture_view: wgpu::TextureView,
-    /// MSAA intermediate texture (4x). Fragment writes land here. Held alive for msaa_view.
     _msaa_texture: wgpu::Texture,
     msaa_view: wgpu::TextureView,
-    /// CPU-mapped readback buffer (padded to 256-byte row alignment).
     readback: wgpu::Buffer,
     bytes_per_row: u32,
 }
 
-impl GpuFrameResources {
+impl GpuFrameSlot {
     fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
         let bytes_per_row = align_to_256(width * 4);
 
@@ -501,6 +491,34 @@ impl GpuFrameResources {
     }
 }
 
+/// Double-buffered GPU ring buffer per resolution.
+///
+/// Keeps two independent `GpuFrameSlot` instances alive so that the GPU can
+/// render frame N into slot 1 while the CPU reads back frame N-1 from slot 0.
+struct GpuFrameResources {
+    slots: [GpuFrameSlot; RING_BUFFER_SIZE],
+    active_index: usize,
+}
+
+impl GpuFrameResources {
+    fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
+        Self {
+            slots: [
+                GpuFrameSlot::new(device, width, height),
+                GpuFrameSlot::new(device, width, height),
+            ],
+            active_index: 0,
+        }
+    }
+}
+
+struct InFlight {
+    frame_idx: u32,
+    slot_idx: usize,
+    submission_index: wgpu::SubmissionIndex,
+    rx: std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Backend
 // ────────────────────────────────────────────────────────────────────────────
@@ -530,35 +548,24 @@ impl WgpuBackend {
             fallback: TinySkiaBackend::new(),
         })
     }
-}
 
-impl RasterizerBackend for WgpuBackend {
-    fn render_frame(&self, scene: &Scene, config: &FrameConfig) -> Result<RgbaImage, RasterError> {
-        let Some(commands) = compile_scene(scene) else {
-            return self.fallback.render_frame(scene, config);
-        };
-
-        if config.width > self.ctx.max_texture_dimension_2d
-            || config.height > self.ctx.max_texture_dimension_2d
-        {
-            return self.fallback.render_frame(scene, config);
-        }
-
-        let width = config.width;
-        let height = config.height;
+    fn submit_frame_to_slot(
+        &self,
+        commands: &[DrawCommand],
+        width: u32,
+        height: u32,
+        slot: &GpuFrameSlot,
+    ) -> Result<
+        (
+            wgpu::SubmissionIndex,
+            std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
+        ),
+        RasterError,
+    > {
         let device = &self.ctx.device;
         let queue = &self.ctx.queue;
 
-        // ── Obtain or create per-resolution GPU resources ────────────────────
-        let mut pool = self
-            .frame_resources
-            .lock()
-            .map_err(|_| RasterError::Init("GPU resource pool mutex poisoned".into()))?;
-        let res = pool
-            .entry((width, height))
-            .or_insert_with(|| GpuFrameResources::new(device, width, height));
-
-        // ── Globals uniform (resolution) ─────────────────────────────────────
+        // Globals uniform
         let globals_data: [f32; 4] = [width as f32, height as f32, 0.0, 0.0];
         let globals_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("globals_buf"),
@@ -574,7 +581,6 @@ impl RasterizerBackend for WgpuBackend {
             }],
         });
 
-        // ── Render all scene nodes ───────────────────────────────────────────
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("frame_encoder"),
         });
@@ -582,7 +588,6 @@ impl RasterizerBackend for WgpuBackend {
         let all_instances: Vec<GpuInstance> = commands.iter().map(|c| *c.instance()).collect();
 
         if !all_instances.is_empty() {
-            // Upload all instances in a single storage buffer.
             let instance_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("instances_storage_buf"),
                 contents: bytemuck_cast(&all_instances),
@@ -597,7 +602,6 @@ impl RasterizerBackend for WgpuBackend {
                 }],
             });
 
-            // Pre-allocate buffers for Mesh commands so their lifetimes encompass the pass.
             let mesh_buffers: Vec<Option<(wgpu::Buffer, wgpu::Buffer)>> = commands
                 .iter()
                 .map(|cmd| match cmd {
@@ -620,12 +624,11 @@ impl RasterizerBackend for WgpuBackend {
                 })
                 .collect();
 
-            // Single render pass for the entire frame!
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("frame_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &res.msaa_view,
-                    resolve_target: Some(&res.texture_view),
+                    view: &slot.msaa_view,
+                    resolve_target: Some(&slot.texture_view),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                         store: wgpu::StoreOp::Store,
@@ -637,7 +640,6 @@ impl RasterizerBackend for WgpuBackend {
             pass.set_bind_group(0, &globals_bg, &[]);
             pass.set_bind_group(1, &instance_bg, &[]);
 
-            // Batch consecutive Analytic commands, and dispatch Meshes individually.
             let mut i = 0;
             while i < commands.len() {
                 match &commands[i] {
@@ -662,12 +664,11 @@ impl RasterizerBackend for WgpuBackend {
                 }
             }
         } else {
-            // Clear pass for empty scene
             let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("clear_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &res.msaa_view,
-                    resolve_target: Some(&res.texture_view),
+                    view: &slot.msaa_view,
+                    resolve_target: Some(&slot.texture_view),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                         store: wgpu::StoreOp::Store,
@@ -677,14 +678,13 @@ impl RasterizerBackend for WgpuBackend {
             });
         }
 
-        // ── Copy resolved texture → readback buffer ──────────────────────────
         encoder.copy_texture_to_buffer(
-            res.texture.as_image_copy(),
+            slot.texture.as_image_copy(),
             wgpu::ImageCopyBuffer {
-                buffer: &res.readback,
+                buffer: &slot.readback,
                 layout: wgpu::ImageDataLayout {
                     offset: 0,
-                    bytes_per_row: Some(res.bytes_per_row),
+                    bytes_per_row: Some(slot.bytes_per_row),
                     rows_per_image: Some(height),
                 },
             },
@@ -695,40 +695,210 @@ impl RasterizerBackend for WgpuBackend {
             },
         );
 
-        queue.submit([encoder.finish()]);
+        let submission_index = queue.submit([encoder.finish()]);
 
-        // ── Map, read, and unmap ─────────────────────────────────────────────
-        let slice = res.readback.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |result| {
-            let _ = tx.send(result);
-        });
-        device.poll(wgpu::Maintain::Wait);
-        rx.recv()
+        slot.readback
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = tx.send(result);
+            });
+
+        Ok((submission_index, rx))
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn drain_slot(
+        &self,
+        in_flight: InFlight,
+        res: &GpuFrameResources,
+        width: u32,
+        height: u32,
+        scratch: &mut Vec<u8>,
+        consume_fn: &mut dyn FnMut(u32, &[u8]) -> Result<(), RasterError>,
+    ) -> Result<(), RasterError> {
+        self.ctx
+            .device
+            .poll(wgpu::Maintain::wait_for(in_flight.submission_index));
+        in_flight
+            .rx
+            .recv()
             .map_err(|_| RasterError::Frame {
-                frame: config.frame,
+                frame: in_flight.frame_idx,
                 reason: "GPU readback channel error".into(),
             })?
             .map_err(|e| RasterError::Frame {
-                frame: config.frame,
+                frame: in_flight.frame_idx,
                 reason: format!("GPU map error: {e:?}"),
             })?;
 
-        let bytes_per_row = res.bytes_per_row;
+        let slot = &res.slots[in_flight.slot_idx];
+        let bytes_per_row = slot.bytes_per_row;
+        let expected_row_bytes = (width * 4) as usize;
+        let total_bytes = expected_row_bytes * height as usize;
+        let slice = slot.readback.slice(..);
         let data = slice.get_mapped_range();
-        // Strip wgpu's 256-byte row padding.
-        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
-        for row in 0..height {
-            let start = (row * bytes_per_row) as usize;
-            let end = start + (width * 4) as usize;
-            pixels.extend_from_slice(&data[start..end]);
-        }
+
+        let res = if bytes_per_row as usize == expected_row_bytes {
+            consume_fn(in_flight.frame_idx, &data[..total_bytes])
+        } else {
+            scratch.clear();
+            scratch.reserve_exact(total_bytes);
+            for row in 0..height {
+                let start = (row * bytes_per_row) as usize;
+                let end = start + expected_row_bytes;
+                scratch.extend_from_slice(&data[start..end]);
+            }
+            consume_fn(in_flight.frame_idx, scratch)
+        };
         drop(data);
-        res.readback.unmap();
+        slot.readback.unmap();
+
+        res
+    }
+}
+
+impl RasterizerBackend for WgpuBackend {
+    fn render_frame(&self, scene: &Scene, config: &FrameConfig) -> Result<RgbaImage, RasterError> {
+        let Some(commands) = compile_scene(scene) else {
+            return self.fallback.render_frame(scene, config);
+        };
+
+        if config.width > self.ctx.max_texture_dimension_2d
+            || config.height > self.ctx.max_texture_dimension_2d
+        {
+            return self.fallback.render_frame(scene, config);
+        }
+
+        let width = config.width;
+        let height = config.height;
+
+        let mut pool = self
+            .frame_resources
+            .lock()
+            .map_err(|_| RasterError::Init("GPU resource pool mutex poisoned".into()))?;
+        let res = pool
+            .entry((width, height))
+            .or_insert_with(|| GpuFrameResources::new(&self.ctx.device, width, height));
+
+        let slot_idx = res.active_index % RING_BUFFER_SIZE;
+        res.active_index = res.active_index.wrapping_add(1);
+
+        let (submission_index, rx) =
+            self.submit_frame_to_slot(&commands, width, height, &res.slots[slot_idx])?;
+
+        let mut out_pixels = None;
+        let mut scratch = Vec::new();
+        self.drain_slot(
+            InFlight {
+                frame_idx: config.frame,
+                slot_idx,
+                submission_index,
+                rx,
+            },
+            res,
+            width,
+            height,
+            &mut scratch,
+            &mut |_frame, pixels| {
+                out_pixels = Some(pixels.to_vec());
+                Ok(())
+            },
+        )?;
+
+        let pixels = out_pixels.ok_or_else(|| {
+            RasterError::ImageEncode("Failed to assemble RgbaImage from GPU readback".into())
+        })?;
 
         RgbaImage::from_raw(width, height, pixels).ok_or_else(|| {
             RasterError::ImageEncode("Failed to assemble RgbaImage from GPU readback".into())
         })
+    }
+
+    fn supports_streaming(&self) -> bool {
+        true
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn render_stream(
+        &self,
+        total: u32,
+        scene_fn: &(dyn Fn(u32) -> Result<Scene, RasterError> + Sync),
+        config_fn: &(dyn Fn(u32) -> FrameConfig + Sync),
+        consume_fn: &mut dyn FnMut(u32, &[u8]) -> Result<(), RasterError>,
+    ) -> Result<(), RasterError> {
+        if total == 0 {
+            return Ok(());
+        }
+
+        let first_cfg = config_fn(0);
+        let width = first_cfg.width;
+        let height = first_cfg.height;
+
+        if width > self.ctx.max_texture_dimension_2d || height > self.ctx.max_texture_dimension_2d {
+            return self
+                .fallback
+                .render_stream(total, scene_fn, config_fn, consume_fn);
+        }
+
+        let mut pool = self
+            .frame_resources
+            .lock()
+            .map_err(|_| RasterError::Init("GPU resource pool mutex poisoned".into()))?;
+        let res = pool
+            .entry((width, height))
+            .or_insert_with(|| GpuFrameResources::new(&self.ctx.device, width, height));
+
+        let mut in_flight: Option<InFlight> = None;
+        let mut scratch = Vec::new();
+
+        for frame in 0..total {
+            let scene = scene_fn(frame)?;
+            let cfg = config_fn(frame);
+
+            let Some(commands) = compile_scene(&scene) else {
+                if let Some(prev) = in_flight.take() {
+                    self.drain_slot(prev, res, width, height, &mut scratch, consume_fn)?;
+                }
+                let img = self.fallback.render_frame(&scene, &cfg)?;
+                consume_fn(frame, img.as_raw())?;
+                continue;
+            };
+
+            let slot_idx = (frame as usize) % RING_BUFFER_SIZE;
+
+            // If the target slot is currently occupied by an in-flight frame, drain it now
+            if let Some(prev) = in_flight.take() {
+                if prev.slot_idx == slot_idx {
+                    self.drain_slot(prev, res, width, height, &mut scratch, consume_fn)?;
+                } else {
+                    in_flight = Some(prev);
+                }
+            }
+
+            // Submit this frame to GPU
+            let (submission_index, rx) =
+                self.submit_frame_to_slot(&commands, width, height, &res.slots[slot_idx])?;
+
+            // Overlap: drain the previous frame while the newly submitted frame is being rendered on GPU
+            if let Some(prev) = in_flight.take() {
+                self.drain_slot(prev, res, width, height, &mut scratch, consume_fn)?;
+            }
+
+            in_flight = Some(InFlight {
+                frame_idx: frame,
+                slot_idx,
+                submission_index,
+                rx,
+            });
+        }
+
+        // Drain any remaining in-flight frame at the end of the stream
+        if let Some(prev) = in_flight.take() {
+            self.drain_slot(prev, res, width, height, &mut scratch, consume_fn)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -1343,5 +1513,73 @@ mod tests {
             mean_alpha_error < 8.0,
             "CPU/GPU mean alpha error was {mean_alpha_error}"
         );
+    }
+
+    #[test]
+    fn gpu_render_stream_pipelined_matches_render_frame() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping render_stream test");
+            return;
+        };
+
+        let width = 160;
+        let height = 90;
+        let total_frames = 5;
+
+        let make_scene = |frame: u32| {
+            let offset = frame as f32 * 10.0;
+            Scene {
+                nodes: vec![
+                    SceneNode::Rect {
+                        x: offset,
+                        y: 10.0,
+                        w: 40.0,
+                        h: 30.0,
+                        fill: Color::rgb(200, 50, 80),
+                        stroke: Some(Color::WHITE),
+                        stroke_width: 2.0,
+                        corner_radius: 4.0,
+                    },
+                    SceneNode::Circle {
+                        cx: 80.0,
+                        cy: 45.0 + offset * 0.5,
+                        r: 20.0,
+                        fill: Color::rgba(50, 150, 250, 180),
+                        stroke: None,
+                        stroke_width: 0.0,
+                    },
+                ],
+            }
+        };
+
+        // 1. Render sequentially using render_frame
+        let mut sequential_frames = Vec::new();
+        for f in 0..total_frames {
+            let scene = make_scene(f);
+            let cfg = FrameConfig::new(width, height, f, 30.0);
+            let img = gpu.render_frame(&scene, &cfg).expect("render_frame failed");
+            sequential_frames.push(img.into_raw());
+        }
+
+        // 2. Render pipelined stream using render_stream
+        let mut streamed_frames = Vec::new();
+        gpu.render_stream(
+            total_frames,
+            &|f| Ok(make_scene(f)),
+            &|f| FrameConfig::new(width, height, f, 30.0),
+            &mut |_f, rgba| {
+                streamed_frames.push(rgba.to_vec());
+                Ok(())
+            },
+        )
+        .expect("render_stream failed");
+
+        assert_eq!(streamed_frames.len(), total_frames as usize);
+        for f in 0..total_frames as usize {
+            assert_eq!(
+                streamed_frames[f], sequential_frames[f],
+                "Frame {f} rendered via render_stream does not match render_frame"
+            );
+        }
     }
 }

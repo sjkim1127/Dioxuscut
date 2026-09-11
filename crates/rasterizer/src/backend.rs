@@ -60,4 +60,24 @@ impl FrameConfig {
 pub trait RasterizerBackend: Send + Sync {
     /// Render a single `Scene` into an `RgbaImage`.
     fn render_frame(&self, scene: &Scene, config: &FrameConfig) -> Result<RgbaImage, RasterError>;
+
+    /// Whether this backend provides an internal pipelined streaming implementation
+    /// (e.g. GPU double-buffered ring buffers).
+    fn supports_streaming(&self) -> bool {
+        false
+    }
+
+    /// Render a sequence of frames in streaming fashion with internal pipelining.
+    #[allow(clippy::type_complexity)]
+    fn render_stream(
+        &self,
+        _total: u32,
+        _scene_fn: &(dyn Fn(u32) -> Result<Scene, RasterError> + Sync),
+        _config_fn: &(dyn Fn(u32) -> FrameConfig + Sync),
+        _consume_fn: &mut dyn FnMut(u32, &[u8]) -> Result<(), RasterError>,
+    ) -> Result<(), RasterError> {
+        Err(RasterError::Init(
+            "Streaming is not supported on this backend".into(),
+        ))
+    }
 }

@@ -518,52 +518,84 @@ where
         ));
     }
 
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(concurrency)
-        .build()
-        .map_err(|e| {
-            let _ = ffmpeg.kill();
-            let _ = ffmpeg.wait();
-            RasterError::Init(format!("Rayon pool error: {e}"))
-        })?;
-
     // ── 3. Keep a bounded window of renders ahead of the pipe writer ─────────
     let mut stdin = ffmpeg
         .stdin
         .take()
         .ok_or_else(|| RasterError::Init("Failed to open FFmpeg stdin".into()))?;
 
-    let render_result = stream_ordered_frames(
-        &pool,
-        total,
-        concurrency,
-        |frame| {
-            config.control.check(started)?;
-            let composition_frame = config.start_frame + frame; // validated above
-            let scene = scene_fn(composition_frame).map_err(|error| RasterError::Frame {
-                frame: composition_frame,
-                reason: error.to_string(),
+    let render_result = if backend.supports_streaming() {
+        backend.render_stream(
+            total,
+            &|frame| {
+                config.control.check(started)?;
+                let composition_frame = config.start_frame + frame;
+                scene_fn(composition_frame).map_err(|error| RasterError::Frame {
+                    frame: composition_frame,
+                    reason: error.to_string(),
+                })
+            },
+            &|frame| {
+                let composition_frame = config.start_frame + frame;
+                FrameConfig::new(width, height, composition_frame, fps)
+            },
+            &mut |frame, rgba| {
+                config.control.check(started)?;
+                stdin.write_all(rgba).map_err(|e| {
+                    RasterError::ImageEncode(format!("FFmpeg pipe write error: {e}"))
+                })?;
+                if let Some(callback) = &config.control.progress {
+                    callback(RenderProgress {
+                        completed_frames: frame + 1,
+                        total_frames: total,
+                        frame: config.start_frame + frame,
+                    });
+                }
+                Ok(())
+            },
+        )
+    } else {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(concurrency)
+            .build()
+            .map_err(|e| {
+                let _ = ffmpeg.kill();
+                let _ = ffmpeg.wait();
+                RasterError::Init(format!("Rayon pool error: {e}"))
             })?;
-            let frame_cfg = FrameConfig::new(width, height, composition_frame, fps);
-            let img = backend.render_frame(&scene, &frame_cfg)?;
-            config.control.check(started)?;
-            Ok(img.into_raw())
-        },
-        |frame, rgba| {
-            config.control.check(started)?;
-            stdin
-                .write_all(&rgba)
-                .map_err(|e| RasterError::ImageEncode(format!("FFmpeg pipe write error: {e}")))?;
-            if let Some(callback) = &config.control.progress {
-                callback(RenderProgress {
-                    completed_frames: frame + 1,
-                    total_frames: total,
-                    frame: config.start_frame + frame,
-                });
-            }
-            Ok(())
-        },
-    );
+
+        stream_ordered_frames(
+            &pool,
+            total,
+            concurrency,
+            |frame| {
+                config.control.check(started)?;
+                let composition_frame = config.start_frame + frame; // validated above
+                let scene = scene_fn(composition_frame).map_err(|error| RasterError::Frame {
+                    frame: composition_frame,
+                    reason: error.to_string(),
+                })?;
+                let frame_cfg = FrameConfig::new(width, height, composition_frame, fps);
+                let img = backend.render_frame(&scene, &frame_cfg)?;
+                config.control.check(started)?;
+                Ok(img.into_raw())
+            },
+            |frame, rgba| {
+                config.control.check(started)?;
+                stdin.write_all(&rgba).map_err(|e| {
+                    RasterError::ImageEncode(format!("FFmpeg pipe write error: {e}"))
+                })?;
+                if let Some(callback) = &config.control.progress {
+                    callback(RenderProgress {
+                        completed_frames: frame + 1,
+                        total_frames: total,
+                        frame: config.start_frame + frame,
+                    });
+                }
+                Ok(())
+            },
+        )
+    };
 
     if render_result.is_ok() {
         let _ = stdin.flush();

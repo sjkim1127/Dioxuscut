@@ -268,6 +268,49 @@ fn bench_gpu_resolutions(c: &mut Criterion) {
     group.finish();
 }
 
+#[cfg(feature = "gpu")]
+fn bench_gpu_streaming(c: &mut Criterion) {
+    use dioxuscut_rasterizer::wgpu_backend::WgpuBackend;
+
+    let backend = match WgpuBackend::new() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("GPU backend unavailable, skipping GPU streaming bench: {e}");
+            return;
+        }
+    };
+
+    let mut group = c.benchmark_group("gpu_streaming_throughput_1080p");
+    group.sample_size(15);
+
+    let frame_count = 10u32;
+    let scene = scene_grid(25, 14);
+
+    group.bench_function("sequential_render_frame_10_frames", |b| {
+        b.iter(|| {
+            for f in 0..frame_count {
+                let config = FrameConfig::new(1920, 1080, f, 30.0);
+                let _ = backend.render_frame(&scene, &config).unwrap();
+            }
+        })
+    });
+
+    group.bench_function("pipelined_render_stream_10_frames", |b| {
+        b.iter(|| {
+            backend
+                .render_stream(
+                    frame_count,
+                    &|_f| Ok(scene.clone()),
+                    &|f| FrameConfig::new(1920, 1080, f, 30.0),
+                    &mut |_f, _rgba| Ok(()),
+                )
+                .unwrap();
+        })
+    });
+
+    group.finish();
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Entry points
 // ─────────────────────────────────────────────────────────────────
@@ -281,7 +324,8 @@ criterion_group!(
     bench_cpu_scenes,
     bench_cpu_resolutions,
     bench_gpu_scenes,
-    bench_gpu_resolutions
+    bench_gpu_resolutions,
+    bench_gpu_streaming
 );
 
 criterion_main!(benches);

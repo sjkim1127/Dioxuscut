@@ -124,6 +124,23 @@ impl RasterizerBackend for TinySkiaBackend {
             RasterError::ImageEncode("Failed to build RgbaImage from pixel data".into())
         })
     }
+
+    #[allow(clippy::type_complexity)]
+    fn render_stream(
+        &self,
+        total: u32,
+        scene_fn: &(dyn Fn(u32) -> Result<Scene, RasterError> + Sync),
+        config_fn: &(dyn Fn(u32) -> FrameConfig + Sync),
+        consume_fn: &mut dyn FnMut(u32, &[u8]) -> Result<(), RasterError>,
+    ) -> Result<(), RasterError> {
+        for frame in 0..total {
+            let scene = scene_fn(frame)?;
+            let cfg = config_fn(frame);
+            let img = self.render_frame(&scene, &cfg)?;
+            consume_fn(frame, img.as_raw())?;
+        }
+        Ok(())
+    }
 }
 
 struct RenderResources<'a> {
