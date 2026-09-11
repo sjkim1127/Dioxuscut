@@ -8,7 +8,7 @@ use crate::composition::{
 };
 use dioxuscut_rasterizer::{
     layout_text_box, AudioTrack, Color, ImageFit, Scene, SceneNode, TextBox, TextHorizontalAlign,
-    TextOverflow, Transform2D,
+    TextOverflow, Transform2D, VisualizerStyle,
 };
 use rhai::module_resolvers::DummyModuleResolver;
 use rhai::{
@@ -300,6 +300,50 @@ impl SceneBuilder {
     }
 
     #[allow(clippy::too_many_arguments)]
+    fn audio_visualizer(
+        &mut self,
+        x: FLOAT,
+        y: FLOAT,
+        w: FLOAT,
+        h: FLOAT,
+        src: ImmutableString,
+        time: FLOAT,
+        color: ImmutableString,
+        style_type: ImmutableString,
+    ) -> RhaiResult<()> {
+        let style = match style_type.to_lowercase().as_str() {
+            "wave" => VisualizerStyle::Wave {
+                stroke_width: 3.0,
+                filled: true,
+            },
+            "radial" | "circle" => VisualizerStyle::Radial {
+                radius: (h.min(w) * 0.35) as f32,
+                bar_count: 48,
+                bar_length: (h.min(w) * 0.25) as f32,
+            },
+            _ => VisualizerStyle::Bars {
+                count: 32,
+                gap: 4.0,
+                radius: 2.0,
+                mirror: false,
+            },
+        };
+
+        self.scene.push(SceneNode::AudioVisualizer {
+            src: src.into_owned(),
+            x: finite_f32("x", x)?,
+            y: finite_f32("y", y)?,
+            width: non_negative_f32("width", w)?,
+            height: non_negative_f32("height", h)?,
+            color: Color::from_hex(&color).unwrap_or(Color::WHITE),
+            style,
+            time: time.max(0.0) as f64,
+            opacity: 1.0,
+        });
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn video_inner(
         &mut self,
         x: FLOAT,
@@ -357,8 +401,35 @@ impl SceneBuilder {
                 volume: f64::from(unit_f32("audio volume", volume)?),
                 playback_rate,
                 looped,
+                volume_keyframes: Vec::new(),
             },
         });
+        Ok(())
+    }
+
+    fn audio_simple(&mut self, src: ImmutableString, volume: FLOAT) -> RhaiResult<()> {
+        self.audio(src, 0.0, 0.0, 0.0, volume, 1.0, false)
+    }
+
+    fn audio_ducked(
+        &mut self,
+        src: ImmutableString,
+        volume: FLOAT,
+        keyframes: rhai::Array,
+    ) -> RhaiResult<()> {
+        validate_media_source(&src)?;
+        let mut kfs = Vec::new();
+        for item in keyframes {
+            if let Ok(arr) = item.into_typed_array::<FLOAT>() {
+                if arr.len() >= 2 {
+                    kfs.push((arr[0] as f64, arr[1] as f64));
+                }
+            }
+        }
+        let mut track = AudioTrack::new(src.into_owned());
+        track.volume = volume.clamp(0.0, 2.0) as f64;
+        track.volume_keyframes = kfs;
+        self.scene.push(SceneNode::Audio { track });
         Ok(())
     }
 
@@ -606,8 +677,11 @@ fn register_scene_api(engine: &mut Engine) {
     engine.register_fn("video", SceneBuilder::video);
     engine.register_fn("video", SceneBuilder::video_looped);
     engine.register_fn("audio", SceneBuilder::audio);
+    engine.register_fn("audio", SceneBuilder::audio_simple);
+    engine.register_fn("audio_ducked", SceneBuilder::audio_ducked);
     engine.register_fn("emoji", SceneBuilder::emoji);
     engine.register_fn("lottie", SceneBuilder::lottie);
+    engine.register_fn("audio_visualizer", SceneBuilder::audio_visualizer);
     engine.register_fn("group", SceneBuilder::group);
     engine.register_fn(
         "interpolate",

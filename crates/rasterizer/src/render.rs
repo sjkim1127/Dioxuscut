@@ -967,6 +967,41 @@ fn active_audio_tracks(config: &PipeConfig) -> Vec<&AudioTrack> {
         .collect()
 }
 
+fn build_volume_expression(base_volume: f64, keyframes: &[(f64, f64)]) -> String {
+    if keyframes.is_empty() {
+        return format!("{:.6}", base_volume);
+    }
+    if keyframes.len() == 1 {
+        return format!("{:.6}", keyframes[0].1 * base_volume);
+    }
+
+    let mut sorted = keyframes.to_vec();
+    sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    let last_val = sorted.last().unwrap().1 * base_volume;
+    let mut expr = format!("{:.6}", last_val);
+
+    for i in (0..sorted.len() - 1).rev() {
+        let (t0, v0_raw) = sorted[i];
+        let (t1, v1_raw) = sorted[i + 1];
+        let v0 = v0_raw * base_volume;
+        let v1 = v1_raw * base_volume;
+        let dt = (t1 - t0).max(0.0001);
+
+        let interp = format!("({:.6}+({:.6})*(t-{:.6})/{:.6})", v0, v1 - v0, t0, dt);
+        if i == 0 {
+            expr = format!(
+                "if(lt(t,{:.6}),{:.6},if(lt(t,{:.6}),{},{}))",
+                t0, v0, t1, interp, expr
+            );
+        } else {
+            expr = format!("if(lt(t,{:.6}),{},{})", t1, interp, expr);
+        }
+    }
+
+    expr
+}
+
 fn build_audio_filter(config: &PipeConfig, tracks: &[&AudioTrack]) -> String {
     let mut filters = Vec::with_capacity(tracks.len() + 1);
     let range_start = config.start_frame as f64 / config.fps;
@@ -974,12 +1009,17 @@ fn build_audio_filter(config: &PipeConfig, tracks: &[&AudioTrack]) -> String {
         let skipped_timeline = (range_start - track.timeline_start).max(0.0);
         let source_start = track.start_from + skipped_timeline * track.playback_rate;
         let mut chain = format!(
-            "[{}:a:0]atrim=start={:.9},asetpts=PTS-STARTPTS,atempo={:.9},volume={:.9}",
+            "[{}:a:0]atrim=start={:.9},asetpts=PTS-STARTPTS,atempo={:.9}",
             index + 1,
             source_start,
             track.playback_rate,
-            track.volume
         );
+        if track.volume_keyframes.is_empty() {
+            chain.push_str(&format!(",volume={:.9}", track.volume));
+        } else {
+            let expr = build_volume_expression(track.volume, &track.volume_keyframes);
+            chain.push_str(&format!(",volume='{}':eval=frame", expr));
+        }
         if let Some(duration) = track.duration {
             let remaining = (duration - skipped_timeline).max(0.0);
             chain.push_str(&format!(",atrim=duration={remaining:.9}"));

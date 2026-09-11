@@ -283,6 +283,9 @@ pub struct AudioTrack {
     pub playback_rate: f64,
     /// Repeat the source when it is shorter than the requested duration.
     pub looped: bool,
+    /// Optional dynamic volume keyframes `(timeline_seconds, volume_gain)`.
+    #[serde(default)]
+    pub volume_keyframes: Vec<(f64, f64)>,
 }
 
 impl AudioTrack {
@@ -295,6 +298,81 @@ impl AudioTrack {
             volume: 1.0,
             playback_rate: 1.0,
             looped: false,
+            volume_keyframes: Vec::new(),
+        }
+    }
+
+    pub fn with_volume_keyframes(
+        mut self,
+        keyframes: impl IntoIterator<Item = (f64, f64)>,
+    ) -> Self {
+        self.volume_keyframes = keyframes.into_iter().collect();
+        self
+    }
+}
+
+/// Visual style options for audio visualizers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum VisualizerStyle {
+    /// Rectangular frequency spectrum bars.
+    Bars {
+        #[serde(default = "default_bar_count")]
+        count: usize,
+        #[serde(default = "default_bar_gap")]
+        gap: f32,
+        #[serde(default = "default_bar_radius")]
+        radius: f32,
+        #[serde(default)]
+        mirror: bool,
+    },
+    /// Smooth continuous wave / oscilloscope line.
+    Wave {
+        #[serde(default = "default_wave_stroke_width")]
+        stroke_width: f32,
+        #[serde(default)]
+        filled: bool,
+    },
+    /// Radial spectrum bars radiating from a central circle (e.g. podcast profile avatar).
+    Radial {
+        #[serde(default = "default_radial_radius")]
+        radius: f32,
+        #[serde(default = "default_radial_count")]
+        bar_count: usize,
+        #[serde(default = "default_radial_bar_length")]
+        bar_length: f32,
+    },
+}
+
+const fn default_bar_count() -> usize {
+    32
+}
+const fn default_bar_gap() -> f32 {
+    4.0
+}
+const fn default_bar_radius() -> f32 {
+    2.0
+}
+const fn default_wave_stroke_width() -> f32 {
+    3.0
+}
+const fn default_radial_radius() -> f32 {
+    60.0
+}
+const fn default_radial_count() -> usize {
+    48
+}
+const fn default_radial_bar_length() -> f32 {
+    50.0
+}
+
+impl Default for VisualizerStyle {
+    fn default() -> Self {
+        Self::Bars {
+            count: default_bar_count(),
+            gap: default_bar_gap(),
+            radius: default_bar_radius(),
+            mirror: false,
         }
     }
 }
@@ -483,6 +561,23 @@ pub enum SceneNode {
         #[serde(default = "default_opacity")]
         opacity: f32,
     },
+
+    /// Audio frequency spectrum or waveform visualizer (Bars, Wave, Radial).
+    AudioVisualizer {
+        /// File path or `file://` URI to audio file (MP3, WAV, AAC, M4A).
+        src: String,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        color: Color,
+        #[serde(default)]
+        style: VisualizerStyle,
+        #[serde(default)]
+        time: f64,
+        #[serde(default = "default_opacity")]
+        opacity: f32,
+    },
 }
 
 const fn default_playback_rate() -> f32 {
@@ -622,6 +717,11 @@ impl Scene {
                     SceneNode::Audio { track } => {
                         let mut track = track.clone();
                         track.volume *= parent_volume;
+                        if (parent_volume - 1.0).abs() > f64::EPSILON {
+                            for (_, vol) in &mut track.volume_keyframes {
+                                *vol *= parent_volume;
+                            }
+                        }
                         output.push(track);
                     }
                     SceneNode::Group {

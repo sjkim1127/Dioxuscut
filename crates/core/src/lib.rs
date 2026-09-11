@@ -18,6 +18,7 @@
 //! - Animation primitives from [`dioxuscut_animation`]
 
 pub mod absolute_fill;
+pub mod audio_visualizer_component;
 pub mod composition;
 pub mod emoji_component;
 pub mod freeze;
@@ -32,6 +33,7 @@ pub mod types;
 
 // ── Public re-exports ─────────────────────────────────────────────────────────
 pub use absolute_fill::AbsoluteFill;
+pub use audio_visualizer_component::{AudioVisualizer, AudioVisualizerProps, VisualizerStyle};
 pub use composition::{Composition, CompositionProps};
 pub use emoji_component::{Emoji, EmojiProps};
 pub use freeze::Freeze;

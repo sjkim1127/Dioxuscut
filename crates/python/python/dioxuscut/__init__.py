@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Optional, Union
 
 # Import native PyO3 module
 from ._dioxuscut import (
+    calculate_ducking,
+    get_audio_spectrum,
     get_version,
     get_video_metadata,
     interpolate,
@@ -31,6 +33,8 @@ __all__ = [
     "CaptionStyle",
     "Composition",
     "ShortsVideo",
+    "calculate_ducking",
+    "get_audio_spectrum",
     "get_video_metadata",
     "interpolate",
     "interpolate_colors",

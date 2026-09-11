@@ -575,6 +575,36 @@ fn SceneNodeView(props: SceneNodeViewProps) -> Element {
                 }
             }
         }
+        SceneNode::AudioVisualizer {
+            x,
+            y,
+            width,
+            height,
+            color,
+            opacity,
+            ..
+        } => {
+            let fill_str = format!(
+                "rgba({}, {}, {}, {:.2})",
+                color.r,
+                color.g,
+                color.b,
+                color.a as f32 / 255.0
+            );
+            rsx! {
+                rect {
+                    x,
+                    y,
+                    width,
+                    height,
+                    fill: "none",
+                    stroke: "{fill_str}",
+                    stroke_width: 1.5,
+                    stroke_dasharray: "4 2",
+                    opacity,
+                }
+            }
+        }
     }
 }
 
@@ -1092,6 +1122,7 @@ mod tests {
             volume: 0.75,
             playback_rate: 1.25,
             looped: false,
+            volume_keyframes: Vec::new(),
         };
 
         assert_eq!(audio_preview_timing(&track, 1.0), (1.5, false));

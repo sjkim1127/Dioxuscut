@@ -65,6 +65,7 @@ lyon_tessellation = "1.0.20"
 
 # Audio decoding
 hound             = "3.5"
+symphonia         = { version = "0.5.4", default-features = false, features = ["mp3", "wav", "aac", "isomp4", "pcm"] }
 
 # Error handling
 anyhow            = "1"

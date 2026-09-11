@@ -365,6 +365,52 @@ fn parse_vtt(py: Python<'_>, vtt_str: &str) -> PyResult<Vec<PyObject>> {
     tokens_to_py_list(py, &tokens)
 }
 
+/// Calculate background music auto-ducking volume keyframes from speech intervals.
+#[pyfunction]
+#[pyo3(signature = (
+    intervals,
+    total_duration,
+    base_volume = 0.8,
+    duck_volume = 0.15,
+    attack_sec = 0.25,
+    release_sec = 0.40,
+    hold_threshold_sec = 0.35
+))]
+fn calculate_ducking(
+    intervals: Vec<(f64, f64)>,
+    total_duration: f64,
+    base_volume: f64,
+    duck_volume: f64,
+    attack_sec: f64,
+    release_sec: f64,
+    hold_threshold_sec: f64,
+) -> Vec<(f64, f64)> {
+    let speech_intervals: Vec<dioxuscut_media::SpeechInterval> = intervals
+        .into_iter()
+        .map(|(s, e)| dioxuscut_media::SpeechInterval::new(s, e))
+        .collect();
+
+    let options = dioxuscut_media::DuckingOptions {
+        base_volume,
+        duck_volume,
+        attack_sec,
+        release_sec,
+        hold_threshold_sec,
+    };
+
+    dioxuscut_media::calculate_ducking_envelope(&speech_intervals, total_duration, &options)
+}
+
+/// Compute frequency spectrum band magnitudes for an audio file at a given timestamp.
+#[pyfunction]
+#[pyo3(signature = (src, time_secs, n_bars = 32))]
+fn get_audio_spectrum(src: &str, time_secs: f64, n_bars: usize) -> PyResult<Vec<f32>> {
+    let path = std::path::Path::new(src);
+    let data = dioxuscut_rasterizer::audio_cache::decode_audio_file(path)
+        .map_err(|e| PyRuntimeError::new_err(format!("Failed to decode audio: {e}")))?;
+    Ok(data.get_spectrum(time_secs, n_bars))
+}
+
 /// Python module initialization.
 #[pymodule]
 fn _dioxuscut(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -380,5 +426,7 @@ fn _dioxuscut(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_whisper, m)?)?;
     m.add_function(wrap_pyfunction!(parse_srt, m)?)?;
     m.add_function(wrap_pyfunction!(parse_vtt, m)?)?;
+    m.add_function(wrap_pyfunction!(calculate_ducking, m)?)?;
+    m.add_function(wrap_pyfunction!(get_audio_spectrum, m)?)?;
     Ok(())
 }

@@ -4,6 +4,7 @@ Comprehensive tests for Dioxuscut Python SDK bindings.
 """
 
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -211,6 +212,61 @@ def test_shorts_ai_video():
     print("[✓] ShortsVideo AI Builder test passed.")
 
 
+def test_audio_visualizer_and_ducking():
+    print("\n[*] Testing Audio Visualizer & Smart Auto-Ducking Suite...")
+    import wave
+    import struct
+
+    # Generate small test WAV file (440Hz sine wave)
+    wav_path = TARGET_DIR / "test_sine.wav"
+    sample_rate = 44100
+    n_samples = int(sample_rate * 1.5) # 1.5 seconds
+    with wave.open(str(wav_path), "w") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        data = bytearray()
+        for i in range(n_samples):
+            val = int(18000.0 * math.sin(2.0 * math.pi * 440.0 * i / sample_rate))
+            data.extend(struct.pack("<h", val))
+        wf.writeframes(data)
+
+    # 1. Test spectrum calculation
+    spectrum = dioxuscut.get_audio_spectrum(str(wav_path), time_secs=0.5, n_bars=32)
+    assert len(spectrum) == 32, "Spectrum must return 32 bins"
+    assert any(b > 0.05 for b in spectrum), "Spectrum should detect sine signal"
+    print(f"[+] Computed audio spectrum: max bin = {max(spectrum):.4f}")
+
+    # 2. Test ducking keyframes calculation
+    speech_ivs = [(0.5, 1.2)]
+    duck_kfs = dioxuscut.calculate_ducking(speech_ivs, total_duration=2.0, base_volume=0.8, duck_volume=0.15)
+    assert len(duck_kfs) >= 4, "Ducking keyframes must have attack/hold/release points"
+    assert duck_kfs[0][1] == 0.8, "Initial volume must be base volume"
+    print(f"[+] Calculated {len(duck_kfs)} auto-ducking keyframes: {duck_kfs}")
+
+    # 3. Test end-to-end Shorts rendering with Visualizer & Background Music
+    out_audio_mp4 = TARGET_DIR / "test_audio_suite.mp4"
+    if out_audio_mp4.exists():
+        out_audio_mp4.unlink()
+
+    short = dioxuscut.ShortsVideo(
+        width=720,
+        height=1280,
+        fps=30.0,
+        duration_in_frames=45,
+        bg_color="#050714",
+    )
+    short.add_voiceover(wav_path, volume=1.0)
+    short.add_background_music(wav_path, volume=0.3, duck_on_voice=True, duck_volume=0.08)
+    short.add_audio_visualizer(wav_path, x=100.0, y=700.0, width=520.0, height=140.0, style="bars", color="#00e5ff")
+    short.add_audio_visualizer(wav_path, x=100.0, y=900.0, width=520.0, height=140.0, style="wave", color="#ff007f")
+    short.render(out_audio_mp4)
+
+    assert out_audio_mp4.exists() and out_audio_mp4.stat().st_size > 5000
+    print(f"[+] Rendered Audio Suite Shorts MP4: {out_audio_mp4.stat().st_size} bytes")
+    print("[✓] Audio Visualizer & Smart Auto-Ducking Suite test passed.")
+
+
 def main():
     print("=" * 60)
     print("🚀 Running Dioxuscut Python SDK Test Suite")
@@ -222,6 +278,7 @@ def main():
     test_render_script()
     test_composition_class()
     test_shorts_ai_video()
+    test_audio_visualizer_and_ducking()
     print("\n" + "=" * 60)
     print("🎉 ALL PYTHON SDK TESTS PASSED PERFECTLY!")
     print("=" * 60)

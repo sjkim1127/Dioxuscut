@@ -28,6 +28,7 @@
 #![allow(unknown_lints)]
 #![allow(clippy::chunks_exact_to_as_chunks)]
 
+pub mod audio_cache;
 pub mod backend;
 pub mod emoji;
 pub mod font;
@@ -43,6 +44,7 @@ mod video_cache;
 #[cfg(feature = "gpu")]
 pub mod wgpu_backend;
 
+pub use audio_cache::AudioData;
 pub use emoji::{is_emoji_char, is_emoji_grapheme, render_emoji, split_text_and_emojis, TextRun};
 pub use mesh3d::{Mesh3D, Vec3};
 
@@ -68,7 +70,7 @@ pub use render::{
 pub use gif_cache::{GifFrame, GifFrameCache, LoopBehavior};
 pub use scene::{
     AudioTrack, BlendMode, ClipRegion, Color, GradientStop, ImageFit, MaskMode, Scene, SceneFilter,
-    SceneNode, SceneShadow, Transform2D,
+    SceneNode, SceneShadow, Transform2D, VisualizerStyle,
 };
 pub use tiny_skia_backend::TinySkiaBackend;
 pub use video_cache::{probe_video_metadata, VideoMetadata};

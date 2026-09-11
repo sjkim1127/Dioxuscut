@@ -12,9 +12,11 @@ import json
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from . import (
+    calculate_ducking,
+    get_audio_spectrum,
     get_video_metadata,
     parse_srt,
     parse_vtt,
@@ -71,10 +73,24 @@ class EmojiSticker:
 
 
 @dataclass
+class AudioVisualizerConfig:
+    src: str
+    x: float
+    y: float
+    width: float
+    height: float
+    style: str = "bars"  # "bars", "wave", "radial"
+    color: str = "#00e5ff"
+    start_sec: float = 0.0
+    duration_sec: Optional[float] = None
+
+
+@dataclass
 class AudioTrackConfig:
     src: str
     volume: float = 1.0
     looped: bool = False
+    volume_keyframes: List[Tuple[float, float]] = field(default_factory=list)
 
 
 class ShortsVideo:
@@ -100,6 +116,8 @@ class ShortsVideo:
         self.bg_image: Optional[str] = None
 
         self.audio_tracks: List[AudioTrackConfig] = []
+        self.visualizers: List[AudioVisualizerConfig] = []
+        self.speech_intervals: List[Tuple[float, float]] = []
         self.subtitles: Optional[SubtitleConfig] = None
         self.lottie_stickers: List[LottieSticker] = []
         self.emoji_stickers: List[EmojiSticker] = []
@@ -121,10 +139,96 @@ class ShortsVideo:
         volume: float = 1.0,
         loop: bool = False,
     ) -> ShortsVideo:
-        """Add a voiceover or background music audio track."""
+        """Add a general audio track."""
         resolved = str(Path(audio_path).resolve())
         self.audio_tracks.append(
             AudioTrackConfig(src=resolved, volume=volume, looped=loop)
+        )
+        return self
+
+    def add_voiceover(
+        self,
+        audio_path: Union[str, Path],
+        volume: float = 1.0,
+    ) -> ShortsVideo:
+        """
+        Add the primary speech / narration voiceover track.
+        """
+        resolved = str(Path(audio_path).resolve())
+        self.audio_tracks.append(
+            AudioTrackConfig(src=resolved, volume=volume, looped=False)
+        )
+        return self
+
+    def add_background_music(
+        self,
+        audio_path: Union[str, Path],
+        volume: float = 0.35,
+        duck_on_voice: bool = True,
+        duck_volume: float = 0.08,
+        attack_sec: float = 0.25,
+        release_sec: float = 0.40,
+        loop: bool = True,
+    ) -> ShortsVideo:
+        """
+        Add background music track with smart auto-ducking during speech.
+
+        Args:
+            audio_path: Path to background music file (MP3, WAV, AAC, M4A)
+            volume: Normal music volume in 0.0..1.0 (default 0.35)
+            duck_on_voice: Automatically lower volume when speech is active (default True)
+            duck_volume: Attenuated volume during speech (default 0.08)
+            attack_sec: Fade down duration in seconds (default 0.25s)
+            release_sec: Fade up duration in seconds (default 0.40s)
+            loop: Repeat music if video is longer than the track (default True)
+        """
+        resolved = str(Path(audio_path).resolve())
+        self.audio_tracks.append(
+            AudioTrackConfig(
+                src=resolved,
+                volume=volume,
+                looped=loop,
+                volume_keyframes=[],
+            )
+        )
+        return self
+
+    def add_audio_visualizer(
+        self,
+        audio_path: Union[str, Path],
+        x: float,
+        y: float,
+        width: float = 400.0,
+        height: float = 120.0,
+        style: str = "bars",
+        color: str = "#00e5ff",
+        start_sec: float = 0.0,
+        duration_sec: Optional[float] = None,
+    ) -> ShortsVideo:
+        """
+        Add a dynamic frequency spectrum or waveform visualizer.
+
+        Args:
+            audio_path: Audio file (MP3, WAV, AAC, M4A)
+            x, y, width, height: Bounding box in canvas pixels
+            style: 'bars' (classic spectrum), 'wave' (oscilloscope), or 'radial' (circular podcast avatar)
+            color: Color hex or rgba (e.g. '#00e5ff', '#ff007f')
+            start_sec: Video start time offset
+            duration_sec: Optional duration on timeline
+        """
+        resolved = str(Path(audio_path).resolve())
+        self.visualizers.append(
+            AudioVisualizerConfig(
+                src=resolved,
+                x=x,
+                y=y,
+                width=width,
+                height=height,
+                style=style.lower(),
+                color=color,
+                start_sec=start_sec,
+                duration_sec=duration_sec,
+            )
         )
         return self
 
@@ -174,6 +278,12 @@ class ShortsVideo:
         else:  # CLEAN
             default_bg = None if bg_color is None else bg_color
             default_scale = 1.0 if active_scale is None else active_scale
+
+        for t in tokens:
+            s_sec = t["start_ms"] / 1000.0
+            e_sec = t["end_ms"] / 1000.0
+            if e_sec > s_sec:
+                self.speech_intervals.append((s_sec, e_sec))
 
         self.subtitles = SubtitleConfig(
             tokens=tokens,
@@ -373,11 +483,39 @@ class ShortsVideo:
                 f'    output.image(0.0, 0.0, {float(self.width)}, {float(self.height)}, "{clean_path}", "cover", 1.0);'
             )
 
+        # Auto-ducking resolution
+        duration_sec = self._resolve_duration_in_frames() / self.fps
+        for track in self.audio_tracks:
+            if not track.volume_keyframes and self.speech_intervals and track.volume < 0.9:
+                track.volume_keyframes = calculate_ducking(
+                    self.speech_intervals,
+                    duration_sec,
+                    base_volume=1.0,
+                    duck_volume=0.25,
+                )
+
         # Audio tracks
         for track in self.audio_tracks:
             clean_path = track.src.replace("\\", "/")
+            if track.volume_keyframes:
+                kfs_json = json.dumps([[round(t, 4), round(v, 4)] for t, v in track.volume_keyframes])
+                lines.append(
+                    f'    output.audio_ducked("{clean_path}", {float(track.volume)}, {kfs_json});'
+                )
+            else:
+                lines.append(
+                    f'    output.audio("{clean_path}", {float(track.volume)});'
+                )
+
+        # Audio visualizers
+        for viz in self.visualizers:
+            clean_src = viz.src.replace("\\", "/")
+            conds = [f"time_sec >= {viz.start_sec}"]
+            if viz.duration_sec is not None:
+                conds.append(f"time_sec <= {viz.start_sec + viz.duration_sec}")
+            cond_expr = " && ".join(conds)
             lines.append(
-                f'    output.audio("{clean_path}", 0.0, {float(track.volume)});'
+                f'    if {cond_expr} {{ output.audio_visualizer({viz.x}, {viz.y}, {viz.width}, {viz.height}, "{clean_src}", time_sec, "{viz.color}", "{viz.style}"); }}'
             )
 
         # Lottie stickers

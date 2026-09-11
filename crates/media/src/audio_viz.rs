@@ -47,8 +47,16 @@ impl From<std::io::Error> for AudioVizError {
     }
 }
 
-/// Loads and decodes a WAV audio file into [`AudioData`].
+/// Loads and decodes an audio file (MP3, WAV, AAC, M4A) into [`AudioData`].
 pub fn load_audio_data(path: &Path) -> Result<AudioData, AudioVizError> {
+    if let Ok(decoded) = dioxuscut_rasterizer::audio_cache::decode_audio_file(path) {
+        return Ok(AudioData {
+            channel_waveforms: decoded.channel_waveforms,
+            sample_rate: decoded.sample_rate,
+            duration_secs: decoded.duration_secs as f32,
+        });
+    }
+
     let reader = hound::WavReader::open(path)
         .map_err(|e| AudioVizError::Decode(format!("failed to open WAV: {e}")))?;
     let spec = reader.spec();
