@@ -25,6 +25,6 @@ serde               = { workspace = true }
 serde_json          = { workspace = true }
 
 [features]
-default = ["web"]
+default = []
 web     = ["dioxus/web", "dioxuscut-core/web"]
 desktop = ["dioxus/desktop", "dioxuscut-core/desktop"]

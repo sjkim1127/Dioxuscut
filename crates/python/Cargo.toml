@@ -10,10 +10,10 @@ readme = "README.md"
 
 [lib]
 name = "_dioxuscut"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.22", features = ["extension-module", "abi3-py310"] }
+pyo3 = { version = "0.22", features = ["abi3-py310"] }
 serde_json = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true }
@@ -25,3 +25,7 @@ dioxuscut-composition = { workspace = true }
 dioxuscut-core = { workspace = true }
 dioxuscut-media = { workspace = true }
 dioxuscut-rasterizer = { workspace = true }
+
+[features]
+default = ["extension-module"]
+extension-module = ["pyo3/extension-module"]

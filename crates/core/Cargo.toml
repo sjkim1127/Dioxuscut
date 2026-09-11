@@ -18,7 +18,7 @@ serde_json         = { workspace = true }
 tracing            = { workspace = true }
 
 [features]
-default = ["web"]
+default = []
 web     = ["dioxus/web"]
 desktop = ["dioxus/desktop"]
 

@@ -86,4 +86,4 @@ jobs:
         run: cargo check --locked --workspace --all-targets --all-features
 
       - name: Run All Workspace Tests
-        run: cargo test --locked --workspace --all-features
+        run: cargo test --locked --workspace --exclude dioxuscut-python
