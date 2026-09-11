@@ -1,8 +1,8 @@
 //! Native Scene adapter for all procedural shape generators.
 
 use crate::{
-    make_arrow, make_callout, make_circle, make_heart, make_pie, make_polygon, make_rect,
-    make_spark, make_star, make_triangle, CalloutDirection,
+    make_arrow, make_callout, make_circle, make_ellipse, make_heart, make_pie, make_polygon,
+    make_rect, make_spark, make_star, make_triangle, CalloutDirection,
 };
 use dioxuscut_composition::{CompositionError, SceneEmitter, SceneFrameContext};
 use dioxuscut_rasterizer::{Color, Scene, SceneNode, Transform2D};
@@ -45,6 +45,11 @@ impl SceneShape {
     pub fn circle(radius: f64) -> Self {
         let (path, width, height) = make_circle(radius);
         Self::new(path, width, height)
+    }
+
+    pub fn ellipse(rx: f64, ry: f64) -> Self {
+        let shape = make_ellipse(rx, ry);
+        Self::new(shape.path, shape.width, shape.height)
     }
 
     pub fn callout(

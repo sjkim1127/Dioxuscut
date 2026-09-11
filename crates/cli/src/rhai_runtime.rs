@@ -772,6 +772,65 @@ fn register_scene_api(engine: &mut Engine) {
             val.clamp(min, max)
         }
     });
+    engine.register_fn(
+        "typewriter_text",
+        |text: ImmutableString, progress: FLOAT| -> ImmutableString {
+            dioxuscut_animation::typewriter_text(&text, progress, true, '|').into()
+        },
+    );
+    engine.register_fn(
+        "scramble_text",
+        |text: ImmutableString, progress: FLOAT, seed: INT| -> ImmutableString {
+            dioxuscut_animation::scramble_text(&text, progress, seed as u64).into()
+        },
+    );
+    engine.register_fn("make_ellipse", |rx: FLOAT, ry: FLOAT| -> ImmutableString {
+        dioxuscut_shapes::make_ellipse(rx, ry).path.into()
+    });
+    engine.register_fn(
+        "safe_area_insets",
+        |platform: ImmutableString, w: FLOAT, h: FLOAT| -> Map {
+            let plat = match platform.to_lowercase().as_str() {
+                "reels" | "instagram" => dioxuscut_composition::Platform::InstagramReels,
+                "shorts" | "youtube" => dioxuscut_composition::Platform::YouTubeShorts,
+                "action" => dioxuscut_composition::Platform::ActionSafe,
+                "title" => dioxuscut_composition::Platform::TitleSafe,
+                _ => dioxuscut_composition::Platform::TikTok,
+            };
+            let insets = dioxuscut_composition::get_safe_area_insets(plat, w as f32, h as f32);
+            let mut map = Map::new();
+            map.insert("top".into(), Dynamic::from(insets.top as FLOAT));
+            map.insert("bottom".into(), Dynamic::from(insets.bottom as FLOAT));
+            map.insert("left".into(), Dynamic::from(insets.left as FLOAT));
+            map.insert("right".into(), Dynamic::from(insets.right as FLOAT));
+            map
+        },
+    );
+    engine.register_fn(
+        "fit_text",
+        |text: ImmutableString, max_w: FLOAT, max_h: FLOAT| -> FLOAT {
+            dioxuscut_composition::fit_text(&text, max_w as f32, max_h as f32, 10.0, 120.0) as FLOAT
+        },
+    );
+    engine.register_fn("path_bounding_box", |path: ImmutableString| -> Map {
+        let mut map = Map::new();
+        if let Some(bbox) = dioxuscut_paths::get_bounding_box(&path) {
+            map.insert("x".into(), Dynamic::from(bbox.x));
+            map.insert("y".into(), Dynamic::from(bbox.y));
+            map.insert("width".into(), Dynamic::from(bbox.width));
+            map.insert("height".into(), Dynamic::from(bbox.height));
+        }
+        map
+    });
+    engine.register_fn(
+        "rotate_path",
+        |path: ImmutableString, angle_rad: FLOAT, cx: FLOAT, cy: FLOAT| -> ImmutableString {
+            dioxuscut_paths::rotate_path(&path, angle_rad, cx, cy).into()
+        },
+    );
+    engine.register_fn("reverse_path", |path: ImmutableString| -> ImmutableString {
+        dioxuscut_paths::reverse_path(&path).into()
+    });
 }
 
 fn context_map(frame: u32, context: NativeCompositionContext) -> Map {

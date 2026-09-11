@@ -17,6 +17,7 @@
 pub mod arrow;
 pub mod callout;
 pub mod circle;
+pub mod ellipse;
 pub mod heart;
 pub mod pie;
 pub mod polygon;
@@ -32,6 +33,7 @@ pub mod triangle;
 pub use arrow::{make_arrow, Arrow, ArrowProps};
 pub use callout::{make_callout, Callout, CalloutDirection, CalloutProps};
 pub use circle::{make_circle, Circle, CircleProps};
+pub use ellipse::{make_ellipse, Ellipse, EllipseProps};
 pub use heart::{make_heart, Heart, HeartProps};
 pub use pie::{make_pie, Pie, PieProps};
 pub use polygon::{make_polygon, Polygon, PolygonProps};

@@ -411,6 +411,104 @@ fn get_audio_spectrum(src: &str, time_secs: f64, n_bars: usize) -> PyResult<Vec<
     Ok(data.get_spectrum(time_secs, n_bars))
 }
 
+/// Compute the axis-aligned bounding box of an SVG path.
+#[pyfunction]
+fn get_bounding_box(py: Python<'_>, path: &str) -> PyResult<Option<PyObject>> {
+    if let Some(bbox) = dioxuscut_paths::get_bounding_box(path) {
+        let dict = pyo3::types::PyDict::new_bound(py);
+        dict.set_item("x", bbox.x)?;
+        dict.set_item("y", bbox.y)?;
+        dict.set_item("width", bbox.width)?;
+        dict.set_item("height", bbox.height)?;
+        Ok(Some(dict.into()))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Rotate an SVG path by `angle_rad` around `(cx, cy)`.
+#[pyfunction]
+#[pyo3(signature = (path, angle_rad, cx = 0.0, cy = 0.0))]
+fn rotate_path(path: &str, angle_rad: f64, cx: f64, cy: f64) -> String {
+    dioxuscut_paths::rotate_path(path, angle_rad, cx, cy)
+}
+
+/// Reverse the drawing direction of an SVG path.
+#[pyfunction]
+fn reverse_path(path: &str) -> String {
+    dioxuscut_paths::reverse_path(path)
+}
+
+/// Get the normalized 2D tangent vector (dx, dy) at arc length along an SVG path.
+#[pyfunction]
+fn get_tangent_at_length(path: &str, length: f64) -> Option<(f64, f64)> {
+    dioxuscut_paths::get_tangent_at_length(path, length).map(|pt| (pt.x, pt.y))
+}
+
+/// Generate SVG path string for an ellipse of radii `rx` and `ry`.
+#[pyfunction]
+fn make_ellipse(rx: f64, ry: f64) -> String {
+    dioxuscut_shapes::make_ellipse(rx, ry).path
+}
+
+/// Get safe area insets for TikTok, Instagram Reels, or YouTube Shorts.
+#[pyfunction]
+#[pyo3(signature = (platform, width = 1080.0, height = 1920.0))]
+fn get_safe_area_insets(
+    py: Python<'_>,
+    platform: &str,
+    width: f32,
+    height: f32,
+) -> PyResult<PyObject> {
+    let plat = match platform.to_lowercase().as_str() {
+        "reels" | "instagram" => dioxuscut_composition::Platform::InstagramReels,
+        "shorts" | "youtube" => dioxuscut_composition::Platform::YouTubeShorts,
+        "action" => dioxuscut_composition::Platform::ActionSafe,
+        "title" => dioxuscut_composition::Platform::TitleSafe,
+        _ => dioxuscut_composition::Platform::TikTok,
+    };
+    let insets = dioxuscut_composition::get_safe_area_insets(plat, width, height);
+    let dict = pyo3::types::PyDict::new_bound(py);
+    dict.set_item("top", insets.top)?;
+    dict.set_item("bottom", insets.bottom)?;
+    dict.set_item("left", insets.left)?;
+    dict.set_item("right", insets.right)?;
+    let (x, y, w, h) = insets.to_rect(width, height);
+    dict.set_item("safe_x", x)?;
+    dict.set_item("safe_y", y)?;
+    dict.set_item("safe_width", w)?;
+    dict.set_item("safe_height", h)?;
+    Ok(dict.into())
+}
+
+/// Calculate optimal font size to fit text within `max_width` and `max_height`.
+#[pyfunction]
+#[pyo3(signature = (text, max_width, max_height, min_font_size = 12.0, max_font_size = 120.0))]
+fn fit_text(
+    text: &str,
+    max_width: f32,
+    max_height: f32,
+    min_font_size: f32,
+    max_font_size: f32,
+) -> f32 {
+    dioxuscut_composition::fit_text(text, max_width, max_height, min_font_size, max_font_size)
+}
+
+/// Typewriter text reveal effect.
+#[pyfunction]
+#[pyo3(signature = (text, progress, show_cursor = true, cursor_char = "|"))]
+fn typewriter_text(text: &str, progress: f64, show_cursor: bool, cursor_char: &str) -> String {
+    let ch = cursor_char.chars().next().unwrap_or('|');
+    dioxuscut_animation::typewriter_text(text, progress, show_cursor, ch)
+}
+
+/// Cyberpunk / matrix scrambled text decoding effect.
+#[pyfunction]
+#[pyo3(signature = (target_text, progress, seed = 42))]
+fn scramble_text(target_text: &str, progress: f64, seed: u64) -> String {
+    dioxuscut_animation::scramble_text(target_text, progress, seed)
+}
+
 /// Python module initialization.
 #[pymodule]
 fn _dioxuscut(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -428,5 +526,14 @@ fn _dioxuscut(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_vtt, m)?)?;
     m.add_function(wrap_pyfunction!(calculate_ducking, m)?)?;
     m.add_function(wrap_pyfunction!(get_audio_spectrum, m)?)?;
+    m.add_function(wrap_pyfunction!(get_bounding_box, m)?)?;
+    m.add_function(wrap_pyfunction!(rotate_path, m)?)?;
+    m.add_function(wrap_pyfunction!(reverse_path, m)?)?;
+    m.add_function(wrap_pyfunction!(get_tangent_at_length, m)?)?;
+    m.add_function(wrap_pyfunction!(make_ellipse, m)?)?;
+    m.add_function(wrap_pyfunction!(get_safe_area_insets, m)?)?;
+    m.add_function(wrap_pyfunction!(fit_text, m)?)?;
+    m.add_function(wrap_pyfunction!(typewriter_text, m)?)?;
+    m.add_function(wrap_pyfunction!(scramble_text, m)?)?;
     Ok(())
 }

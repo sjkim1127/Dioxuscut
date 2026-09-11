@@ -11,19 +11,28 @@ from typing import Any, Dict, List, Optional, Union
 # Import native PyO3 module
 from ._dioxuscut import (
     calculate_ducking,
+    fit_text,
     get_audio_spectrum,
+    get_bounding_box,
+    get_safe_area_insets,
+    get_tangent_at_length,
     get_version,
     get_video_metadata,
     interpolate,
     interpolate_colors,
     list_compositions,
+    make_ellipse,
     parse_srt,
     parse_vtt,
     parse_whisper,
     random,
     render_native,
+    reverse_path,
+    rotate_path,
+    scramble_text,
     spring,
     static_file,
+    typewriter_text,
 )
 from .shorts import CaptionStyle, ShortsVideo
 
@@ -34,11 +43,16 @@ __all__ = [
     "Composition",
     "ShortsVideo",
     "calculate_ducking",
+    "fit_text",
     "get_audio_spectrum",
+    "get_bounding_box",
+    "get_safe_area_insets",
+    "get_tangent_at_length",
     "get_video_metadata",
     "interpolate",
     "interpolate_colors",
     "list_compositions",
+    "make_ellipse",
     "parse_srt",
     "parse_vtt",
     "parse_whisper",
@@ -46,8 +60,12 @@ __all__ = [
     "render",
     "render_script",
     "render_still",
+    "reverse_path",
+    "rotate_path",
+    "scramble_text",
     "spring",
     "static_file",
+    "typewriter_text",
 ]
 
 

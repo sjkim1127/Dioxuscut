@@ -345,6 +345,17 @@ class ShortsVideo:
         )
         return self
 
+    def get_safe_area(self, platform: str = "tiktok") -> Dict[str, float]:
+        """
+        Get unobstructed screen bounds for TikTok, Instagram Reels, or YouTube Shorts.
+
+        Returns:
+            Dict containing 'top', 'bottom', 'left', 'right', 'safe_x', 'safe_y', 'safe_width', 'safe_height'.
+        """
+        from . import get_safe_area_insets
+
+        return get_safe_area_insets(platform, float(self.width), float(self.height))
+
     def render(
         self,
         output: Union[str, Path],

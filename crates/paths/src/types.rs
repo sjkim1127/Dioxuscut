@@ -55,3 +55,23 @@ pub struct EvolvedPath {
     /// `stroke-dashoffset` CSS property value.
     pub stroke_dashoffset: f64,
 }
+
+/// Axis-aligned 2D bounding box of an SVG path.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct BoundingBox {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl BoundingBox {
+    pub fn new(x: f64, y: f64, width: f64, height: f64) -> Self {
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+}

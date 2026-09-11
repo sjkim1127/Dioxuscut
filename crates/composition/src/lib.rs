@@ -1,7 +1,11 @@
 //! Shared native composition contract and built-in composition registry.
 
+pub mod safe_area;
 mod scene_emitter;
 
+pub use safe_area::{
+    fit_text, get_safe_area_insets, measure_text_approx, Platform, SafeAreaInsets,
+};
 pub use scene_emitter::{
     FlipDirection, LinearWipeDirection, SceneEmitter, SceneEmitterComposition, SceneFrameContext,
     SceneFreeze, SceneGroup, SceneLayer, SceneLinearGradient, SceneLoop, SceneRect, SceneSequence,

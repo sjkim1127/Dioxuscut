@@ -267,6 +267,62 @@ def test_audio_visualizer_and_ducking():
     print("[✓] Audio Visualizer & Smart Auto-Ducking Suite test passed.")
 
 
+def test_remotion_paths_shapes_and_layout():
+    print("\n[*] Testing Remotion Paths, Shapes, Layout & Typography Parity...")
+
+    # 1. Bounding box & Path transformations
+    path = "M 10 20 L 110 20 L 110 70 L 10 70 Z"
+    bbox = dioxuscut.get_bounding_box(path)
+    assert bbox is not None, "Bounding box must be computed"
+    assert bbox["x"] == 10.0 and bbox["y"] == 20.0
+    assert bbox["width"] == 100.0 and bbox["height"] == 50.0
+    print(f"[+] Computed path bbox: {bbox}")
+
+    rev = dioxuscut.reverse_path("M 0 0 L 10 10 L 20 20")
+    assert "M 20.0000 20.0000" in rev
+    print(f"[+] Reversed path: {rev}")
+
+    rot = dioxuscut.rotate_path("M 10 0 L 20 0", math.pi / 2, 0.0, 0.0)
+    assert "M 0.0000 10.0000" in rot
+    print(f"[+] Rotated path: {rot}")
+
+    tangent = dioxuscut.get_tangent_at_length("M 0 0 L 100 0", 50.0)
+    assert tangent is not None and abs(tangent[0] - 1.0) < 1e-4 and abs(tangent[1]) < 1e-4
+    print(f"[+] Path tangent vector at length 50: {tangent}")
+
+    # 2. Shape generators
+    ellipse = dioxuscut.make_ellipse(80.0, 40.0)
+    assert "M 80 0" in ellipse and "A 80 40" in ellipse
+    print(f"[+] Generated Ellipse SVG: {ellipse[:40]}...")
+
+    # 3. Safe area & Layout
+    safe_tiktok = dioxuscut.get_safe_area_insets("tiktok", 1080.0, 1920.0)
+    assert safe_tiktok["top"] == 120.0 and safe_tiktok["bottom"] == 340.0
+    assert safe_tiktok["safe_width"] == 1080.0 - 40.0 - 120.0
+    print(f"[+] TikTok Safe Area: {safe_tiktok}")
+
+    short = dioxuscut.ShortsVideo(width=720, height=1280)
+    short_safe = short.get_safe_area("reels")
+    assert short_safe["top"] > 50.0
+    print(f"[+] ShortsVideo.get_safe_area('reels'): {short_safe}")
+
+    optimal_font_size = dioxuscut.fit_text("BIG VIRAL HEADLINE", max_width=400.0, max_height=80.0)
+    assert 12.0 <= optimal_font_size <= 120.0
+    print(f"[+] fit_text optimal font size: {optimal_font_size:.2f}px")
+
+    # 4. Kinetic Typography
+    typed = dioxuscut.typewriter_text("Hello World", progress=0.5, show_cursor=True)
+    assert typed.startswith("Hello") and typed.endswith("|")
+    print(f"[+] Typewriter progress 0.5: '{typed}'")
+
+    scrambled = dioxuscut.scramble_text("TOP SECRET", progress=0.5, seed=123)
+    assert scrambled.startswith("TOP S")
+    assert len(scrambled) == len("TOP SECRET")
+    print(f"[+] Scrambled text progress 0.5: '{scrambled}'")
+
+    print("[✓] Remotion Paths, Shapes, Layout & Typography test passed.")
+
+
 def main():
     print("=" * 60)
     print("🚀 Running Dioxuscut Python SDK Test Suite")
@@ -279,6 +335,7 @@ def main():
     test_composition_class()
     test_shorts_ai_video()
     test_audio_visualizer_and_ducking()
+    test_remotion_paths_shapes_and_layout()
     print("\n" + "=" * 60)
     print("🎉 ALL PYTHON SDK TESTS PASSED PERFECTLY!")
     print("=" * 60)
