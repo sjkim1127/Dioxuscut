@@ -19,9 +19,11 @@
 
 pub mod absolute_fill;
 pub mod composition;
+pub mod emoji_component;
 pub mod freeze;
 pub mod hooks;
 pub mod loop_component;
+pub mod lottie_component;
 pub mod scene;
 pub mod sequence;
 pub mod series;
@@ -31,9 +33,11 @@ pub mod types;
 // ── Public re-exports ─────────────────────────────────────────────────────────
 pub use absolute_fill::AbsoluteFill;
 pub use composition::{Composition, CompositionProps};
+pub use emoji_component::{Emoji, EmojiProps};
 pub use freeze::Freeze;
 pub use hooks::{use_current_frame, use_video_config};
 pub use loop_component::{Loop, LoopProps};
+pub use lottie_component::{Lottie, LottieProps};
 pub use scene::SceneAbsoluteFill;
 pub use sequence::{Sequence, SequenceLayout, SequenceProps};
 pub use series::{Series, SeriesCoordinator, SeriesProps, SeriesSequence, SeriesSequenceProps};

@@ -324,6 +324,47 @@ fn get_video_metadata(py: Python<'_>, path: &str) -> PyResult<PyObject> {
     Ok(dict.into())
 }
 
+fn tokens_to_py_list(
+    py: Python<'_>,
+    tokens: &[dioxuscut_captions::CaptionToken],
+) -> PyResult<Vec<PyObject>> {
+    let mut list = Vec::new();
+    for t in tokens {
+        let dict = pyo3::types::PyDict::new_bound(py);
+        dict.set_item("text", &t.text)?;
+        dict.set_item("start_ms", t.start_ms)?;
+        dict.set_item("end_ms", t.end_ms)?;
+        dict.set_item("start", t.start_ms as f64 / 1000.0)?;
+        dict.set_item("end", t.end_ms as f64 / 1000.0)?;
+        list.push(dict.into());
+    }
+    Ok(list)
+}
+
+/// Parse OpenAI / Faster-Whisper JSON into a list of word tokens.
+#[pyfunction]
+fn parse_whisper(py: Python<'_>, json_str: &str) -> PyResult<Vec<PyObject>> {
+    let tokens = dioxuscut_captions::parse_whisper_json(json_str)
+        .map_err(|e| PyValueError::new_err(format!("Whisper parse error: {e}")))?;
+    tokens_to_py_list(py, &tokens)
+}
+
+/// Parse SRT subtitle file content into a list of word tokens.
+#[pyfunction]
+fn parse_srt(py: Python<'_>, srt_str: &str) -> PyResult<Vec<PyObject>> {
+    let tokens = dioxuscut_captions::parse_srt(srt_str)
+        .map_err(|e| PyValueError::new_err(format!("SRT parse error: {e}")))?;
+    tokens_to_py_list(py, &tokens)
+}
+
+/// Parse WebVTT subtitle file content into a list of word tokens.
+#[pyfunction]
+fn parse_vtt(py: Python<'_>, vtt_str: &str) -> PyResult<Vec<PyObject>> {
+    let tokens = dioxuscut_captions::parse_vtt(vtt_str)
+        .map_err(|e| PyValueError::new_err(format!("VTT parse error: {e}")))?;
+    tokens_to_py_list(py, &tokens)
+}
+
 /// Python module initialization.
 #[pymodule]
 fn _dioxuscut(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -336,5 +377,8 @@ fn _dioxuscut(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(spring, m)?)?;
     m.add_function(wrap_pyfunction!(static_file, m)?)?;
     m.add_function(wrap_pyfunction!(get_video_metadata, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_whisper, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_srt, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_vtt, m)?)?;
     Ok(())
 }

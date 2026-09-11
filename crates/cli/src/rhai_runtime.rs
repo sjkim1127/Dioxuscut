@@ -265,6 +265,40 @@ impl SceneBuilder {
         self.video_inner(x, y, w, h, src, time, fit, opacity, looped)
     }
 
+    fn emoji(&mut self, x: FLOAT, y: FLOAT, size: FLOAT, emoji: ImmutableString) -> RhaiResult<()> {
+        self.scene.push(SceneNode::Emoji {
+            emoji: emoji.into_owned(),
+            x: finite_f32("x", x)?,
+            y: finite_f32("y", y)?,
+            size: non_negative_f32("size", size)?,
+            opacity: 1.0,
+        });
+        Ok(())
+    }
+
+    fn lottie(
+        &mut self,
+        x: FLOAT,
+        y: FLOAT,
+        w: FLOAT,
+        h: FLOAT,
+        src: ImmutableString,
+        time: FLOAT,
+    ) -> RhaiResult<()> {
+        self.scene.push(SceneNode::Lottie {
+            src: src.into_owned(),
+            time: time.max(0.0) as f64,
+            x: finite_f32("x", x)?,
+            y: finite_f32("y", y)?,
+            w: non_negative_f32("width", w)?,
+            h: non_negative_f32("height", h)?,
+            playback_rate: 1.0,
+            loop_behavior: dioxuscut_rasterizer::LoopBehavior::Loop,
+            opacity: 1.0,
+        });
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn video_inner(
         &mut self,
@@ -572,6 +606,8 @@ fn register_scene_api(engine: &mut Engine) {
     engine.register_fn("video", SceneBuilder::video);
     engine.register_fn("video", SceneBuilder::video_looped);
     engine.register_fn("audio", SceneBuilder::audio);
+    engine.register_fn("emoji", SceneBuilder::emoji);
+    engine.register_fn("lottie", SceneBuilder::lottie);
     engine.register_fn("group", SceneBuilder::group);
     engine.register_fn(
         "interpolate",

@@ -29,10 +29,12 @@
 #![allow(clippy::chunks_exact_to_as_chunks)]
 
 pub mod backend;
+pub mod emoji;
 pub mod font;
 pub mod frame_cache;
 pub mod gif_cache;
 mod image_cache;
+pub(crate) mod lottie_cache;
 pub mod mesh3d;
 pub mod render;
 pub mod scene;
@@ -41,6 +43,7 @@ mod video_cache;
 #[cfg(feature = "gpu")]
 pub mod wgpu_backend;
 
+pub use emoji::{is_emoji_char, is_emoji_grapheme, render_emoji, split_text_and_emojis, TextRun};
 pub use mesh3d::{Mesh3D, Vec3};
 
 pub use backend::{FrameConfig, RasterError, RasterizerBackend};

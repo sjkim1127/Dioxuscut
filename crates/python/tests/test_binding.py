@@ -3,6 +3,7 @@
 Comprehensive tests for Dioxuscut Python SDK bindings.
 """
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -171,6 +172,45 @@ def test_composition_class():
     print("[✓] Composition OOP class test passed.")
 
 
+def test_shorts_ai_video():
+    print("\n[*] Testing ShortsVideo AI Builder with Whisper & Emojis...")
+    whisper_json = json.dumps([
+        {"word": "Awesome", "start": 0.0, "end": 0.5},
+        {"word": "Shorts 🔥", "start": 0.5, "end": 1.0},
+    ])
+    tokens = dioxuscut.parse_whisper(whisper_json)
+    assert len(tokens) == 2
+    assert tokens[0]["text"] == "Awesome"
+
+    out_shorts = TARGET_DIR / "test_shorts_vertical.mp4"
+    if out_shorts.exists():
+        out_shorts.unlink()
+
+    short = dioxuscut.ShortsVideo(
+        width=720,
+        height=1280,
+        fps=30.0,
+        duration_in_frames=30,
+        bg_color="#0b0d19",
+    )
+    short.add_subtitles(
+        tokens,
+        style=dioxuscut.CaptionStyle.HORMOZI,
+        active_color="#ffe600",
+        font_size=48.0,
+    )
+    short.add_emoji("🚀", x=360.0, y=400.0, size=80.0)
+    short.render(out_shorts)
+
+    assert out_shorts.exists() and out_shorts.stat().st_size > 1000
+    meta = dioxuscut.get_video_metadata(str(out_shorts))
+    assert meta["width"] == 720
+    assert meta["height"] == 1280
+    assert not meta["is_landscape"]
+    print(f"[+] Rendered Shorts MP4 size: {out_shorts.stat().st_size} bytes ({meta['width']}x{meta['height']})")
+    print("[✓] ShortsVideo AI Builder test passed.")
+
+
 def main():
     print("=" * 60)
     print("🚀 Running Dioxuscut Python SDK Test Suite")
@@ -181,6 +221,7 @@ def main():
     test_render_video()
     test_render_script()
     test_composition_class()
+    test_shorts_ai_video()
     print("\n" + "=" * 60)
     print("🎉 ALL PYTHON SDK TESTS PASSED PERFECTLY!")
     print("=" * 60)

@@ -450,6 +450,39 @@ pub enum SceneNode {
         #[serde(default = "default_opacity")]
         opacity: f32,
     },
+
+    /// Standalone full-color 32-bit RGBA emoji.
+    Emoji {
+        /// Unicode emoji sequence (e.g. "🔥", "🚀", "💡").
+        emoji: String,
+        x: f32,
+        y: f32,
+        /// Bounding size in pixels.
+        size: f32,
+        #[serde(default = "default_opacity")]
+        opacity: f32,
+    },
+
+    /// Headless Lottie animation scene node (JSON format).
+    ///
+    /// Powered by `rasterlottie` and `tiny-skia`. Synced to the composition timeline.
+    Lottie {
+        /// File path or `file://` URI to the Lottie JSON file.
+        src: String,
+        /// Time in seconds into the Lottie playback.
+        #[serde(default)]
+        time: f64,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        #[serde(default = "default_playback_rate")]
+        playback_rate: f32,
+        #[serde(default)]
+        loop_behavior: crate::gif_cache::LoopBehavior,
+        #[serde(default = "default_opacity")]
+        opacity: f32,
+    },
 }
 
 const fn default_playback_rate() -> f32 {

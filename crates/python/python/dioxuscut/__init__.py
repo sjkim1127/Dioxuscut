@@ -15,20 +15,29 @@ from ._dioxuscut import (
     interpolate,
     interpolate_colors,
     list_compositions,
+    parse_srt,
+    parse_vtt,
+    parse_whisper,
     random,
     render_native,
     spring,
     static_file,
 )
+from .shorts import CaptionStyle, ShortsVideo
 
 __version__ = get_version()
 __all__ = [
     "__version__",
+    "CaptionStyle",
     "Composition",
+    "ShortsVideo",
     "get_video_metadata",
     "interpolate",
     "interpolate_colors",
     "list_compositions",
+    "parse_srt",
+    "parse_vtt",
+    "parse_whisper",
     "random",
     "render",
     "render_script",

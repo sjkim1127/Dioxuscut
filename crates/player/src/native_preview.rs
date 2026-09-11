@@ -535,6 +535,46 @@ fn SceneNodeView(props: SceneNodeViewProps) -> Element {
                 }
             }
         }
+        SceneNode::Emoji {
+            emoji,
+            x,
+            y,
+            size,
+            opacity,
+        } => {
+            let font_size = size;
+            let style = format!("font-size: {}px; user-select: none;", font_size);
+            rsx! {
+                text {
+                    x,
+                    y: y + font_size * 0.85,
+                    opacity,
+                    style: "{style}",
+                    "{emoji}"
+                }
+            }
+        }
+        SceneNode::Lottie {
+            x,
+            y,
+            w,
+            h,
+            opacity,
+            ..
+        } => {
+            rsx! {
+                rect {
+                    x,
+                    y,
+                    width: w,
+                    height: h,
+                    fill: "none",
+                    stroke: "rgba(0, 240, 255, 0.4)",
+                    stroke_width: 1.0,
+                    opacity,
+                }
+            }
+        }
     }
 }
 

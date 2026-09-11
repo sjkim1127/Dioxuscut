@@ -20,6 +20,7 @@ tokio = { workspace = true }
 anyhow = { workspace = true }
 
 dioxuscut-animation = { workspace = true }
+dioxuscut-captions = { workspace = true }
 dioxuscut-cli = { workspace = true, features = ["rhai"] }
 dioxuscut-composition = { workspace = true }
 dioxuscut-core = { workspace = true }

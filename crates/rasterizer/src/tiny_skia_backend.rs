@@ -29,6 +29,7 @@ pub struct TinySkiaBackend {
     images: ImageCache,
     videos: VideoFrameCache,
     gifs: GifFrameCache,
+    lotties: crate::lottie_cache::LottieCache,
 }
 
 impl TinySkiaBackend {
@@ -39,6 +40,7 @@ impl TinySkiaBackend {
             images: ImageCache::default(),
             videos: VideoFrameCache::default(),
             gifs: GifFrameCache::new(),
+            lotties: crate::lottie_cache::LottieCache::default(),
         }
     }
 
@@ -49,6 +51,7 @@ impl TinySkiaBackend {
             images: ImageCache::default(),
             videos: VideoFrameCache::default(),
             gifs: GifFrameCache::new(),
+            lotties: crate::lottie_cache::LottieCache::default(),
         }
     }
 
@@ -80,6 +83,7 @@ impl RasterizerBackend for TinySkiaBackend {
             images: &self.images,
             videos: &self.videos,
             gifs: &self.gifs,
+            lotties: &self.lotties,
             sampling_fps: config.fps,
         };
         render_nodes(
@@ -103,6 +107,7 @@ struct RenderResources<'a> {
     images: &'a ImageCache,
     videos: &'a VideoFrameCache,
     gifs: &'a GifFrameCache,
+    lotties: &'a crate::lottie_cache::LottieCache,
     sampling_fps: f64,
 }
 
@@ -317,6 +322,62 @@ fn render_node(
             }
         }
 
+        SceneNode::Lottie {
+            src,
+            time,
+            x,
+            y,
+            w,
+            h,
+            playback_rate,
+            loop_behavior,
+            opacity: node_opacity,
+        } => {
+            let time_secs = *time * *playback_rate as f64;
+            let target_w = (*w).round().max(1.0) as u32;
+            let target_h = (*h).round().max(1.0) as u32;
+            let frame_image =
+                resources
+                    .lotties
+                    .render(src, time_secs, target_w, target_h, *loop_behavior)?;
+            draw_media(
+                pixmap,
+                &frame_image,
+                src,
+                *x,
+                *y,
+                *w,
+                *h,
+                ImageFit::Contain,
+                opacity * node_opacity,
+                transform,
+            )?;
+        }
+
+        SceneNode::Emoji {
+            emoji,
+            x,
+            y,
+            size,
+            opacity: node_opacity,
+        } => {
+            let target_size = (*size).round().max(8.0) as u32;
+            if let Some(emoji_img) = crate::emoji::render_emoji(emoji, target_size) {
+                draw_media(
+                    pixmap,
+                    &emoji_img,
+                    emoji,
+                    *x,
+                    *y,
+                    *size,
+                    *size,
+                    ImageFit::Contain,
+                    opacity * node_opacity,
+                    transform,
+                )?;
+            }
+        }
+
         SceneNode::LinearGradient {
             x,
             y,
@@ -476,8 +537,54 @@ fn render_node(
             font_size,
             color,
             font_sources,
-            ..
+            font_weight,
         } => {
+            let has_emoji = content.chars().any(crate::emoji::is_emoji_char);
+            if has_emoji {
+                let runs = crate::emoji::split_text_and_emojis(content);
+                let mut pen_x = *x;
+                for run in runs {
+                    match run {
+                        crate::emoji::TextRun::Text(text_part) => {
+                            if text_part.is_empty() {
+                                continue;
+                            }
+                            let part_width = crate::font::measure_text_width(
+                                &text_part,
+                                *font_size,
+                                font_sources,
+                            )
+                            .unwrap_or_else(|_| {
+                                text_part.chars().count() as f32 * *font_size * 0.5
+                            });
+                            let sub_node = SceneNode::Text {
+                                x: pen_x,
+                                y: *y,
+                                content: text_part,
+                                font_size: *font_size,
+                                color: *color,
+                                font_weight: *font_weight,
+                                font_sources: font_sources.clone(),
+                            };
+                            render_node(pixmap, &sub_node, transform, opacity, resources)?;
+                            pen_x += part_width;
+                        }
+                        crate::emoji::TextRun::Emoji(emoji_str) => {
+                            let emoji_node = SceneNode::Emoji {
+                                emoji: emoji_str,
+                                x: pen_x,
+                                y: *y - *font_size * 0.85,
+                                size: *font_size,
+                                opacity: 1.0,
+                            };
+                            render_node(pixmap, &emoji_node, transform, opacity, resources)?;
+                            pen_x += *font_size * 1.08;
+                        }
+                    }
+                }
+                return Ok(());
+            }
+
             let text_color = apply_opacity(*color, opacity);
 
             if let Some(rendered) = resources
