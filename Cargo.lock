@@ -1807,6 +1807,7 @@ name = "dioxuscut-rasterizer"
 version = "0.2.0-alpha.1"
 dependencies = [
  "ab_glyph",
+ "base64",
  "criterion",
  "image",
  "lyon_tessellation",

@@ -7,9 +7,11 @@ use crate::composition::{
     layout::prelude::*, Composition, CompositionError, LayoutBox, NativeCompositionContext,
     PreparedComposition,
 };
+use base64::Engine as _;
 use dioxuscut_rasterizer::{
-    layout_text_box, AudioTrack, Color, GradientStop, ImageFit, Scene, SceneNode, TextBox,
-    TextHorizontalAlign, TextOverflow, Transform2D, VisualizerStyle,
+    layout_text_box, parse_glb, parse_gltf, AudioTrack, Color, ConfettiEmitter, ConfettiShape,
+    GradientStop, ImageFit, Mesh3D, Scene, SceneNode, TextBox, TextHorizontalAlign, TextOverflow,
+    Transform2D, Vec3, VisualizerStyle,
 };
 use rhai::module_resolvers::DummyModuleResolver;
 use rhai::{
@@ -1007,6 +1009,228 @@ impl SceneBuilder {
         self.scene.nodes.extend(doc.scene.nodes);
         Ok(())
     }
+
+    fn confetti_at(&mut self, x: Dynamic, y: Dynamic, opts: Map) -> RhaiResult<()> {
+        let x = dynamic_to_finite_f32(&x, "x")?;
+        let y = dynamic_to_finite_f32(&y, "y")?;
+        let count = get_opt_usize(&opts, "count", 150);
+        let spread = get_opt_f32(&opts, "spread", 70.0);
+        let angle = get_opt_f32(&opts, "angle", 270.0);
+        let velocity = get_opt_f32(&opts, "velocity", 600.0);
+        let gravity = get_opt_f32(&opts, "gravity", 750.0);
+        let frame = get_opt_usize(&opts, "frame", 0);
+        let fps = get_opt_f32(&opts, "fps", 30.0);
+        let seed = get_opt_u64(&opts, "seed", 42);
+
+        let colors =
+            if let Some(c_arr) = opts.get("colors").and_then(|v| v.clone().into_array().ok()) {
+                let mut list = Vec::new();
+                for c in c_arr {
+                    if let Ok(s) = c.into_string() {
+                        if let Ok(parsed) = parse_color(&s) {
+                            list.push(parsed);
+                        }
+                    }
+                }
+                if list.is_empty() {
+                    None
+                } else {
+                    Some(list)
+                }
+            } else {
+                None
+            };
+
+        let shapes =
+            if let Some(s_arr) = opts.get("shapes").and_then(|v| v.clone().into_array().ok()) {
+                let mut list = Vec::new();
+                for s in s_arr {
+                    if let Ok(name) = s.into_string() {
+                        match name.to_lowercase().as_str() {
+                            "circle" => list.push(ConfettiShape::Circle),
+                            "star" => list.push(ConfettiShape::Star),
+                            "rect" | "rectangle" => list.push(ConfettiShape::Rectangle),
+                            _ => {}
+                        }
+                    }
+                }
+                if list.is_empty() {
+                    None
+                } else {
+                    Some(list)
+                }
+            } else {
+                None
+            };
+
+        let mut emitter = ConfettiEmitter::new(x, y)
+            .with_count(count)
+            .with_spread(spread)
+            .with_angle(angle)
+            .with_velocity(velocity);
+        emitter.gravity = gravity;
+        emitter.seed = seed;
+        if let Some(c) = colors {
+            emitter = emitter.with_colors(c);
+        }
+        if let Some(s) = shapes {
+            emitter.shapes = s;
+        }
+
+        let nodes = emitter.render_frame(frame, fps);
+        self.scene.nodes.extend(nodes);
+        Ok(())
+    }
+
+    fn confetti(&mut self, opts: Map) -> RhaiResult<()> {
+        let x = Dynamic::from_float(get_opt_f32(&opts, "x", 960.0) as FLOAT);
+        let y = Dynamic::from_float(get_opt_f32(&opts, "y", 540.0) as FLOAT);
+        self.confetti_at(x, y, opts)
+    }
+
+    fn confetti_cannon(&mut self, origin: &str, mut opts: Map) -> RhaiResult<()> {
+        let (x, y, angle) = match origin.to_lowercase().as_str() {
+            "bottom_left" | "left" => (0.0, 1080.0, 315.0),
+            "bottom_right" | "right" => (1920.0, 1080.0, 225.0),
+            "top" => (960.0, 0.0, 90.0),
+            _ => (960.0, 540.0, 270.0),
+        };
+        if !opts.contains_key("angle") {
+            opts.insert("angle".into(), Dynamic::from_float(angle as FLOAT));
+        }
+        self.confetti_at(
+            Dynamic::from_float(x as FLOAT),
+            Dynamic::from_float(y as FLOAT),
+            opts,
+        )
+    }
+
+    fn mesh_3d(&mut self, mesh_type: &str, opts: Map) -> RhaiResult<()> {
+        let center_x = get_opt_f32(&opts, "x", get_opt_f32(&opts, "center_x", 960.0));
+        let center_y = get_opt_f32(&opts, "y", get_opt_f32(&opts, "center_y", 540.0));
+        let size = get_opt_f32(&opts, "size", 200.0);
+        let scale = get_opt_f32(&opts, "scale", 1.0);
+        let pitch = get_opt_f32(&opts, "pitch", get_opt_f32(&opts, "rotate_x", 0.0)).to_radians();
+        let yaw = get_opt_f32(&opts, "yaw", get_opt_f32(&opts, "rotate_y", 0.0)).to_radians();
+        let roll = get_opt_f32(&opts, "roll", get_opt_f32(&opts, "rotate_z", 0.0)).to_radians();
+        let cam_dist = get_opt_f32(&opts, "camera_dist", 600.0);
+        let wireframe = opts
+            .get("wireframe")
+            .and_then(|v| v.as_bool().ok())
+            .unwrap_or(false);
+
+        let color_str = get_opt_string(&opts, "color").unwrap_or_else(|| "#3b82f6".to_string());
+        let base_color = parse_color(&color_str)?;
+
+        let light_x = get_opt_f32(&opts, "light_x", 0.5);
+        let light_y = get_opt_f32(&opts, "light_y", 1.0);
+        let light_z = get_opt_f32(&opts, "light_z", 0.8);
+        let light_dir = Vec3::new(light_x, light_y, light_z);
+
+        let mut mesh = match mesh_type.to_lowercase().as_str() {
+            "cube" | "box" => Mesh3D::cube(size),
+            "sphere" => {
+                let rings = get_opt_usize(&opts, "rings", 16);
+                let sectors = get_opt_usize(&opts, "sectors", 24);
+                Mesh3D::sphere(size * 0.5, rings, sectors)
+            }
+            "torus" | "donut" => {
+                let r_major = size * 0.5;
+                let r_minor = get_opt_f32(&opts, "tube_radius", r_major * 0.35);
+                let segs_major = get_opt_usize(&opts, "segs_major", 24);
+                let segs_minor = get_opt_usize(&opts, "segs_minor", 16);
+                Mesh3D::torus(r_major, r_minor, segs_major, segs_minor)
+            }
+            unknown => {
+                return Err(runtime_error(format!(
+                    "Unknown 3D mesh type '{unknown}'. Valid types: 'cube', 'sphere', 'torus'"
+                )))
+            }
+        };
+
+        if (scale - 1.0).abs() > 1e-4 {
+            mesh.scale(scale);
+        }
+        mesh.rotate(pitch, yaw, roll);
+
+        mesh.render_to_scene(
+            &mut self.scene,
+            center_x,
+            center_y,
+            cam_dist,
+            base_color,
+            light_dir,
+            wireframe,
+        );
+
+        Ok(())
+    }
+
+    fn gltf(&mut self, gltf_source: &str, opts: Map) -> RhaiResult<()> {
+        let center_x = get_opt_f32(&opts, "x", get_opt_f32(&opts, "center_x", 960.0));
+        let center_y = get_opt_f32(&opts, "y", get_opt_f32(&opts, "center_y", 540.0));
+        let scale = get_opt_f32(&opts, "scale", 100.0);
+        let pitch = get_opt_f32(&opts, "pitch", get_opt_f32(&opts, "rotate_x", 0.0)).to_radians();
+        let yaw = get_opt_f32(&opts, "yaw", get_opt_f32(&opts, "rotate_y", 0.0)).to_radians();
+        let roll = get_opt_f32(&opts, "roll", get_opt_f32(&opts, "rotate_z", 0.0)).to_radians();
+        let cam_dist = get_opt_f32(&opts, "camera_dist", 600.0);
+        let wireframe = opts
+            .get("wireframe")
+            .and_then(|v| v.as_bool().ok())
+            .unwrap_or(false);
+
+        let light_x = get_opt_f32(&opts, "light_x", 0.5);
+        let light_y = get_opt_f32(&opts, "light_y", 1.0);
+        let light_z = get_opt_f32(&opts, "light_z", 0.8);
+        let light_dir = Vec3::new(light_x, light_y, light_z);
+
+        let trimmed = gltf_source.trim();
+        let mut model = if trimmed.starts_with('{') {
+            parse_gltf(trimmed, None)
+                .map_err(|e| runtime_error(format!("Failed to parse glTF: {e}")))?
+        } else if let Some(b64) = trimmed.strip_prefix("data:model/gltf-binary;base64,") {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(b64)
+                .map_err(|e| runtime_error(format!("Failed to decode GLB base64: {e}")))?;
+            parse_glb(&bytes).map_err(|e| runtime_error(format!("Failed to parse GLB: {e}")))?
+        } else if let Some(b64) = trimmed.strip_prefix("data:model/gltf+json;base64,") {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(b64)
+                .map_err(|e| runtime_error(format!("Failed to decode glTF JSON base64: {e}")))?;
+            let json = std::str::from_utf8(&bytes)
+                .map_err(|e| runtime_error(format!("Invalid UTF-8 in glTF JSON base64: {e}")))?;
+            parse_gltf(json, None)
+                .map_err(|e| runtime_error(format!("Failed to parse glTF: {e}")))?
+        } else {
+            // Attempt JSON parse first, then GLB
+            parse_gltf(trimmed, None)
+                .or_else(|_| parse_glb(trimmed.as_bytes()))
+                .map_err(|e| runtime_error(format!("Failed to parse 3D glTF/GLB: {e}")))?
+        };
+
+        let base_color = if let Some(color_str) = get_opt_string(&opts, "color") {
+            parse_color(&color_str)?
+        } else {
+            model.base_color
+        };
+
+        if (scale - 1.0).abs() > 1e-4 {
+            model.mesh.scale(scale);
+        }
+        model.mesh.rotate(pitch, yaw, roll);
+
+        model.mesh.render_to_scene(
+            &mut self.scene,
+            center_x,
+            center_y,
+            cam_dist,
+            base_color,
+            light_dir,
+            wireframe,
+        );
+
+        Ok(())
+    }
 }
 
 fn get_opt_f32(map: &Map, key: &str, default: f32) -> f32 {
@@ -1035,6 +1259,28 @@ fn get_opt_f32_opt(map: &Map, key: &str) -> Option<f32> {
 
 fn get_opt_string(map: &Map, key: &str) -> Option<String> {
     map.get(key).and_then(|v| v.clone().into_string().ok())
+}
+
+fn get_opt_usize(map: &Map, key: &str, default: usize) -> usize {
+    if let Some(v) = map.get(key) {
+        if let Ok(i) = v.as_int() {
+            if i >= 0 {
+                return i as usize;
+            }
+        }
+    }
+    default
+}
+
+fn get_opt_u64(map: &Map, key: &str, default: u64) -> u64 {
+    if let Some(v) = map.get(key) {
+        if let Ok(i) = v.as_int() {
+            if i >= 0 {
+                return i as u64;
+            }
+        }
+    }
+    default
 }
 
 fn apply_layout_options(box_layout: &mut LayoutBox, opts: &Map) -> RhaiResult<()> {
@@ -1069,6 +1315,16 @@ fn dynamic_to_non_negative_f32(val: &Dynamic, name: &str) -> RhaiResult<f32> {
     }
     if let Ok(i) = val.as_int() {
         return non_negative_f32(name, i as FLOAT);
+    }
+    Err(runtime_error(format!("{name} must be a valid number")))
+}
+
+fn dynamic_to_finite_f32(val: &Dynamic, name: &str) -> RhaiResult<f32> {
+    if let Ok(f) = val.as_float() {
+        return finite_f32(name, f);
+    }
+    if let Ok(i) = val.as_int() {
+        return finite_f32(name, i as FLOAT);
     }
     Err(runtime_error(format!("{name} must be a valid number")))
 }
@@ -1326,6 +1582,11 @@ fn register_scene_api(engine: &mut Engine) {
     engine.register_fn("d3_bar", SceneBuilder::d3_bar);
     engine.register_fn("d3_pie", SceneBuilder::d3_pie);
     engine.register_fn("d3_eval", SceneBuilder::d3_eval);
+    engine.register_fn("confetti", SceneBuilder::confetti);
+    engine.register_fn("confetti", SceneBuilder::confetti_at);
+    engine.register_fn("confetti_cannon", SceneBuilder::confetti_cannon);
+    engine.register_fn("mesh_3d", SceneBuilder::mesh_3d);
+    engine.register_fn("gltf", SceneBuilder::gltf);
 
     engine.register_type_with_name::<RhaiLayout>("RhaiLayout");
     engine.register_fn("rect", RhaiLayout::rect);

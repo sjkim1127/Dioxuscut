@@ -34,9 +34,11 @@ pub mod emoji;
 pub mod font;
 pub mod frame_cache;
 pub mod gif_cache;
+pub mod gltf;
 mod image_cache;
 pub(crate) mod lottie_cache;
 pub mod mesh3d;
+pub mod particles;
 pub mod render;
 pub mod scene;
 pub mod security;
@@ -50,7 +52,9 @@ pub use security::MediaSecurityPolicy;
 
 pub use audio_cache::AudioData;
 pub use emoji::{is_emoji_char, is_emoji_grapheme, render_emoji, split_text_and_emojis, TextRun};
+pub use gltf::{parse_glb, parse_gltf, GltfModel};
 pub use mesh3d::{Mesh3D, Vec3};
+pub use particles::{ConfettiEmitter, ConfettiShape, Particle};
 
 pub use backend::{FrameConfig, RasterError, RasterizerBackend};
 pub use font::{

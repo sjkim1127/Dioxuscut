@@ -37,7 +37,7 @@ axum               = { workspace = true, features = ["ws"] }
 tower-http         = { workspace = true }
 image              = { workspace = true }
 notify             = "6"
-base64             = "0.22"
+base64             = { workspace = true }
 taffy              = { workspace = true }
 
 [dev-dependencies]
