@@ -93,20 +93,13 @@ struct InstanceData {
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
-@group(1) @binding(0) var<uniform> instance: InstanceData;
+@group(1) @binding(0) var<storage, read> instances: array<InstanceData>;
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) local_position: vec2<f32>,
+    @location(1) @interpolate(flat) instance_index: u32,
 };
-
-fn transform_position(local: vec2<f32>) -> vec2<f32> {
-    let value = vec3<f32>(local, 1.0);
-    return vec2<f32>(
-        dot(instance.transform_x.xyz, value),
-        dot(instance.transform_y.xyz, value),
-    );
-}
 
 fn to_clip_position(pixel_position: vec2<f32>) -> vec4<f32> {
     let ndc = vec2<f32>(
@@ -117,7 +110,11 @@ fn to_clip_position(pixel_position: vec2<f32>) -> vec4<f32> {
 }
 
 @vertex
-fn vs_main(@builtin(vertex_index) vid: u32) -> VertexOutput {
+fn vs_main(
+    @builtin(vertex_index) vid: u32,
+    @builtin(instance_index) iid: u32,
+) -> VertexOutput {
+    let instance = instances[iid];
     let x = instance.bounds.x;
     let y = instance.bounds.y;
     let w = instance.bounds.z;
@@ -134,7 +131,12 @@ fn vs_main(@builtin(vertex_index) vid: u32) -> VertexOutput {
         case 4u: { pixel_pos = vec2<f32>(x + w, y + h); }
         default: { pixel_pos = vec2<f32>(x + w, y    ); }
     }
-    return VertexOutput(to_clip_position(transform_position(pixel_pos)), pixel_pos);
+    let value = vec3<f32>(pixel_pos, 1.0);
+    let transformed = vec2<f32>(
+        dot(instance.transform_x.xyz, value),
+        dot(instance.transform_y.xyz, value),
+    );
+    return VertexOutput(to_clip_position(transformed), pixel_pos, iid);
 }
 
 struct MeshVertexInput {
@@ -142,24 +144,33 @@ struct MeshVertexInput {
 };
 
 @vertex
-fn vs_mesh(vertex: MeshVertexInput) -> VertexOutput {
-    return VertexOutput(to_clip_position(transform_position(vertex.position)), vertex.position);
+fn vs_mesh(
+    vertex: MeshVertexInput,
+    @builtin(instance_index) iid: u32,
+) -> VertexOutput {
+    let instance = instances[iid];
+    let value = vec3<f32>(vertex.position, 1.0);
+    let transformed = vec2<f32>(
+        dot(instance.transform_x.xyz, value),
+        dot(instance.transform_y.xyz, value),
+    );
+    return VertexOutput(to_clip_position(transformed), vertex.position, iid);
 }
 
-fn gradient_color(t: f32) -> vec4<f32> {
-    let count = max(instance.kind_data.y, 1u);
-    if t <= instance.stop_positions[0].x {
-        return instance.stop_colors[0];
+fn gradient_color(instance_idx: u32, t: f32) -> vec4<f32> {
+    let count = max(instances[instance_idx].kind_data.y, 1u);
+    if t <= instances[instance_idx].stop_positions[0].x {
+        return instances[instance_idx].stop_colors[0];
     }
 
-    var previous_position = instance.stop_positions[0].x;
-    var previous_color = instance.stop_colors[0];
+    var previous_position = instances[instance_idx].stop_positions[0].x;
+    var previous_color = instances[instance_idx].stop_colors[0];
     for (var index = 1u; index < 16u; index = index + 1u) {
         if index >= count {
             break;
         }
-        let next_position = instance.stop_positions[index].x;
-        let next_color = instance.stop_colors[index];
+        let next_position = instances[instance_idx].stop_positions[index].x;
+        let next_color = instances[instance_idx].stop_colors[index];
         if t <= next_position {
             let span = max(next_position - previous_position, 0.000001);
             let amount = clamp((t - previous_position) / span, 0.0, 1.0);
@@ -173,6 +184,7 @@ fn gradient_color(t: f32) -> vec4<f32> {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    let instance = instances[in.instance_index];
     let shape_type = instance.kind_data.x;
     let shape = instance.shape_bounds;
     var col = instance.color;
@@ -219,20 +231,21 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let center = shape.xy + shape.zw * 0.5;
         let half_diagonal = length(shape.zw) * 0.5;
         let t = dot(in.local_position - center, dir) / max(half_diagonal * 2.0, 0.000001) + 0.5;
-        col = gradient_color(clamp(t, 0.0, 1.0));
+        col = gradient_color(in.instance_index, clamp(t, 0.0, 1.0));
 
     } else if shape_type == 3u {
         let center = shape.xy + shape.zw * 0.5;
         let radius = max(shape.z * 0.5, 0.000001);
         let t = clamp(length(in.local_position - center) / radius, 0.0, 1.0);
-        col = gradient_color(t);
+        col = gradient_color(in.instance_index, t);
     }
 
     return vec4<f32>(col.rgb, col.a * instance.params.w * coverage);
 }
 
 @fragment
-fn fs_solid(_in: VertexOutput) -> @location(0) vec4<f32> {
+fn fs_solid(in: VertexOutput) -> @location(0) vec4<f32> {
+    let instance = instances[in.instance_index];
     return vec4<f32>(instance.color.rgb, instance.color.a * instance.params.w);
 }
 "#;
@@ -318,7 +331,7 @@ impl GpuContext {
                 binding: 0,
                 visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
@@ -566,8 +579,90 @@ impl RasterizerBackend for WgpuBackend {
             label: Some("frame_encoder"),
         });
 
-        // Clear pass — renders to MSAA, resolves into the resolve texture.
-        {
+        let all_instances: Vec<GpuInstance> = commands.iter().map(|c| *c.instance()).collect();
+
+        if !all_instances.is_empty() {
+            // Upload all instances in a single storage buffer.
+            let instance_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("instances_storage_buf"),
+                contents: bytemuck_cast(&all_instances),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+            let instance_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("instances_bg"),
+                layout: &self.ctx.instance_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: instance_buf.as_entire_binding(),
+                }],
+            });
+
+            // Pre-allocate buffers for Mesh commands so their lifetimes encompass the pass.
+            let mesh_buffers: Vec<Option<(wgpu::Buffer, wgpu::Buffer)>> = commands
+                .iter()
+                .map(|cmd| match cmd {
+                    DrawCommand::Mesh {
+                        vertices, indices, ..
+                    } => {
+                        let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("path_vertices"),
+                            contents: bytemuck_cast(vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                        let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("path_indices"),
+                            contents: bytemuck_cast(indices),
+                            usage: wgpu::BufferUsages::INDEX,
+                        });
+                        Some((vb, ib))
+                    }
+                    DrawCommand::Analytic { .. } => None,
+                })
+                .collect();
+
+            // Single render pass for the entire frame!
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("frame_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &res.msaa_view,
+                    resolve_target: Some(&res.texture_view),
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+
+            pass.set_bind_group(0, &globals_bg, &[]);
+            pass.set_bind_group(1, &instance_bg, &[]);
+
+            // Batch consecutive Analytic commands, and dispatch Meshes individually.
+            let mut i = 0;
+            while i < commands.len() {
+                match &commands[i] {
+                    DrawCommand::Analytic { .. } => {
+                        let start = i;
+                        while i < commands.len()
+                            && matches!(commands[i], DrawCommand::Analytic { .. })
+                        {
+                            i += 1;
+                        }
+                        pass.set_pipeline(&self.ctx.pipeline);
+                        pass.draw(0..6, start as u32..i as u32);
+                    }
+                    DrawCommand::Mesh { indices, .. } => {
+                        let (vb, ib) = mesh_buffers[i].as_ref().expect("mesh buffers allocated");
+                        pass.set_pipeline(&self.ctx.mesh_pipeline);
+                        pass.set_vertex_buffer(0, vb.slice(..));
+                        pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..indices.len() as u32, 0, i as u32..i as u32 + 1);
+                        i += 1;
+                    }
+                }
+            }
+        } else {
+            // Clear pass for empty scene
             let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("clear_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -580,78 +675,6 @@ impl RasterizerBackend for WgpuBackend {
                 })],
                 ..Default::default()
             });
-        }
-
-        // Draw each compiled node in painter's order.
-        for command in &commands {
-            let instance_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("instance_buf"),
-                contents: bytemuck_cast(std::slice::from_ref(command.instance())),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
-            let instance_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("instance_bg"),
-                layout: &self.ctx.instance_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: instance_buf.as_entire_binding(),
-                }],
-            });
-
-            let vertex_buf = match command {
-                DrawCommand::Mesh { vertices, .. } => Some(device.create_buffer_init(
-                    &wgpu::util::BufferInitDescriptor {
-                        label: Some("path_vertices"),
-                        contents: bytemuck_cast(vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    },
-                )),
-                DrawCommand::Analytic { .. } => None,
-            };
-            let index_buf = match command {
-                DrawCommand::Mesh { indices, .. } => Some(device.create_buffer_init(
-                    &wgpu::util::BufferInitDescriptor {
-                        label: Some("path_indices"),
-                        contents: bytemuck_cast(indices),
-                        usage: wgpu::BufferUsages::INDEX,
-                    },
-                )),
-                DrawCommand::Analytic { .. } => None,
-            };
-
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("draw_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &res.msaa_view,
-                    resolve_target: Some(&res.texture_view),
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
-
-            pass.set_bind_group(0, &globals_bg, &[]);
-            pass.set_bind_group(1, &instance_bg, &[]);
-            match command {
-                DrawCommand::Analytic { .. } => {
-                    pass.set_pipeline(&self.ctx.pipeline);
-                    pass.draw(0..6, 0..1);
-                }
-                DrawCommand::Mesh { indices, .. } => {
-                    pass.set_pipeline(&self.ctx.mesh_pipeline);
-                    pass.set_vertex_buffer(
-                        0,
-                        vertex_buf.as_ref().expect("mesh vertex buffer").slice(..),
-                    );
-                    pass.set_index_buffer(
-                        index_buf.as_ref().expect("mesh index buffer").slice(..),
-                        wgpu::IndexFormat::Uint32,
-                    );
-                    pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
-                }
-            }
         }
 
         // ── Copy resolved texture → readback buffer ──────────────────────────
