@@ -31,11 +31,17 @@ pub struct TinySkiaBackend {
     gifs: GifFrameCache,
     lotties: crate::lottie_cache::LottieCache,
     audios: crate::audio_cache::AudioCache,
+    security: crate::security::MediaSecurityPolicy,
 }
 
 impl TinySkiaBackend {
     /// Create a new backend, loading a system font automatically.
     pub fn new() -> Self {
+        Self::new_with_policy(crate::security::MediaSecurityPolicy::default())
+    }
+
+    /// Create a new backend with a media security sandbox policy.
+    pub fn new_with_policy(security: crate::security::MediaSecurityPolicy) -> Self {
         Self {
             font: FontCache::load(),
             images: ImageCache::default(),
@@ -43,11 +49,17 @@ impl TinySkiaBackend {
             gifs: GifFrameCache::new(),
             lotties: crate::lottie_cache::LottieCache::default(),
             audios: crate::audio_cache::AudioCache::default(),
+            security,
         }
     }
 
     /// Create without loading a font (text will use placeholder blocks).
     pub fn headless() -> Self {
+        Self::headless_with_policy(crate::security::MediaSecurityPolicy::default())
+    }
+
+    /// Create without loading a font, with a media security sandbox policy.
+    pub fn headless_with_policy(security: crate::security::MediaSecurityPolicy) -> Self {
         Self {
             font: FontCache::headless(),
             images: ImageCache::default(),
@@ -55,7 +67,14 @@ impl TinySkiaBackend {
             gifs: GifFrameCache::new(),
             lotties: crate::lottie_cache::LottieCache::default(),
             audios: crate::audio_cache::AudioCache::default(),
+            security,
         }
+    }
+
+    /// Configure the media security sandbox policy on the backend.
+    pub fn with_security_policy(mut self, security: crate::security::MediaSecurityPolicy) -> Self {
+        self.security = security;
+        self
     }
 
     /// Stop all idle persistent FFmpeg decoder processes immediately.
@@ -78,8 +97,7 @@ impl RasterizerBackend for TinySkiaBackend {
             RasterError::Init("Failed to create Pixmap — invalid dimensions".into())
         })?;
 
-        // Clear to transparent
-        pixmap.fill(tiny_skia::Color::TRANSPARENT);
+        // Pixmap::new already allocates zeroed (transparent) pixels.
 
         let resources = RenderResources {
             font: &self.font,
@@ -89,6 +107,7 @@ impl RasterizerBackend for TinySkiaBackend {
             lotties: &self.lotties,
             audios: &self.audios,
             sampling_fps: config.fps,
+            security: &self.security,
         };
         render_nodes(
             &mut pixmap,
@@ -98,8 +117,9 @@ impl RasterizerBackend for TinySkiaBackend {
             &resources,
         )?;
 
-        // Convert tiny-skia Pixmap (RGBA premultiplied) to image::RgbaImage
-        let raw_data = pixmap.data().to_vec();
+        // Transfer the pixel allocation; copying a full frame here doubles
+        // output-buffer traffic and temporarily retains two frame buffers.
+        let raw_data = pixmap.take();
         RgbaImage::from_raw(config.width, config.height, raw_data).ok_or_else(|| {
             RasterError::ImageEncode("Failed to build RgbaImage from pixel data".into())
         })
@@ -114,6 +134,7 @@ struct RenderResources<'a> {
     lotties: &'a crate::lottie_cache::LottieCache,
     audios: &'a crate::audio_cache::AudioCache,
     sampling_fps: f64,
+    security: &'a crate::security::MediaSecurityPolicy,
 }
 
 fn render_nodes(
@@ -249,7 +270,7 @@ fn render_node(
             fit,
             opacity: node_opacity,
         } => {
-            let source = resources.images.load(src)?;
+            let source = resources.images.load_with_policy(src, resources.security)?;
             draw_media(
                 pixmap,
                 &source,
@@ -275,9 +296,13 @@ fn render_node(
             fit,
             opacity: node_opacity,
         } => {
-            let source = resources
-                .videos
-                .load(src, *time, resources.sampling_fps, *looped)?;
+            let source = resources.videos.load_with_policy(
+                src,
+                *time,
+                resources.sampling_fps,
+                *looped,
+                resources.security,
+            )?;
             draw_media(
                 pixmap,
                 &source,
@@ -306,7 +331,9 @@ fn render_node(
             fit,
             opacity: node_opacity,
         } => {
-            let frames = resources.gifs.load_frames(src)?;
+            let frames = resources
+                .gifs
+                .load_frames_with_policy(src, resources.security)?;
             // Convert composition time to GIF playback time in milliseconds.
             // `time` is already the composition time in seconds; scale by playback_rate.
             let time_ms = *time * *playback_rate as f64 * 1000.0;
@@ -341,10 +368,14 @@ fn render_node(
             let time_secs = *time * *playback_rate as f64;
             let target_w = (*w).round().max(1.0) as u32;
             let target_h = (*h).round().max(1.0) as u32;
-            let frame_image =
-                resources
-                    .lotties
-                    .render(src, time_secs, target_w, target_h, *loop_behavior)?;
+            let frame_image = resources.lotties.render_with_policy(
+                src,
+                time_secs,
+                target_w,
+                target_h,
+                *loop_behavior,
+                resources.security,
+            )?;
             draw_media(
                 pixmap,
                 &frame_image,
@@ -1433,6 +1464,7 @@ fn render_audio_visualizer(
     time: f64,
     transform: Transform,
 ) -> Result<(), RasterError> {
+    resources.security.validate_path(src)?;
     let mut paint = Paint::default();
     paint.set_color_rgba8(color.r, color.g, color.b, color.a);
     paint.anti_alias = true;
@@ -1447,7 +1479,7 @@ fn render_audio_visualizer(
             let n_bars = (*count).max(1);
             let bins = resources
                 .audios
-                .get_spectrum(src, time, n_bars)
+                .get_spectrum_with_policy(src, time, n_bars, resources.security)
                 .unwrap_or_else(|_| vec![0.0; n_bars]);
             let total_gap = gap * (n_bars - 1) as f32;
             let bar_width = ((w - total_gap) / n_bars as f32).max(1.0);
@@ -1483,7 +1515,13 @@ fn render_audio_visualizer(
             let window_secs = 0.05; // 50ms window
             let points = resources
                 .audios
-                .get_waveform_slice(src, time, window_secs, n_points)
+                .get_waveform_slice_with_policy(
+                    src,
+                    time,
+                    window_secs,
+                    n_points,
+                    resources.security,
+                )
                 .unwrap_or_else(|_| vec![0.0; n_points]);
 
             if points.len() < 2 {
@@ -1538,7 +1576,7 @@ fn render_audio_visualizer(
             let n_bars = (*bar_count).max(8);
             let bins = resources
                 .audios
-                .get_spectrum(src, time, n_bars)
+                .get_spectrum_with_policy(src, time, n_bars, resources.security)
                 .unwrap_or_else(|_| vec![0.0; n_bars]);
 
             let cx = x + w * 0.5;

@@ -220,7 +220,7 @@ pub enum Commands {
         hw_accel: HwAccelArg,
     },
 
-    /// Automatically migrate Remotion (.tsx) components to Dioxuscut (Rust, Rhai, or Python).
+    /// (Experimental) Scaffold a Dioxuscut component from a Remotion (.tsx) file.
     Migrate {
         /// Path to the Remotion .tsx file.
         input: PathBuf,
@@ -232,6 +232,10 @@ pub enum Commands {
         /// Destination output file path (optional, prints to stdout if omitted).
         #[arg(long, short)]
         output: Option<PathBuf>,
+
+        /// Explicit acknowledgment of experimental preview status.
+        #[arg(long, default_value_t = false)]
+        experimental: bool,
     },
 
     /// Inspect video or audio metadata (resolution, fps, duration, aspect ratio).

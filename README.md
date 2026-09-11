@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/status-early%20development-f59e0b?style=flat-square" alt="Early development" />
 </p>
 
-Dioxuscut is an early-stage programmatic video toolkit written in Rust. Its native export path renders a registered `NativeComposition` into a small scene graph, rasterizes frames with `tiny-skia` or `wgpu`, and sends bounded batches of raw RGBA frames to FFmpeg. Local video frames are decoded through FFmpeg, and declared audio tracks are mixed into the encoded output. The same native scene can be displayed in the Dioxus Player through `NativeCompositionPreview`.
+Dioxuscut is an early-stage programmatic video toolkit written in Rust. Its native export path renders a registered `NativeComposition` into a small scene graph, rasterizes frames with `tiny-skia` or `wgpu`, and streams a bounded window of ordered RGBA frames to FFmpeg while rendering subsequent frames. Local video frames are decoded through FFmpeg, and declared audio tracks are mixed into the encoded output. The same native scene can be displayed in the Dioxus Player through `NativeCompositionPreview`.
 
 The repository also contains Dioxus timeline, media, shape, transition, player, and Studio-preview components. The opt-in `dioxuscut-vdom` adapter can translate ordinary Dioxus elements, a documented CSS subset, text, local media elements, and basic SVG shapes into the native scene graph. Existing explicit `Scene` and `SceneEmitter` APIs remain available for precise rendering control.
 
@@ -45,7 +45,7 @@ Native export
       -> PreparedComposition::render(frame)
       -> Scene
       -> TinySkiaBackend / WgpuBackend with CPU fallback
-      -> bounded ordered RGBA batches
+      -> bounded ordered RGBA window
       -> FFmpeg + collected audio tracks
       -> MP4 / WebM / MOV / GIF
 

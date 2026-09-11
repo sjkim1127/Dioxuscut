@@ -1584,7 +1584,7 @@ dependencies = [
 
 [[package]]
 name = "dioxuscut-animation"
-version = "0.1.5"
+version = "0.2.0-alpha.1"
 dependencies = [
  "approx",
  "num-traits",
@@ -1594,7 +1594,7 @@ dependencies = [
 
 [[package]]
 name = "dioxuscut-captions"
-version = "0.1.5"
+version = "0.2.0-alpha.1"
 dependencies = [
  "dioxus",
  "dioxuscut-composition",
@@ -1607,7 +1607,7 @@ dependencies = [
 
 [[package]]
 name = "dioxuscut-cli"
-version = "0.1.5"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1629,7 +1629,7 @@ dependencies = [
 
 [[package]]
 name = "dioxuscut-composition"
-version = "0.1.5"
+version = "0.2.0-alpha.1"
 dependencies = [
  "dioxuscut-rasterizer",
  "serde",
@@ -1639,7 +1639,7 @@ dependencies = [
 
 [[package]]
 name = "dioxuscut-core"
-version = "0.1.5"
+version = "0.2.0-alpha.1"
 dependencies = [
  "dioxus",
  "dioxus-ssr",
@@ -1655,7 +1655,7 @@ dependencies = [
 
 [[package]]
 name = "dioxuscut-media"
-version = "0.1.5"
+version = "0.2.0-alpha.1"
 dependencies = [
  "dioxus",
  "dioxuscut-composition",
@@ -1671,7 +1671,7 @@ dependencies = [
 
 [[package]]
 name = "dioxuscut-noise"
-version = "0.1.5"
+version = "0.2.0-alpha.1"
 dependencies = [
  "dioxus",
  "dioxuscut-core",
@@ -1680,7 +1680,7 @@ dependencies = [
 
 [[package]]
 name = "dioxuscut-paths"
-version = "0.1.5"
+version = "0.2.0-alpha.1"
 dependencies = [
  "serde",
  "thiserror 1.0.69",
@@ -1688,7 +1688,7 @@ dependencies = [
 
 [[package]]
 name = "dioxuscut-player"
-version = "0.1.5"
+version = "0.2.0-alpha.1"
 dependencies = [
  "dioxus",
  "dioxuscut-animation",
@@ -1703,7 +1703,7 @@ dependencies = [
 
 [[package]]
 name = "dioxuscut-python"
-version = "0.1.5"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "dioxuscut-animation",
@@ -1723,7 +1723,7 @@ dependencies = [
 
 [[package]]
 name = "dioxuscut-rasterizer"
-version = "0.1.5"
+version = "0.2.0-alpha.1"
 dependencies = [
  "ab_glyph",
  "image",
@@ -1745,7 +1745,7 @@ dependencies = [
 
 [[package]]
 name = "dioxuscut-renderer"
-version = "0.1.5"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -1764,7 +1764,7 @@ dependencies = [
 
 [[package]]
 name = "dioxuscut-shapes"
-version = "0.1.5"
+version = "0.2.0-alpha.1"
 dependencies = [
  "dioxus",
  "dioxuscut-animation",
@@ -1777,7 +1777,7 @@ dependencies = [
 
 [[package]]
 name = "dioxuscut-transitions"
-version = "0.1.5"
+version = "0.2.0-alpha.1"
 dependencies = [
  "dioxus",
  "dioxuscut-animation",
@@ -1789,7 +1789,7 @@ dependencies = [
 
 [[package]]
 name = "dioxuscut-vdom"
-version = "0.1.5"
+version = "0.2.0-alpha.1"
 dependencies = [
  "dioxus",
  "dioxus-core",
@@ -2039,7 +2039,7 @@ dependencies = [
 
 [[package]]
 name = "example"
-version = "0.1.5"
+version = "0.2.0-alpha.1"
 dependencies = [
  "dioxus",
  "dioxus-web",
@@ -5820,7 +5820,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "studio"
-version = "0.1.5"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "dioxus",

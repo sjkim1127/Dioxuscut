@@ -43,19 +43,31 @@ impl GifFrameCache {
         Self::default()
     }
 
-    /// Load (and cache) all frames for the given GIF file path.
+    /// Load (and cache) all frames for the given GIF file path using default policy.
     pub fn load_frames(&self, src: &str) -> Result<Arc<Vec<GifFrame>>, RasterError> {
+        self.load_frames_with_policy(src, &crate::security::MediaSecurityPolicy::default())
+    }
+
+    /// Load (and cache) all frames for the given GIF file path validating against security policy.
+    pub fn load_frames_with_policy(
+        &self,
+        src: &str,
+        policy: &crate::security::MediaSecurityPolicy,
+    ) -> Result<Arc<Vec<GifFrame>>, RasterError> {
+        let canonical = policy.validate_path(src)?;
+        let key = canonical.display().to_string();
+
         // Fast path: already cached
         {
             let guard = self.inner.read().unwrap();
-            if let Some(frames) = guard.get(src) {
+            if let Some(frames) = guard.get(&key) {
                 return Ok(Arc::clone(frames));
             }
         }
 
         // Slow path: decode from disk
-        let bytes =
-            std::fs::read(src).map_err(|e| RasterError::Scene(format!("GIF read '{src}': {e}")))?;
+        let bytes = std::fs::read(&canonical)
+            .map_err(|e| RasterError::Scene(format!("GIF read '{src}': {e}")))?;
         let decoder = GifDecoder::new(std::io::Cursor::new(&bytes))
             .map_err(|e| RasterError::Scene(format!("GIF decode '{src}': {e}")))?;
 
@@ -74,10 +86,7 @@ impl GifFrameCache {
         }
 
         let frames = Arc::new(frames);
-        self.inner
-            .write()
-            .unwrap()
-            .insert(src.to_string(), Arc::clone(&frames));
+        self.inner.write().unwrap().insert(key, Arc::clone(&frames));
         Ok(frames)
     }
 

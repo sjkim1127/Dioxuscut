@@ -16,13 +16,13 @@
 //!                   [frame 1]  (all at once, Rayon)
 //!                   [frame 2] → disk → FFmpeg
 //!
-//! Pipe (fastest):   bounded Rayon batch → ordered RGBA frames → FFmpeg → MP4
+//! Pipe (fastest):   bounded render window → ordered RGBA frames → FFmpeg → MP4
 //!                   Zero disk I/O, zero PNG compression overhead
 //! ```
 
 use crate::backend::{FrameConfig, RasterError, RasterizerBackend};
 use crate::scene::{AudioTrack, Scene};
-use crate::video_cache::canonical_local_path;
+use crate::security::MediaSecurityPolicy;
 use image::RgbaImage;
 use rayon::prelude::*;
 use std::fmt;
@@ -212,6 +212,8 @@ pub struct PipeConfig {
     /// Audio tracks mixed and trimmed to the rendered video duration.
     pub audio_tracks: Vec<AudioTrack>,
     pub control: RenderControl,
+    /// Media security sandbox policy for audio and asset loading.
+    pub security_policy: MediaSecurityPolicy,
 }
 
 impl PipeConfig {
@@ -236,7 +238,13 @@ impl PipeConfig {
             hw_accel: HwAccel::default(),
             audio_tracks: Vec::new(),
             control: RenderControl::default(),
+            security_policy: MediaSecurityPolicy::default(),
         }
+    }
+
+    pub fn with_security_policy(mut self, policy: MediaSecurityPolicy) -> Self {
+        self.security_policy = policy;
+        self
     }
 
     pub fn with_concurrency(mut self, n: usize) -> Self {
@@ -427,7 +435,7 @@ where
 
 // ── Mode 3: FFmpeg stdin pipe (fastest) ──────────────────────────────────────
 
-/// Render frames in bounded parallel batches and stream raw RGBA to FFmpeg stdin.
+/// Render a bounded window of parallel frames while streaming ordered RGBA to FFmpeg.
 ///
 /// **This is the fastest rendering mode.** It eliminates:
 /// - PNG compression overhead
@@ -436,7 +444,7 @@ where
 ///
 /// # Pipeline
 /// ```text
-/// bounded Rayon batch → ordered RGBA frames → FFmpeg stdin → MP4
+/// bounded render window → ordered RGBA frames → FFmpeg stdin → MP4
 /// ```
 ///
 /// # FFmpeg invocation
@@ -519,42 +527,29 @@ where
             RasterError::Init(format!("Rayon pool error: {e}"))
         })?;
 
-    // ── 3. Render and stream bounded batches in frame order ───────────────────
-    // At most `concurrency` raw frames are retained at once. This keeps memory
-    // proportional to the worker count instead of the video duration.
+    // ── 3. Keep a bounded window of renders ahead of the pipe writer ─────────
     let mut stdin = ffmpeg
         .stdin
         .take()
         .ok_or_else(|| RasterError::Init("Failed to open FFmpeg stdin".into()))?;
 
-    let render_result = (0..total).step_by(concurrency).try_for_each(|batch_start| {
-        config.control.check(started)?;
-        let batch_end = total.min(batch_start.saturating_add(concurrency as u32));
-        let rendered: Result<Vec<(u32, u32, Vec<u8>)>, RasterError> = pool.install(|| {
-            (batch_start..batch_end)
-                .into_par_iter()
-                .map(|frame| {
-                    config.control.check(started)?;
-                    let composition_frame =
-                        config.start_frame.checked_add(frame).ok_or_else(|| {
-                            RasterError::Scene("render frame range overflows u32".into())
-                        })?;
-                    let scene =
-                        scene_fn(composition_frame).map_err(|error| RasterError::Frame {
-                            frame: composition_frame,
-                            reason: error.to_string(),
-                        })?;
-                    let frame_cfg = FrameConfig::new(width, height, composition_frame, fps);
-                    let img = backend.render_frame(&scene, &frame_cfg)?;
-                    config.control.check(started)?;
-                    Ok((frame, composition_frame, img.into_raw()))
-                })
-                .collect()
-        });
-
-        let mut frames = rendered?;
-        frames.sort_by_key(|(frame, _, _)| *frame);
-        for (frame, composition_frame, rgba) in frames {
+    let render_result = stream_ordered_frames(
+        &pool,
+        total,
+        concurrency,
+        |frame| {
+            config.control.check(started)?;
+            let composition_frame = config.start_frame + frame; // validated above
+            let scene = scene_fn(composition_frame).map_err(|error| RasterError::Frame {
+                frame: composition_frame,
+                reason: error.to_string(),
+            })?;
+            let frame_cfg = FrameConfig::new(width, height, composition_frame, fps);
+            let img = backend.render_frame(&scene, &frame_cfg)?;
+            config.control.check(started)?;
+            Ok(img.into_raw())
+        },
+        |frame, rgba| {
             config.control.check(started)?;
             stdin
                 .write_all(&rgba)
@@ -563,12 +558,12 @@ where
                 callback(RenderProgress {
                     completed_frames: frame + 1,
                     total_frames: total,
-                    frame: composition_frame,
+                    frame: config.start_frame + frame,
                 });
             }
-        }
-        Ok::<(), RasterError>(())
-    });
+            Ok(())
+        },
+    );
 
     if render_result.is_ok() {
         let _ = stdin.flush();
@@ -594,6 +589,81 @@ where
     }
 
     Ok(())
+}
+
+/// Render at most `window` frames ahead, consuming them in timeline order.
+/// A new task is issued only after the consumer releases an earlier frame.
+/// Thus rendering can overlap pipe writes without retaining extra frame batches.
+fn stream_ordered_frames<F, C>(
+    pool: &rayon::ThreadPool,
+    total: u32,
+    window: usize,
+    render: F,
+    mut consume: C,
+) -> Result<(), RasterError>
+where
+    F: Fn(u32) -> Result<Vec<u8>, RasterError> + Sync,
+    C: FnMut(u32, Vec<u8>) -> Result<(), RasterError>,
+{
+    if window == 0 {
+        return Err(RasterError::Init(
+            "Render concurrency must be greater than zero".into(),
+        ));
+    }
+    let stopped = AtomicBool::new(false);
+    // Signal queued tasks on errors and unwinding, before the scope joins them.
+    struct StopOnDrop<'a>(&'a AtomicBool);
+    impl Drop for StopOnDrop<'_> {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
+    pool.in_place_scope(|scope| {
+        let _stop = StopOnDrop(&stopped);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let render = &render;
+        let stopped = &stopped;
+        let submit = |frame| {
+            let sender = sender.clone();
+            scope.spawn(move |_| {
+                if stopped.load(Ordering::Relaxed) {
+                    return;
+                }
+                // Forward panics too, so a missing frame cannot deadlock the
+                // ordered consumer. The caller retains normal panic semantics.
+                let result =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| render(frame)));
+                let _ = sender.send((frame, result));
+            });
+        };
+        let mut submitted = total.min(u32::try_from(window).unwrap_or(u32::MAX));
+        for frame in 0..submitted {
+            submit(frame);
+        }
+        let mut next = 0;
+        let mut pending = std::collections::BTreeMap::new();
+        while next < total {
+            let (frame, result) = receiver.recv().map_err(|_| {
+                RasterError::Init(
+                    "Render workers stopped before completing the frame window".into(),
+                )
+            })?;
+            let rgba = match result {
+                Ok(result) => result?,
+                Err(panic) => std::panic::resume_unwind(panic),
+            };
+            pending.insert(frame, rgba);
+            while let Some(rgba) = pending.remove(&next) {
+                consume(next, rgba)?;
+                next += 1;
+                if submitted < total {
+                    submit(submitted);
+                    submitted += 1;
+                }
+            }
+        }
+        Ok(())
+    })
 }
 
 fn validate_pipe_config(config: &PipeConfig) -> Result<(), RasterError> {
@@ -641,7 +711,7 @@ fn validate_pipe_config(config: &PipeConfig) -> Result<(), RasterError> {
             "GIF output does not support audio tracks".into(),
         ));
     }
-    validate_audio_tracks(&config.audio_tracks)
+    validate_audio_tracks(&config.audio_tracks, &config.security_policy)
 }
 
 fn wait_for_ffmpeg(
@@ -910,9 +980,12 @@ fn ffmpeg_has_encoder(name: &str) -> bool {
         .any(|encoder| encoder == name)
 }
 
-fn validate_audio_tracks(tracks: &[AudioTrack]) -> Result<(), RasterError> {
+fn validate_audio_tracks(
+    tracks: &[AudioTrack],
+    policy: &MediaSecurityPolicy,
+) -> Result<(), RasterError> {
     for track in tracks {
-        canonical_local_path(&track.src)?;
+        policy.validate_path(&track.src)?;
         if !track.start_from.is_finite() || track.start_from < 0.0 {
             return Err(invalid_audio(
                 track,
@@ -1113,6 +1186,163 @@ mod tests {
             });
             s
         }
+    }
+
+    #[test]
+    fn streaming_overlaps_the_next_render_without_exceeding_the_window() {
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::mpsc;
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(3)
+            .build()
+            .unwrap();
+        let active = AtomicUsize::new(0);
+        let peak = AtomicUsize::new(0);
+        let (first_ready, wait_first) = mpsc::channel();
+        let wait_first = Mutex::new(wait_first);
+        let (next_ready, wait_next) = mpsc::channel();
+        let mut output = Vec::new();
+        stream_ordered_frames(
+            &pool,
+            12,
+            3,
+            |frame| {
+                let count = active.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(count, Ordering::SeqCst);
+                if frame == 0 {
+                    // Force out-of-order rendering; frame one must already be ready.
+                    wait_first
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(Duration::from_secs(5))
+                        .unwrap();
+                } else if frame == 1 {
+                    first_ready.send(()).unwrap();
+                } else if frame == 3 {
+                    next_ready.send(()).unwrap();
+                }
+                Ok(vec![frame as u8; 4])
+            },
+            |frame, bytes| {
+                if frame == 1 {
+                    // A batch barrier would prevent frame 3 starting here.
+                    wait_next.recv_timeout(Duration::from_secs(5)).unwrap();
+                }
+                output.extend_from_slice(&bytes);
+                drop(bytes);
+                active.fetch_sub(1, Ordering::SeqCst);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            output,
+            (0..12u8).flat_map(|frame| [frame; 4]).collect::<Vec<_>>()
+        );
+        assert!(peak.load(Ordering::SeqCst) <= 3);
+        assert_eq!(active.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn streaming_stops_scheduling_after_render_or_writer_error() {
+        use std::sync::atomic::AtomicUsize;
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .unwrap();
+        for fail_render in [false, true] {
+            let rendered = AtomicUsize::new(0);
+            let mut consumed = 0;
+            let result = stream_ordered_frames(
+                &pool,
+                100,
+                2,
+                |frame| {
+                    rendered.fetch_add(1, Ordering::SeqCst);
+                    if fail_render && frame == 0 {
+                        Err(RasterError::Scene("failed frame".into()))
+                    } else {
+                        Ok(vec![frame as u8])
+                    }
+                },
+                |_, _| {
+                    consumed += 1;
+                    Err(RasterError::ImageEncode("failed pipe".into()))
+                },
+            );
+            assert!(result.is_err());
+            assert!(rendered.load(Ordering::SeqCst) <= 2);
+            assert_eq!(consumed, if fail_render { 0 } else { 1 });
+        }
+    }
+
+    #[test]
+    fn streaming_honors_cancellation_between_ordered_writes() {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(3)
+            .build()
+            .unwrap();
+        let control = RenderControl::new();
+        let started = Instant::now();
+        let mut consumed = Vec::new();
+        let result = stream_ordered_frames(
+            &pool,
+            100,
+            3,
+            |frame| {
+                control.check(started)?;
+                Ok(vec![frame as u8])
+            },
+            |frame, _| {
+                control.check(started)?;
+                consumed.push(frame);
+                if frame == 2 {
+                    control.cancellation_token().cancel();
+                }
+                Ok(())
+            },
+        );
+        assert!(matches!(result, Err(RasterError::Cancelled)));
+        assert_eq!(consumed, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn streaming_single_worker_and_short_final_window() {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .unwrap();
+        for window in [1, 2, 8] {
+            let mut frames = Vec::new();
+            stream_ordered_frames(
+                &pool,
+                3,
+                window,
+                |frame| Ok(vec![frame as u8]),
+                |_, bytes| {
+                    frames.extend(bytes);
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(frames, vec![0, 1, 2]);
+        }
+    }
+
+    #[test]
+    fn streaming_worker_panic_reaches_caller_instead_of_waiting_forever() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(2)
+                .build()
+                .unwrap();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                stream_ordered_frames(&pool, 10, 2, |_| panic!("test render panic"), |_, _| Ok(()))
+            }));
+            sender.send(result.is_err()).unwrap();
+        });
+        assert!(receiver.recv_timeout(Duration::from_secs(5)).unwrap());
     }
 
     #[test]
@@ -1523,7 +1753,7 @@ mod tests {
     fn test_audio_track_validation_rejects_invalid_volume() {
         let mut track = AudioTrack::new(std::env::current_exe().unwrap().display().to_string());
         track.volume = 1.5;
-        let error = validate_audio_tracks(&[track]).unwrap_err();
+        let error = validate_audio_tracks(&[track], &MediaSecurityPolicy::default()).unwrap_err();
         assert!(error.to_string().contains("volume must be between"));
     }
 

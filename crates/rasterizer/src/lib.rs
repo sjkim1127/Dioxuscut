@@ -39,10 +39,13 @@ pub(crate) mod lottie_cache;
 pub mod mesh3d;
 pub mod render;
 pub mod scene;
+pub mod security;
 pub mod tiny_skia_backend;
 mod video_cache;
 #[cfg(feature = "gpu")]
 pub mod wgpu_backend;
+
+pub use security::MediaSecurityPolicy;
 
 pub use audio_cache::AudioData;
 pub use emoji::{is_emoji_char, is_emoji_grapheme, render_emoji, split_text_and_emojis, TextRun};

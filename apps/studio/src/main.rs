@@ -165,7 +165,7 @@ fn main() {
         .init();
 
     let window = WindowBuilder::new()
-        .with_title("Dioxuscut Studio")
+        .with_title("Dioxuscut Preview Studio")
         .with_inner_size(LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT))
         .with_resizable(true);
 
@@ -358,8 +358,17 @@ fn TopBar(mut props: TopBarProps) -> Element {
             ts,
         ));
 
-        // Create RenderControl with cancellation token
-        let control = RenderControl::new();
+        let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<u8>();
+
+        // Create RenderControl with cancellation token and reactive progress callback
+        let control = RenderControl::new().with_progress(move |p| {
+            let pct = if p.total_frames > 0 {
+                ((p.completed_frames as f64 / p.total_frames as f64) * 100.0).min(99.0) as u8
+            } else {
+                0
+            };
+            let _ = progress_tx.send(pct);
+        });
         let cancel_token = control.cancellation_token();
 
         let job = RenderJob::new(job_id, meta, output.clone(), cancel_token);
@@ -388,6 +397,18 @@ fn TopBar(mut props: TopBarProps) -> Element {
 
         let mut jobs_signal = props.jobs;
         let start = Instant::now();
+
+        // Background progress listener task
+        let mut progress_signal = jobs_signal;
+        spawn(async move {
+            while let Some(percent) = progress_rx.recv().await {
+                if let Some(job) = progress_signal.write().iter_mut().find(|j| j.id == job_id) {
+                    if matches!(job.status, RenderStatus::Running { .. }) {
+                        job.status = RenderStatus::Running { percent };
+                    }
+                }
+            }
+        });
 
         // Spawn an async task — tokio runtime provided by dioxus-desktop
         spawn(async move {

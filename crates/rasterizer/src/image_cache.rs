@@ -12,14 +12,20 @@ pub(crate) struct ImageCache {
 }
 
 impl ImageCache {
+    #[allow(dead_code)]
     pub(crate) fn load(&self, src: &str) -> Result<Arc<RgbaImage>, RasterError> {
-        let path = local_path(src)?;
-        let canonical = path
-            .canonicalize()
-            .map_err(|error| RasterError::ImageAsset {
-                path: path.display().to_string(),
-                reason: error.to_string(),
-            })?;
+        self.load_with_policy(src, &crate::security::MediaSecurityPolicy::default())
+    }
+
+    pub(crate) fn load_with_policy(
+        &self,
+        src: &str,
+        policy: &crate::security::MediaSecurityPolicy,
+    ) -> Result<Arc<RgbaImage>, RasterError> {
+        let canonical = policy.validate_path(src).map_err(|e| match e {
+            RasterError::MediaAsset { path, reason } => RasterError::ImageAsset { path, reason },
+            other => other,
+        })?;
 
         // Keep cache misses serialized so parallel frame workers do not decode
         // the same asset repeatedly during the first rendered batch.
@@ -48,36 +54,14 @@ impl ImageCache {
     }
 }
 
-fn local_path(src: &str) -> Result<PathBuf, RasterError> {
-    let src = src.trim();
-    if src.is_empty() {
-        return Err(RasterError::ImageAsset {
-            path: src.into(),
-            reason: "source path is empty".into(),
-        });
-    }
-
-    let path = if let Some(path) = src.strip_prefix("file://") {
-        path
-    } else if src.contains("://") || src.starts_with("data:") {
-        return Err(RasterError::ImageAsset {
-            path: src.into(),
-            reason: "only local paths and file:// URIs are supported".into(),
-        });
-    } else {
-        src
-    };
-
-    Ok(PathBuf::from(path))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn rejects_remote_sources_before_io() {
-        let error = local_path("https://example.com/image.png").unwrap_err();
+        let cache = ImageCache::default();
+        let error = cache.load("https://example.com/image.png").unwrap_err();
         assert!(error.to_string().contains("only local paths"));
     }
 }

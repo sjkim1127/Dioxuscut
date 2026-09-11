@@ -330,9 +330,17 @@ pub(crate) struct AudioCache {
 }
 
 impl AudioCache {
+    #[allow(dead_code)]
     pub(crate) fn get_or_load(&self, src: &str) -> Result<Arc<AudioData>, RasterError> {
-        let path = local_path(src)?;
-        let canonical = path.canonicalize().unwrap_or(path);
+        self.get_or_load_with_policy(src, &crate::security::MediaSecurityPolicy::default())
+    }
+
+    pub(crate) fn get_or_load_with_policy(
+        &self,
+        src: &str,
+        policy: &crate::security::MediaSecurityPolicy,
+    ) -> Result<Arc<AudioData>, RasterError> {
+        let canonical = policy.validate_path(src)?;
 
         let mut cache = self.audio_files.lock().expect("audio cache lock poisoned");
         if let Some(entry) = cache.get(&canonical) {
@@ -345,16 +353,33 @@ impl AudioCache {
         Ok(arc_data)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn get_spectrum(
         &self,
         src: &str,
         time_secs: f64,
         n_bins: usize,
     ) -> Result<Vec<f32>, RasterError> {
-        let data = self.get_or_load(src)?;
+        self.get_spectrum_with_policy(
+            src,
+            time_secs,
+            n_bins,
+            &crate::security::MediaSecurityPolicy::default(),
+        )
+    }
+
+    pub(crate) fn get_spectrum_with_policy(
+        &self,
+        src: &str,
+        time_secs: f64,
+        n_bins: usize,
+        policy: &crate::security::MediaSecurityPolicy,
+    ) -> Result<Vec<f32>, RasterError> {
+        let data = self.get_or_load_with_policy(src, policy)?;
         Ok(data.get_spectrum(time_secs, n_bins))
     }
 
+    #[allow(dead_code)]
     pub(crate) fn get_waveform_slice(
         &self,
         src: &str,
@@ -362,30 +387,24 @@ impl AudioCache {
         window_secs: f64,
         n_points: usize,
     ) -> Result<Vec<f32>, RasterError> {
-        let data = self.get_or_load(src)?;
+        self.get_waveform_slice_with_policy(
+            src,
+            time_secs,
+            window_secs,
+            n_points,
+            &crate::security::MediaSecurityPolicy::default(),
+        )
+    }
+
+    pub(crate) fn get_waveform_slice_with_policy(
+        &self,
+        src: &str,
+        time_secs: f64,
+        window_secs: f64,
+        n_points: usize,
+        policy: &crate::security::MediaSecurityPolicy,
+    ) -> Result<Vec<f32>, RasterError> {
+        let data = self.get_or_load_with_policy(src, policy)?;
         Ok(data.get_waveform_slice(time_secs, window_secs, n_points))
     }
-}
-
-fn local_path(src: &str) -> Result<PathBuf, RasterError> {
-    let src = src.trim();
-    if src.is_empty() {
-        return Err(RasterError::ImageAsset {
-            path: src.into(),
-            reason: "source path is empty".into(),
-        });
-    }
-
-    let path = if let Some(path) = src.strip_prefix("file://") {
-        path
-    } else if src.contains("://") || src.starts_with("data:") {
-        return Err(RasterError::ImageAsset {
-            path: src.into(),
-            reason: "remote URLs and data URIs are not yet supported for audio".into(),
-        });
-    } else {
-        src
-    };
-
-    Ok(PathBuf::from(path))
 }

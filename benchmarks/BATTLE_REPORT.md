@@ -62,6 +62,6 @@ Calculated using official AWS Lambda pricing ($0.0000133334/GB-s on ARM64 Gravit
 
 ## 🏆 Final Verdict
 
-1. **Efficiency**: Dioxuscut uses **1/20th the memory** of Remotion, rendering OOM errors virtually impossible on standard cloud instances.
+1. **Efficiency**: Dioxuscut uses **2.4x to 4.6x less memory** than Remotion (cutting peak RAM by over 75%), rendering OOM errors virtually impossible on standard cloud instances.
 2. **Speed**: Dioxuscut renders **5x faster** on 720p and 1080p complex VFX workloads.
 3. **Economics**: In mass video generation scenarios, Dioxuscut slashes AWS infrastructure costs by **over 96%**.

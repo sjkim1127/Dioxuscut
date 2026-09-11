@@ -68,12 +68,30 @@ pub(crate) struct VideoFrameCache {
 }
 
 impl VideoFrameCache {
+    #[allow(dead_code)]
     pub(crate) fn load(
         &self,
         src: &str,
         time: f64,
         sampling_fps: f64,
         looped: bool,
+    ) -> Result<Arc<RgbaImage>, RasterError> {
+        self.load_with_policy(
+            src,
+            time,
+            sampling_fps,
+            looped,
+            &crate::security::MediaSecurityPolicy::default(),
+        )
+    }
+
+    pub(crate) fn load_with_policy(
+        &self,
+        src: &str,
+        time: f64,
+        sampling_fps: f64,
+        looped: bool,
+        policy: &crate::security::MediaSecurityPolicy,
     ) -> Result<Arc<RgbaImage>, RasterError> {
         if !time.is_finite() || time < 0.0 {
             return Err(media_error(
@@ -88,7 +106,7 @@ impl VideoFrameCache {
             ));
         }
 
-        let path = canonical_local_path(src)?;
+        let path = canonical_local_path_with_policy(src, policy)?;
         let metadata = self.metadata_for(&path)?;
         let sampling_rate_micros = fps_key(sampling_fps);
         let frame_index = normalize_frame_index(time, sampling_fps, metadata.duration, looped);
@@ -440,23 +458,14 @@ pub fn probe_video_metadata(src: &str) -> Result<VideoMetadata, RasterError> {
 }
 
 pub(crate) fn canonical_local_path(src: &str) -> Result<PathBuf, RasterError> {
-    let src = src.trim();
-    if src.is_empty() {
-        return Err(media_error(src, "source path is empty"));
-    }
-    let path = if let Some(path) = src.strip_prefix("file://") {
-        path
-    } else if src.contains("://") || src.starts_with("data:") {
-        return Err(media_error(
-            src,
-            "only local paths and file:// URIs are supported",
-        ));
-    } else {
-        src
-    };
-    Path::new(path)
-        .canonicalize()
-        .map_err(|error| media_error(src, error.to_string()))
+    canonical_local_path_with_policy(src, &crate::security::MediaSecurityPolicy::default())
+}
+
+pub(crate) fn canonical_local_path_with_policy(
+    src: &str,
+    policy: &crate::security::MediaSecurityPolicy,
+) -> Result<PathBuf, RasterError> {
+    policy.validate_path(src)
 }
 
 fn probe_path(path: &Path) -> Result<VideoMetadata, RasterError> {

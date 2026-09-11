@@ -90,6 +90,10 @@ fn transpile_to_rust(
     stats: &mut MigrationStats,
 ) -> Result<(String, MigrationStats), String> {
     let mut out = String::new();
+    out.push_str(
+        "//! ⚠️ EXPERIMENTAL SCAFFOLD: Automatically generated from Remotion component.\n",
+    );
+    out.push_str("//! Please review and verify types, layout properties, and styling.\n\n");
     out.push_str("use dioxus::prelude::*;\n");
     out.push_str("use dioxuscut_core::{\n");
     out.push_str("    interpolate, interpolate_colors, random, spring, use_current_frame,\n");
@@ -99,7 +103,7 @@ fn transpile_to_rust(
     out.push_str("    Sequence, Series, SeriesSequence, SpringConfig, SpringOptions,\n");
     out.push_str("};\n\n");
 
-    writeln!(out, "/// Transpiled from Remotion component `{comp_name}`.").unwrap();
+    writeln!(out, "/// Scaffolded from Remotion component `{comp_name}`.").unwrap();
     out.push_str("#[component]\n");
     writeln!(out, "pub fn {comp_name}() -> Element {{").unwrap();
 
@@ -173,7 +177,8 @@ fn transpile_to_rhai(
     stats: &mut MigrationStats,
 ) -> Result<(String, MigrationStats), String> {
     let mut out = String::new();
-    out.push_str("//! Transpiled Remotion -> Dioxuscut Rhai script\n\n");
+    out.push_str("//! ⚠️ EXPERIMENTAL SCAFFOLD: Remotion -> Dioxuscut Rhai script\n");
+    out.push_str("//! Review and adapt properties and scene nodes for production use.\n\n");
     out.push_str("fn render(ctx, props) {\n");
     out.push_str("    let frame = ctx.frame.to_float();\n");
     out.push_str("    let output = scene();\n\n");
@@ -209,7 +214,10 @@ fn transpile_to_python(
     stats: &mut MigrationStats,
 ) -> Result<(String, MigrationStats), String> {
     let mut out = String::new();
-    out.push_str("\"\"\"Transpiled Remotion -> Dioxuscut Python SDK.\"\"\"\n\n");
+    out.push_str("\"\"\"⚠️ EXPERIMENTAL SCAFFOLD: Remotion -> Dioxuscut Python SDK.\n");
+    out.push_str(
+        "Review animation keyframes and layout definitions before production use.\n\"\"\"\n\n",
+    );
     out.push_str("import dioxuscut\n\n");
     writeln!(
         out,
@@ -241,17 +249,67 @@ fn transpile_to_python(
 }
 
 fn convert_interpolate_call_to_rust(line: &str) -> String {
-    // Replace const var = interpolate(frame, [0, 1], [0, 100])
     let trimmed = line.trim();
     let var_name = if let Some(rest) = trimmed.strip_prefix("const ") {
+        rest.split_once('=').map(|(v, _)| v.trim()).unwrap_or("val")
+    } else if let Some(rest) = trimmed.strip_prefix("let ") {
         rest.split_once('=').map(|(v, _)| v.trim()).unwrap_or("val")
     } else {
         "val"
     };
 
-    format!(
-        "let {var_name} = interpolate(frame as f64, &[0.0, 30.0], &[0.0, 1.0], InterpolateOptions::default());"
-    )
+    let brackets = extract_bracket_slices(trimmed);
+    let (in_slice, out_slice) = if brackets.len() >= 2 {
+        (
+            format_f64_slice(&brackets[0]),
+            format_f64_slice(&brackets[1]),
+        )
+    } else {
+        ("&[0.0, 30.0]".to_string(), "&[0.0, 1.0]".to_string())
+    };
+
+    let options = if trimmed.contains("clamp") {
+        "InterpolateOptions { extrapolate_left: ExtrapolateType::Clamp, extrapolate_right: ExtrapolateType::Clamp }"
+    } else {
+        "InterpolateOptions::default()"
+    };
+
+    format!("let {var_name} = interpolate(frame as f64, {in_slice}, {out_slice}, {options});")
+}
+
+fn extract_bracket_slices(s: &str) -> Vec<Vec<f64>> {
+    let mut slices = Vec::new();
+    let mut remainder = s;
+    while let Some(start) = remainder.find('[') {
+        if let Some(end) = remainder[start..].find(']') {
+            let inner = &remainder[start + 1..start + end];
+            let nums: Vec<f64> = inner
+                .split(',')
+                .filter_map(|item| item.trim().parse::<f64>().ok())
+                .collect();
+            if !nums.is_empty() {
+                slices.push(nums);
+            }
+            remainder = &remainder[start + end + 1..];
+        } else {
+            break;
+        }
+    }
+    slices
+}
+
+fn format_f64_slice(nums: &[f64]) -> String {
+    let parts: Vec<String> = nums
+        .iter()
+        .map(|n| {
+            if n.fract() == 0.0 {
+                format!("{:.1}", n)
+            } else {
+                format!("{}", n)
+            }
+        })
+        .collect();
+    format!("&[{}]", parts.join(", "))
 }
 
 fn convert_spring_call_to_rust(line: &str) -> String {
@@ -365,5 +423,20 @@ mod tests {
         let (rhai_code, stats) = transpile_remotion(tsx, MigrationTarget::Rhai).unwrap();
         assert!(rhai_code.contains("fn render(ctx, props)"));
         assert_eq!(stats.interpolations_converted, 1);
+    }
+
+    #[test]
+    fn test_migrate_extracts_custom_interpolate_ranges() {
+        let tsx = r#"
+            export const CustomAnim = () => {
+                const width = interpolate(frame, [0, 60], [100, 500]);
+                const clamped = interpolate(frame, [0, 30], [0, 1], { extrapolateRight: 'clamp' });
+                return (<AbsoluteFill></AbsoluteFill>);
+            };
+        "#;
+        let (rust_code, stats) = transpile_remotion(tsx, MigrationTarget::Rust).unwrap();
+        assert!(rust_code.contains("&[0.0, 60.0], &[100.0, 500.0]"));
+        assert!(rust_code.contains("ExtrapolateType::Clamp"));
+        assert_eq!(stats.interpolations_converted, 2);
     }
 }

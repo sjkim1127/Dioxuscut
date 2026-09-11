@@ -115,3 +115,44 @@ python3 benchmarks/cost_calculator.py
 
 See `benchmarks/BATTLE_REPORT.md` for the latest comprehensive battle report.
 
+
+## Native buffer and export pipeline comparison
+
+`compare-render-pipeline.py` alternates immutable before/after release binaries
+on the same machine, with one excluded warmup and five measured runs. It covers
+720p/1080p/4K CPU frame generation, a 1080p vignette frame, the 720p spring export,
+and the 1080p Cyberpunk export. Compile time and validation are excluded.
+
+Before changing the renderer, build and save the three examples:
+
+```sh
+cargo build --locked --release -p dioxuscut-rasterizer --example raster_bench \
+  -p dioxuscut-core --example render_bench --example cyberpunk_bench
+mkdir -p target/render-speed/before
+cp target/release/examples/{raster_bench,render_bench,cyberpunk_bench} target/render-speed/before/
+```
+
+After changing the renderer, rebuild and copy the same executables to
+`target/render-speed/pipelined`, then run:
+
+```sh
+python3 benchmarks/compare-render-pipeline.py \
+  --before target/render-speed/before --after target/render-speed/pipelined \
+  --output benchmarks/render-pipeline-result.json
+```
+
+Every measured raster run checks all 24 RGBA frame hashes against the baseline.
+Both exports must preserve the decoded bytes and order of all 180 video frames.
+The report records executable SHA-256 hashes, every timing sample, and medians.
+`render-buffer-transfer.json` isolates the buffer-transfer change.
+`render-pipeline-loaded.json` records an exploratory run affected by an unrelated
+Rust compilation; its export times are not an idle-machine baseline.
+
+The CPU backend now transfers its pixel allocation to the output image and
+avoids clearing memory already zeroed by `Pixmap::new`. The pipe renderer issues
+a replacement render as soon as an ordered frame is written. Its in-flight
+output-frame limit remains the configured concurrency, including frames waiting
+for order and the frame being written. Per-node scratch surfaces and FFmpeg's
+own buffers are additional, as before. Tests exercise out-of-order completion,
+render/write overlap, the frame limit, cancellation, write/render errors, and
+worker-panic propagation.

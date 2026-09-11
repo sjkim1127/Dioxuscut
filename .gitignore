@@ -34,3 +34,6 @@ dist/
 *.webm
 *.mov
 
+# AI agent swarm scratchpads and logs
+.agents/
+

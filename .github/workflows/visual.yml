@@ -99,6 +99,11 @@ jobs:
             echo "✓ $f (${size} bytes)"
           done
 
+      - name: Verify visual regression against golden frames
+        run: |
+          python3 -m pip install --upgrade pillow numpy
+          python3 tests/compare_visual_golden.py --actual-dir snapshots --golden-dir tests/visual_golden
+
       - name: Upload snapshots artifact
         id: artifact_upload
         uses: actions/upload-artifact@v4

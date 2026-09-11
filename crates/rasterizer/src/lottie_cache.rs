@@ -26,13 +26,19 @@ pub(crate) struct LottieCache {
 
 impl LottieCache {
     /// Loads or retrieves a parsed Lottie animation.
-    fn get_or_load(&self, src: &str) -> Result<Arc<CachedLottie>, RasterError> {
-        let path = local_path(src)?;
-        let canonical = path.canonicalize().unwrap_or(path);
+    fn get_or_load(
+        &self,
+        src: &str,
+        policy: &crate::security::MediaSecurityPolicy,
+    ) -> Result<(Arc<CachedLottie>, PathBuf), RasterError> {
+        let canonical = policy.validate_path(src).map_err(|e| match e {
+            RasterError::MediaAsset { path, reason } => RasterError::ImageAsset { path, reason },
+            other => other,
+        })?;
 
         let mut cache = self.animations.lock().expect("lottie cache poisoned");
         if let Some(entry) = cache.get(&canonical) {
-            return Ok(Arc::clone(entry));
+            return Ok((Arc::clone(entry), canonical));
         }
 
         let json_content =
@@ -60,11 +66,12 @@ impl LottieCache {
             frame_rate: if frame_rate > 0.0 { frame_rate } else { 30.0 },
         });
 
-        cache.insert(canonical, Arc::clone(&entry));
-        Ok(entry)
+        cache.insert(canonical.clone(), Arc::clone(&entry));
+        Ok((entry, canonical))
     }
 
     /// Renders a specific frame of a Lottie animation at `target_w x target_h`.
+    #[allow(dead_code)]
     pub(crate) fn render(
         &self,
         src: &str,
@@ -73,9 +80,27 @@ impl LottieCache {
         target_h: u32,
         loop_behavior: crate::gif_cache::LoopBehavior,
     ) -> Result<Arc<RgbaImage>, RasterError> {
-        let entry = self.get_or_load(src)?;
-        let path = local_path(src)?;
-        let canonical = path.canonicalize().unwrap_or(path);
+        self.render_with_policy(
+            src,
+            time_secs,
+            target_w,
+            target_h,
+            loop_behavior,
+            &crate::security::MediaSecurityPolicy::default(),
+        )
+    }
+
+    /// Renders a specific frame validating against a security policy.
+    pub(crate) fn render_with_policy(
+        &self,
+        src: &str,
+        time_secs: f64,
+        target_w: u32,
+        target_h: u32,
+        loop_behavior: crate::gif_cache::LoopBehavior,
+        policy: &crate::security::MediaSecurityPolicy,
+    ) -> Result<Arc<RgbaImage>, RasterError> {
+        let (entry, canonical) = self.get_or_load(src, policy)?;
 
         let total_duration_secs = (entry.total_frames / entry.frame_rate) as f64;
         let effective_time = match loop_behavior {
@@ -148,27 +173,4 @@ impl LottieCache {
 
         Ok(arc_img)
     }
-}
-
-fn local_path(src: &str) -> Result<PathBuf, RasterError> {
-    let src = src.trim();
-    if src.is_empty() {
-        return Err(RasterError::ImageAsset {
-            path: src.into(),
-            reason: "source path is empty".into(),
-        });
-    }
-
-    let path = if let Some(path) = src.strip_prefix("file://") {
-        path
-    } else if src.contains("://") || src.starts_with("data:") {
-        return Err(RasterError::ImageAsset {
-            path: src.into(),
-            reason: "only local paths and file:// URIs are supported for Lottie".into(),
-        });
-    } else {
-        src
-    };
-
-    Ok(PathBuf::from(path))
 }

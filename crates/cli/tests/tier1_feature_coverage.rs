@@ -254,10 +254,12 @@ fn test_cli_migrate_subcommand() {
             input,
             target,
             output,
+            experimental,
         } => {
             assert_eq!(input, PathBuf::from("input.tsx"));
             assert_eq!(target, "python");
             assert_eq!(output, Some(PathBuf::from("output.py")));
+            assert!(!experimental);
         }
         _ => panic!("Expected Commands::Migrate"),
     }

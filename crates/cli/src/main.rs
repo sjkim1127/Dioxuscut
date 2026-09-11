@@ -66,7 +66,15 @@ async fn main() -> anyhow::Result<()> {
             input,
             target,
             output,
+            experimental: _,
         } => {
+            eprintln!(
+                "⚠️  [EXPERIMENTAL] dioxuscut migrate generates a starting scaffold template."
+            );
+            eprintln!(
+                "    Complex TypeScript logic and full CSS layouts require manual adaptation.\n"
+            );
+
             let target_mode: dioxuscut_cli::MigrationTarget =
                 target.parse().map_err(|e: String| anyhow::anyhow!("{e}"))?;
             let source = std::fs::read_to_string(input)
