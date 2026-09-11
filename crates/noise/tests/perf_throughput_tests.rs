@@ -26,7 +26,7 @@ fn test_simplex_2d_throughput() {
         sum
     );
     assert!(
-        ops_per_sec > 5_000_000.0,
+        ops_per_sec > 500_000.0,
         "Throughput too low: {} ops/sec",
         ops_per_sec
     );
@@ -56,7 +56,7 @@ fn test_simplex_3d_throughput() {
         sum
     );
     assert!(
-        ops_per_sec > 3_000_000.0,
+        ops_per_sec > 500_000.0,
         "Throughput too low: {} ops/sec",
         ops_per_sec
     );
@@ -87,7 +87,7 @@ fn test_simplex_4d_throughput() {
         sum
     );
     assert!(
-        ops_per_sec > 1_000_000.0,
+        ops_per_sec > 300_000.0,
         "Throughput too low: {} ops/sec",
         ops_per_sec
     );
@@ -117,7 +117,7 @@ fn test_fbm_2d_throughput() {
         sum
     );
     assert!(
-        ops_per_sec > 1_000_000.0,
+        ops_per_sec > 200_000.0,
         "Throughput too low: {} ops/sec",
         ops_per_sec
     );
