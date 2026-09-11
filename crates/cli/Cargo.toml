@@ -23,6 +23,7 @@ dioxuscut-media       = { workspace = true }
 dioxuscut-paths       = { workspace = true }
 dioxuscut-rasterizer  = { workspace = true }
 dioxuscut-shapes      = { workspace = true }
+dioxuscut-charts      = { workspace = true }
 clap               = { version = "4.4", features = ["derive"] }
 tokio              = { workspace = true }
 tracing            = { workspace = true }
@@ -49,6 +50,6 @@ name    = "e2e_cli_subprocess"
 harness = true
 
 [features]
-default = []
+default = ["rhai"]
 gpu     = ["dioxuscut-rasterizer/gpu"]
 rhai    = ["dep:rhai"]

@@ -750,6 +750,263 @@ impl SceneBuilder {
             target_height: height,
         })
     }
+
+    fn svg(&mut self, markup: &str) -> RhaiResult<()> {
+        let doc = dioxuscut_charts::parse_svg(markup)
+            .map_err(|e| runtime_error(format!("SVG parse error: {e}")))?;
+        self.scene.nodes.extend(doc.scene.nodes);
+        Ok(())
+    }
+
+    fn svg_at(&mut self, x: FLOAT, y: FLOAT, markup: &str) -> RhaiResult<()> {
+        let doc = dioxuscut_charts::parse_svg(markup)
+            .map_err(|e| runtime_error(format!("SVG parse error: {e}")))?;
+        let group = SceneNode::Group {
+            transform: Transform2D::translate(finite_f32("x", x)?, finite_f32("y", y)?),
+            opacity: 1.0,
+            children: doc.scene.nodes,
+        };
+        self.scene.push(group);
+        Ok(())
+    }
+
+    fn mermaid(&mut self, code: &str) -> RhaiResult<()> {
+        let scene = dioxuscut_charts::render_mermaid(code, None)
+            .map_err(|e| runtime_error(format!("Mermaid error: {e}")))?;
+        self.scene.nodes.extend(scene.nodes);
+        Ok(())
+    }
+
+    fn mermaid_opts(&mut self, code: &str, opts: Map) -> RhaiResult<()> {
+        let theme_str = get_opt_string(&opts, "theme");
+        let theme = match theme_str.as_deref() {
+            Some("light") => dioxuscut_charts::DiagramTheme::light(),
+            _ => dioxuscut_charts::DiagramTheme::dark(),
+        };
+        let scene = dioxuscut_charts::render_mermaid(code, Some(&theme))
+            .map_err(|e| runtime_error(format!("Mermaid error: {e}")))?;
+
+        let x = get_opt_f32(&opts, "x", 0.0);
+        let y = get_opt_f32(&opts, "y", 0.0);
+        if x != 0.0 || y != 0.0 {
+            self.scene.push(SceneNode::Group {
+                transform: Transform2D::translate(x, y),
+                opacity: 1.0,
+                children: scene.nodes,
+            });
+        } else {
+            self.scene.nodes.extend(scene.nodes);
+        }
+        Ok(())
+    }
+
+    fn d3_line(&mut self, data: Dynamic, opts: Map) -> RhaiResult<()> {
+        let width = get_opt_f32(&opts, "width", 800.0);
+        let height = get_opt_f32(&opts, "height", 450.0);
+        let stroke_width = get_opt_f32(&opts, "stroke_width", 3.0);
+        let mut chart = dioxuscut_charts::D3LineChart {
+            width,
+            height,
+            stroke_width,
+            ..Default::default()
+        };
+        if let Some(s) = get_opt_string(&opts, "stroke") {
+            chart.stroke_color = parse_color(&s)?;
+        }
+        if let Some(c) = get_opt_string(&opts, "curve") {
+            chart.curve = match c.as_str() {
+                "linear" => dioxuscut_charts::CurveType::Linear,
+                "step" => dioxuscut_charts::CurveType::Step,
+                _ => dioxuscut_charts::CurveType::MonotoneX,
+            };
+        }
+        if let Some(f) = opts.get("fill") {
+            if let Ok(b) = f.as_bool() {
+                chart.fill_area = b;
+            }
+        }
+        if let Some(fc) = get_opt_string(&opts, "fill_color") {
+            chart.fill_color = Some(parse_color(&fc)?);
+        }
+        if let Some(t) = get_opt_string(&opts, "title") {
+            chart.title = Some(t);
+        }
+
+        let mut points = Vec::new();
+        if let Ok(arr) = data.clone().into_array() {
+            for (idx, item) in arr.into_iter().enumerate() {
+                if let Ok(pair) = item.clone().into_array() {
+                    if pair.len() >= 2 {
+                        let px = pair[0]
+                            .as_float()
+                            .map(|f| f as f32)
+                            .or_else(|_| pair[0].as_int().map(|i| i as f32))
+                            .unwrap_or(idx as f32);
+                        let py = pair[1]
+                            .as_float()
+                            .map(|f| f as f32)
+                            .or_else(|_| pair[1].as_int().map(|i| i as f32))
+                            .unwrap_or(0.0);
+                        points.push((px, py));
+                    }
+                } else if let Ok(f) = item.as_float() {
+                    points.push((idx as f32, f as f32));
+                } else if let Ok(i) = item.as_int() {
+                    points.push((idx as f32, i as f32));
+                }
+            }
+        }
+        chart.points = points;
+
+        let scene = chart.to_scene();
+        let x = get_opt_f32(&opts, "x", 0.0);
+        let y = get_opt_f32(&opts, "y", 0.0);
+        if x != 0.0 || y != 0.0 {
+            self.scene.push(SceneNode::Group {
+                transform: Transform2D::translate(x, y),
+                opacity: 1.0,
+                children: scene.nodes,
+            });
+        } else {
+            self.scene.nodes.extend(scene.nodes);
+        }
+        Ok(())
+    }
+
+    fn d3_bar(&mut self, data: Dynamic, opts: Map) -> RhaiResult<()> {
+        let width = get_opt_f32(&opts, "width", 800.0);
+        let height = get_opt_f32(&opts, "height", 450.0);
+        let corner_radius = get_opt_f32(&opts, "corner_radius", 6.0);
+        let mut chart = dioxuscut_charts::D3BarChart {
+            width,
+            height,
+            corner_radius,
+            ..Default::default()
+        };
+        if let Some(t) = get_opt_string(&opts, "title") {
+            chart.title = Some(t);
+        }
+
+        if let Ok(arr) = data.clone().into_array() {
+            for (idx, item) in arr.into_iter().enumerate() {
+                if let Ok(pair) = item.clone().into_array() {
+                    if pair.len() >= 2 {
+                        let label = pair[0]
+                            .clone()
+                            .into_string()
+                            .unwrap_or_else(|_| format!("{idx}"));
+                        let val = pair[1]
+                            .as_float()
+                            .map(|f| f as f32)
+                            .or_else(|_| pair[1].as_int().map(|i| i as f32))
+                            .unwrap_or(0.0);
+                        chart.categories.push(label);
+                        chart.values.push(val);
+                    }
+                } else if let Ok(f) = item.as_float() {
+                    chart.categories.push(format!("{idx}"));
+                    chart.values.push(f as f32);
+                } else if let Ok(i) = item.as_int() {
+                    chart.categories.push(format!("{idx}"));
+                    chart.values.push(i as f32);
+                }
+            }
+        }
+
+        let scene = chart.to_scene();
+        let x = get_opt_f32(&opts, "x", 0.0);
+        let y = get_opt_f32(&opts, "y", 0.0);
+        if x != 0.0 || y != 0.0 {
+            self.scene.push(SceneNode::Group {
+                transform: Transform2D::translate(x, y),
+                opacity: 1.0,
+                children: scene.nodes,
+            });
+        } else {
+            self.scene.nodes.extend(scene.nodes);
+        }
+        Ok(())
+    }
+
+    fn d3_pie(&mut self, data: Dynamic, opts: Map) -> RhaiResult<()> {
+        let width = get_opt_f32(&opts, "width", 600.0);
+        let height = get_opt_f32(&opts, "height", 600.0);
+        let outer_radius = width.min(height) * 0.38;
+        let mut chart = dioxuscut_charts::D3PieChart {
+            width,
+            height,
+            outer_radius,
+            ..Default::default()
+        };
+        let donut_fraction = get_opt_f32(&opts, "donut", 0.0);
+        if donut_fraction > 0.0 {
+            chart = chart.with_donut(donut_fraction);
+        }
+        if let Some(t) = get_opt_string(&opts, "title") {
+            chart.title = Some(t);
+        }
+
+        if let Ok(arr) = data.clone().into_array() {
+            for (idx, item) in arr.into_iter().enumerate() {
+                if let Ok(pair) = item.clone().into_array() {
+                    if pair.len() >= 2 {
+                        let label = pair[0]
+                            .clone()
+                            .into_string()
+                            .unwrap_or_else(|_| format!("{idx}"));
+                        let val = pair[1]
+                            .as_float()
+                            .map(|f| f as f32)
+                            .or_else(|_| pair[1].as_int().map(|i| i as f32))
+                            .unwrap_or(0.0);
+                        chart.slices.push((label, val));
+                    }
+                } else if let Ok(f) = item.as_float() {
+                    chart.slices.push((format!("{idx}"), f as f32));
+                } else if let Ok(i) = item.as_int() {
+                    chart.slices.push((format!("{idx}"), i as f32));
+                }
+            }
+        }
+
+        let scene = chart.to_scene();
+        let x = get_opt_f32(&opts, "x", 0.0);
+        let y = get_opt_f32(&opts, "y", 0.0);
+        if x != 0.0 || y != 0.0 {
+            self.scene.push(SceneNode::Group {
+                transform: Transform2D::translate(x, y),
+                opacity: 1.0,
+                children: scene.nodes,
+            });
+        } else {
+            self.scene.nodes.extend(scene.nodes);
+        }
+        Ok(())
+    }
+
+    fn d3_eval(&mut self, script: &str, data: Dynamic) -> RhaiResult<()> {
+        let json_val = rhai::serde::from_dynamic::<Value>(&data)
+            .map_err(|e| runtime_error(format!("Failed to serialize data for QuickJS D3: {e}")))?;
+
+        thread_local! {
+            static JS_ENGINE: std::cell::RefCell<Option<dioxuscut_charts::QuickJsEngine>> = const { std::cell::RefCell::new(None) };
+        }
+
+        let doc = JS_ENGINE
+            .with(
+                |cell| -> Result<dioxuscut_charts::SvgDocument, dioxuscut_charts::ChartError> {
+                    let mut borrow = cell.borrow_mut();
+                    if borrow.is_none() {
+                        *borrow = Some(dioxuscut_charts::QuickJsEngine::new()?);
+                    }
+                    borrow.as_ref().unwrap().eval_d3(script, &json_val)
+                },
+            )
+            .map_err(|e| runtime_error(format!("QuickJS D3 execution error: {e}")))?;
+
+        self.scene.nodes.extend(doc.scene.nodes);
+        Ok(())
+    }
 }
 
 fn get_opt_f32(map: &Map, key: &str, default: f32) -> f32 {
@@ -1061,6 +1318,14 @@ fn register_scene_api(engine: &mut Engine) {
     engine.register_fn("flex_row", SceneBuilder::flex_row);
     engine.register_fn("flex_col", SceneBuilder::flex_col);
     engine.register_fn("grid", SceneBuilder::grid);
+    engine.register_fn("svg", SceneBuilder::svg);
+    engine.register_fn("svg_at", SceneBuilder::svg_at);
+    engine.register_fn("mermaid", SceneBuilder::mermaid);
+    engine.register_fn("mermaid", SceneBuilder::mermaid_opts);
+    engine.register_fn("d3_line", SceneBuilder::d3_line);
+    engine.register_fn("d3_bar", SceneBuilder::d3_bar);
+    engine.register_fn("d3_pie", SceneBuilder::d3_pie);
+    engine.register_fn("d3_eval", SceneBuilder::d3_eval);
 
     engine.register_type_with_name::<RhaiLayout>("RhaiLayout");
     engine.register_fn("rect", RhaiLayout::rect);

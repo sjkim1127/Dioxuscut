@@ -38,12 +38,12 @@ fn test_rhai_script_flex_row_layout() {
     assert_eq!(scene.nodes.len(), 3);
 
     // First node: Rect
-    match &scene.nodes[0] {
+    match scene.nodes[0] {
         SceneNode::Rect { w, h, fill, .. } => {
-            assert_eq!(*w, 100.0);
-            assert_eq!(*h, 50.0);
+            assert_eq!(w, 100.0);
+            assert_eq!(h, 50.0);
             assert_eq!(
-                *fill,
+                fill,
                 Color {
                     r: 255,
                     g: 0,
@@ -56,15 +56,15 @@ fn test_rhai_script_flex_row_layout() {
     }
 
     // Second node: RoundRect
-    match &scene.nodes[1] {
+    match scene.nodes[1] {
         SceneNode::Rect {
             corner_radius,
             fill,
             ..
         } => {
-            assert_eq!(*corner_radius, 8.0);
+            assert_eq!(corner_radius, 8.0);
             assert_eq!(
-                *fill,
+                fill,
                 Color {
                     r: 0,
                     g: 255,
@@ -88,12 +88,12 @@ fn test_rhai_script_flex_row_layout() {
     }
 
     // Check that items are positioned strictly left-to-right: x0 < x1 < x2
-    let x0 = match &scene.nodes[0] {
-        SceneNode::Rect { x, .. } => *x,
+    let x0 = match scene.nodes[0] {
+        SceneNode::Rect { x, .. } => x,
         _ => 0.0,
     };
-    let x1 = match &scene.nodes[1] {
-        SceneNode::Rect { x, .. } => *x,
+    let x1 = match scene.nodes[1] {
+        SceneNode::Rect { x, .. } => x,
         _ => 0.0,
     };
     let x2 = match &scene.nodes[2] {
@@ -144,12 +144,12 @@ fn test_rhai_script_grid_layout() {
     assert_eq!(scene.nodes.len(), 6);
 
     // Row 0 has 3 items with same y, Row 1 has 3 items with same y
-    let y_row0 = match &scene.nodes[0] {
-        SceneNode::Rect { y, .. } => *y,
+    let y_row0 = match scene.nodes[0] {
+        SceneNode::Rect { y, .. } => y,
         _ => 0.0,
     };
-    let y_row1 = match &scene.nodes[3] {
-        SceneNode::Rect { y, .. } => *y,
+    let y_row1 = match scene.nodes[3] {
+        SceneNode::Rect { y, .. } => y,
         _ => 0.0,
     };
 
