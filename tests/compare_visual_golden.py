@@ -2,7 +2,7 @@
 """
 Compares rendered test snapshots against committed golden reference frames.
 Calculates both MAE (Mean Absolute Error) and SSIM (Structural Similarity Index).
-Exits with code 0 if all frames are within tolerance (MAE <= 0.5% or SSIM >= 0.99), or code 1 on regression.
+Exits with code 0 if all frames are within tolerance (MAE <= 0.5% AND SSIM >= 0.99), or code 1 on regression.
 """
 
 import argparse
@@ -80,7 +80,7 @@ def compare_images(
         # Compute SSIM
         ssim = compute_ssim_numpy(arr_a, arr_g)
 
-        passed = (mae <= max_mae) or (ssim >= min_ssim)
+        passed = (mae <= max_mae) and (ssim >= min_ssim)
         details = f"MAE: {mae * 100.0:.4f}% | SSIM: {ssim:.4f}"
         return passed, mae, ssim, details
 

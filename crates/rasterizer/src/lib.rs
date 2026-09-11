@@ -40,6 +40,7 @@ pub mod mesh3d;
 pub mod render;
 pub mod scene;
 pub mod security;
+pub mod text_layout;
 pub mod tiny_skia_backend;
 mod video_cache;
 #[cfg(feature = "gpu")]
@@ -74,6 +75,10 @@ pub use gif_cache::{GifFrame, GifFrameCache, LoopBehavior};
 pub use scene::{
     AudioTrack, BlendMode, ClipRegion, Color, GradientStop, ImageFit, MaskMode, Scene, SceneFilter,
     SceneNode, SceneShadow, Transform2D, VisualizerStyle,
+};
+pub use text_layout::{
+    LayoutLine, PositionedGlyph, TextAlignment, TextDirection, TextLayout, TextLayoutEngine,
+    TextStyle,
 };
 pub use tiny_skia_backend::TinySkiaBackend;
 pub use video_cache::{probe_video_metadata, VideoMetadata};

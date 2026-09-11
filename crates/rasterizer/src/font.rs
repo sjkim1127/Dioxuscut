@@ -260,9 +260,9 @@ pub struct FontCache {
     assets: Mutex<HashMap<String, Arc<LoadedFont>>>,
 }
 
-struct LoadedFont {
-    raster: FontVec,
-    data: Arc<Vec<u8>>,
+pub(crate) struct LoadedFont {
+    pub(crate) raster: FontVec,
+    pub(crate) data: Arc<Vec<u8>>,
 }
 
 struct ShapedGlyph {
@@ -490,7 +490,10 @@ impl FontCache {
         }))
     }
 
-    fn font_chain(&self, sources: &[String]) -> Result<Vec<Arc<LoadedFont>>, FontLoadError> {
+    pub(crate) fn font_chain(
+        &self,
+        sources: &[String],
+    ) -> Result<Vec<Arc<LoadedFont>>, FontLoadError> {
         let mut fonts = Vec::with_capacity(sources.len() + usize::from(self.font.is_some()));
         for source in sources {
             fonts.push(self.load_asset(source)?);
@@ -1378,63 +1381,34 @@ fn shape_runs(
     font_size: f32,
     fonts: &[Arc<LoadedFont>],
 ) -> Result<(Vec<ShapedGlyph>, f32), FontLoadError> {
-    let mut runs: Vec<(usize, usize, usize)> = Vec::new();
-    for (start, grapheme) in text.grapheme_indices(true) {
-        let font_index = fonts
-            .iter()
-            .position(|font| grapheme_supported(&font.raster, grapheme))
-            .unwrap_or(0);
-        let end = start + grapheme.len();
-        if let Some((last_font, _, last_end)) = runs.last_mut() {
-            if *last_font == font_index && *last_end == start {
-                *last_end = end;
-                continue;
-            }
-        }
-        runs.push((font_index, start, end));
-    }
+    let bidi_runs = crate::text_layout::bidi::segment_bidi_runs(
+        text,
+        crate::text_layout::style::TextDirection::Auto,
+    );
+    let resolver = crate::text_layout::font_resolver::FontResolver::from_fonts(fonts.to_vec());
+    let style = crate::text_layout::style::TextStyle::new(font_size);
+    let shaped = crate::text_layout::shaper::shape_bidi_runs(text, &bidi_runs, &resolver, &style)
+        .map_err(|e| FontLoadError {
+        path: "<loaded font>".into(),
+        reason: format!("{e}"),
+    })?;
 
     let mut output = Vec::new();
     let mut cursor_x = 0.0_f32;
-    for (font_index, start, end) in runs {
-        let font = fonts[font_index].clone();
-        let face =
-            rustybuzz::Face::from_slice(font.data.as_slice(), 0).ok_or_else(|| FontLoadError {
-                path: "<loaded font>".into(),
-                reason: "font could not be opened by the shaping engine".into(),
-            })?;
-        let units_per_em = (face.units_per_em() as f32).max(1.0);
-        let unit_scale = font_size / units_per_em;
-        let mut buffer = rustybuzz::UnicodeBuffer::new();
-        buffer.push_str(&text[start..end]);
-        buffer.guess_segment_properties();
-        let shaped = rustybuzz::shape(&face, &[], buffer);
-        for (info, position) in shaped.glyph_infos().iter().zip(shaped.glyph_positions()) {
-            let Ok(glyph_id) = u16::try_from(info.glyph_id) else {
-                continue;
-            };
-            let x = cursor_x + position.x_offset as f32 * unit_scale;
-            let y = -(position.y_offset as f32 * unit_scale);
+    for run in shaped {
+        let font = fonts[run.font_index].clone();
+        for g in run.glyphs {
+            let x = cursor_x + g.x_offset;
+            let y = g.y_offset;
             output.push(ShapedGlyph {
                 font: font.clone(),
-                glyph: ab_glyph::GlyphId(glyph_id)
+                glyph: ab_glyph::GlyphId(g.glyph_id)
                     .with_scale_and_position(PxScale::from(font_size), ab_glyph::point(x, y)),
             });
-            cursor_x += position.x_advance as f32 * unit_scale;
+            cursor_x += g.x_advance;
         }
     }
     Ok((output, cursor_x))
-}
-
-fn grapheme_supported(font: &FontVec, grapheme: &str) -> bool {
-    grapheme.chars().all(|character| {
-        font.glyph_id(character).0 != 0
-            || character.is_control()
-            || character.is_whitespace()
-            || character == '\u{200d}'
-            || ('\u{fe00}'..='\u{fe0f}').contains(&character)
-            || ('\u{e0100}'..='\u{e01ef}').contains(&character)
-    })
 }
 
 /// Rasterized text as a greyscale coverage map.

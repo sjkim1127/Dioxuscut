@@ -55,3 +55,57 @@ async fn rhai_example_renders_a_real_mp4() {
     assert!(bytes.windows(4).any(|window| window == b"ftyp"));
     let _ = fs::remove_dir_all(temp_dir);
 }
+
+#[test]
+fn test_untrusted_script_defaults_to_script_dir_without_cwd() {
+    use dioxuscut_rasterizer::MediaSecurityPolicy;
+    use std::env;
+
+    let temp_parent =
+        env::temp_dir().join(format!("dioxuscut_sandbox_test_{}", std::process::id()));
+    let _ = fs::create_dir_all(&temp_parent);
+    let canon_parent = temp_parent
+        .canonicalize()
+        .unwrap_or_else(|_| temp_parent.clone());
+    let script_file = canon_parent.join("script.rhai");
+
+    let request = RenderRequest {
+        composition: None,
+        script: Some(script_file.clone()),
+        props: None,
+        output: PathBuf::from("out.mp4"),
+        audio: Vec::new(),
+        width: 100,
+        height: 100,
+        fps: 30.0,
+        duration: 30,
+        backend: RenderBackend::Native,
+        codec: dioxuscut_cli::RenderCodec::H264,
+        frame_start: 0,
+        frame_end: None,
+        timeout_seconds: None,
+        crf: 18,
+        preset: "fast".into(),
+        hw_accel: dioxuscut_rasterizer::HwAccel::Auto,
+        sandbox_roots: Vec::new(),
+        permissive: false,
+    };
+
+    let policy = request.effective_security_policy();
+    match policy {
+        MediaSecurityPolicy::Sandboxed { allowed_roots } => {
+            let cwd = env::current_dir().unwrap().canonicalize().unwrap();
+            // Should contain script_dir
+            assert!(allowed_roots.iter().any(|r| r == &canon_parent));
+            // Should NOT automatically include cwd if canon_parent != cwd
+            if !canon_parent.starts_with(&cwd) && !cwd.starts_with(&canon_parent) {
+                assert!(
+                    !allowed_roots.contains(&cwd),
+                    "CWD should NOT be leaked into sandbox default"
+                );
+            }
+        }
+        _ => panic!("Expected MediaSecurityPolicy::Sandboxed"),
+    }
+    let _ = fs::remove_dir_all(&temp_parent);
+}

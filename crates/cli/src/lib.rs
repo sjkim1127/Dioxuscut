@@ -219,8 +219,8 @@ pub enum Commands {
         #[arg(long, value_enum, default_value_t = HwAccelArg::Auto)]
         hw_accel: HwAccelArg,
 
-        /// Allowed root directory for media assets. May be repeated.
-        #[arg(long = "sandbox-root", value_name = "DIR")]
+        /// Allowed root directory for media assets. May be repeated (alias: --media-root).
+        #[arg(long = "sandbox-root", alias = "media-root", value_name = "DIR")]
         sandbox_roots: Vec<PathBuf>,
 
         /// Run in permissive mode without sandbox jail (unrestricted filesystem access).
@@ -305,7 +305,7 @@ impl RenderRequest {
     /// - If `permissive` is true, returns `MediaSecurityPolicy::Permissive`.
     /// - If `sandbox_roots` is non-empty, returns `MediaSecurityPolicy::sandboxed(sandbox_roots)`.
     /// - If rendering an external Rhai script (`self.script.is_some()`), automatically defaults
-    ///   to `MediaSecurityPolicy::sandboxed([script_dir, current_dir])` to safely sandbox untrusted scripts.
+    ///   to `MediaSecurityPolicy::sandboxed([script_dir])` to safely sandbox untrusted scripts under least privilege.
     /// - Otherwise (built-in Rust composition with no roots specified), defaults to `MediaSecurityPolicy::Permissive`.
     pub fn effective_security_policy(&self) -> dioxuscut_rasterizer::MediaSecurityPolicy {
         if self.permissive {
@@ -325,8 +325,10 @@ impl RenderRequest {
                     roots.push(parent.to_path_buf());
                 }
             }
-            if let Ok(cwd) = std::env::current_dir() {
-                if !roots.contains(&cwd) {
+            if roots.is_empty() {
+                // If script_path had no parent directory component (e.g. "script.rhai"),
+                // the script resides in current_dir.
+                if let Ok(cwd) = std::env::current_dir() {
                     roots.push(cwd);
                 }
             }
