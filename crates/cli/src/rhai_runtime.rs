@@ -4,7 +4,8 @@
 //! plus an immutable frame context and returns a restricted [`SceneBuilder`].
 
 use crate::composition::{
-    Composition, CompositionError, NativeCompositionContext, PreparedComposition,
+    layout::prelude::*, Composition, CompositionError, LayoutBox, NativeCompositionContext,
+    PreparedComposition,
 };
 use dioxuscut_rasterizer::{
     layout_text_box, AudioTrack, Color, GradientStop, ImageFit, Scene, SceneNode, TextBox,
@@ -677,6 +678,261 @@ impl SceneBuilder {
         });
         Ok(())
     }
+
+    fn add(&mut self, layout: RhaiLayout) -> RhaiResult<()> {
+        layout
+            .inner
+            .compute_and_emit(layout.target_width, layout.target_height, &mut self.scene)
+            .map_err(|e| runtime_error(format!("Taffy layout calculation failed: {e}")))?;
+        Ok(())
+    }
+
+    fn add_layout(&mut self, layout: RhaiLayout) -> RhaiResult<()> {
+        self.add(layout)
+    }
+
+    fn flex_row(&mut self, opts: Map) -> RhaiResult<RhaiLayout> {
+        self.make_layout(FlexDirection::Row, opts)
+    }
+
+    fn flex_col(&mut self, opts: Map) -> RhaiResult<RhaiLayout> {
+        self.make_layout(FlexDirection::Column, opts)
+    }
+
+    fn grid(&mut self, opts: Map) -> RhaiResult<RhaiLayout> {
+        let cols = get_opt_f32(&opts, "cols", 2.0).max(1.0) as u16;
+        let gap = get_opt_f32(&opts, "gap", 0.0);
+        let mut box_layout = SceneGrid::columns(cols, gap);
+        apply_layout_options(&mut box_layout, &opts)?;
+        let width = get_opt_f32(&opts, "width", 1920.0);
+        let height = get_opt_f32(&opts, "height", 1080.0);
+        Ok(RhaiLayout {
+            inner: box_layout,
+            target_width: width,
+            target_height: height,
+        })
+    }
+
+    fn make_layout(&self, direction: FlexDirection, opts: Map) -> RhaiResult<RhaiLayout> {
+        let gap = get_opt_f32(&opts, "gap", 0.0);
+        let justify_str = get_opt_string(&opts, "justify");
+        let justify = match justify_str.as_deref() {
+            Some("center") => JustifyContent::CENTER,
+            Some("end") | Some("flex-end") => JustifyContent::FLEX_END,
+            Some("between") | Some("space-between") => JustifyContent::SPACE_BETWEEN,
+            Some("around") | Some("space-around") => JustifyContent::SPACE_AROUND,
+            Some("evenly") | Some("space-evenly") => JustifyContent::SPACE_EVENLY,
+            _ => JustifyContent::FLEX_START,
+        };
+        let align_str = get_opt_string(&opts, "align");
+        let align = match align_str.as_deref() {
+            Some("center") => AlignItems::CENTER,
+            Some("end") | Some("flex-end") => AlignItems::FLEX_END,
+            Some("stretch") => AlignItems::STRETCH,
+            Some("baseline") => AlignItems::BASELINE,
+            _ => AlignItems::FLEX_START,
+        };
+
+        let mut box_layout = match direction {
+            FlexDirection::Row => SceneFlex::row(gap, justify, align),
+            FlexDirection::Column => SceneFlex::column(gap, justify, align),
+            _ => LayoutBox::flex(direction).gap(gap),
+        };
+
+        apply_layout_options(&mut box_layout, &opts)?;
+
+        let width = get_opt_f32(&opts, "width", 1920.0);
+        let height = get_opt_f32(&opts, "height", 1080.0);
+
+        Ok(RhaiLayout {
+            inner: box_layout,
+            target_width: width,
+            target_height: height,
+        })
+    }
+}
+
+fn get_opt_f32(map: &Map, key: &str, default: f32) -> f32 {
+    if let Some(v) = map.get(key) {
+        if let Ok(f) = v.as_float() {
+            return f as f32;
+        }
+        if let Ok(i) = v.as_int() {
+            return i as f32;
+        }
+    }
+    default
+}
+
+fn get_opt_f32_opt(map: &Map, key: &str) -> Option<f32> {
+    if let Some(v) = map.get(key) {
+        if let Ok(f) = v.as_float() {
+            return Some(f as f32);
+        }
+        if let Ok(i) = v.as_int() {
+            return Some(i as f32);
+        }
+    }
+    None
+}
+
+fn get_opt_string(map: &Map, key: &str) -> Option<String> {
+    map.get(key).and_then(|v| v.clone().into_string().ok())
+}
+
+fn apply_layout_options(box_layout: &mut LayoutBox, opts: &Map) -> RhaiResult<()> {
+    if let Some(p) = get_opt_f32_opt(opts, "padding") {
+        box_layout.style.padding = Rect {
+            left: length(p),
+            right: length(p),
+            top: length(p),
+            bottom: length(p),
+        };
+    }
+    if let Some(w) = get_opt_f32_opt(opts, "width") {
+        box_layout.style.size.width = length(w);
+    }
+    if let Some(h) = get_opt_f32_opt(opts, "height") {
+        box_layout.style.size.height = length(h);
+    }
+    if let Some(bg) = get_opt_string(opts, "bg") {
+        box_layout.background = Some(parse_color(&bg)?);
+    }
+    if let Some(bc) = get_opt_string(opts, "border_color") {
+        let bw = get_opt_f32(opts, "border_width", 1.0);
+        let br = get_opt_f32(opts, "border_radius", 0.0);
+        box_layout.border = Some((parse_color(&bc)?, bw, br));
+    }
+    Ok(())
+}
+
+fn dynamic_to_non_negative_f32(val: &Dynamic, name: &str) -> RhaiResult<f32> {
+    if let Ok(f) = val.as_float() {
+        return non_negative_f32(name, f);
+    }
+    if let Ok(i) = val.as_int() {
+        return non_negative_f32(name, i as FLOAT);
+    }
+    Err(runtime_error(format!("{name} must be a valid number")))
+}
+
+/// A script-accessible declarative layout container.
+#[derive(Debug, Clone)]
+pub struct RhaiLayout {
+    inner: LayoutBox,
+    target_width: f32,
+    target_height: f32,
+}
+
+impl RhaiLayout {
+    fn rect(&mut self, w: Dynamic, h: Dynamic, fill: &str) -> RhaiResult<()> {
+        let node = SceneNode::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: dynamic_to_non_negative_f32(&w, "width")?,
+            h: dynamic_to_non_negative_f32(&h, "height")?,
+            fill: parse_color(fill)?,
+            stroke: None,
+            stroke_width: 0.0,
+            corner_radius: 0.0,
+        };
+        self.inner.push_node(node, None);
+        Ok(())
+    }
+
+    fn round_rect(
+        &mut self,
+        w: Dynamic,
+        h: Dynamic,
+        fill: &str,
+        radius: Dynamic,
+    ) -> RhaiResult<()> {
+        let node = SceneNode::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: dynamic_to_non_negative_f32(&w, "width")?,
+            h: dynamic_to_non_negative_f32(&h, "height")?,
+            fill: parse_color(fill)?,
+            stroke: None,
+            stroke_width: 0.0,
+            corner_radius: dynamic_to_non_negative_f32(&radius, "corner radius")?,
+        };
+        self.inner.push_node(node, None);
+        Ok(())
+    }
+
+    fn circle(&mut self, radius: Dynamic, fill: &str) -> RhaiResult<()> {
+        let node = SceneNode::Circle {
+            cx: 0.0,
+            cy: 0.0,
+            r: dynamic_to_non_negative_f32(&radius, "radius")?,
+            fill: parse_color(fill)?,
+            stroke: None,
+            stroke_width: 0.0,
+        };
+        self.inner.push_node(node, None);
+        Ok(())
+    }
+
+    fn text(
+        &mut self,
+        content: ImmutableString,
+        font_size: Dynamic,
+        color: &str,
+    ) -> RhaiResult<()> {
+        let size = dynamic_to_non_negative_f32(&font_size, "font size")?;
+        let col = parse_color(color)?;
+        let approx_w = content.chars().count() as f32 * size * 0.6;
+        let approx_h = size * 1.2;
+        let node = SceneNode::Text {
+            x: 0.0,
+            y: 0.0,
+            content: content.into_owned(),
+            font_size: size,
+            color: col,
+            font_weight: 400,
+            font_sources: Vec::new(),
+        };
+        let style = Style {
+            size: Size {
+                width: length(approx_w),
+                height: length(approx_h),
+            },
+            ..Default::default()
+        };
+        self.inner.push_node(node, Some(style));
+        Ok(())
+    }
+
+    fn text_bold(
+        &mut self,
+        content: ImmutableString,
+        font_size: Dynamic,
+        color: &str,
+    ) -> RhaiResult<()> {
+        let size = dynamic_to_non_negative_f32(&font_size, "font size")?;
+        let col = parse_color(color)?;
+        let approx_w = content.chars().count() as f32 * size * 0.6;
+        let approx_h = size * 1.2;
+        let node = SceneNode::Text {
+            x: 0.0,
+            y: 0.0,
+            content: content.into_owned(),
+            font_size: size,
+            color: col,
+            font_weight: 700,
+            font_sources: Vec::new(),
+        };
+        let style = Style {
+            size: Size {
+                width: length(approx_w),
+                height: length(approx_h),
+            },
+            ..Default::default()
+        };
+        self.inner.push_node(node, Some(style));
+        Ok(())
+    }
 }
 
 /// A compiled Rhai composition. Constructing this type compiles the script once.
@@ -802,6 +1058,18 @@ fn register_scene_api(engine: &mut Engine) {
     engine.register_fn("lottie", SceneBuilder::lottie);
     engine.register_fn("audio_visualizer", SceneBuilder::audio_visualizer);
     engine.register_fn("group", SceneBuilder::group);
+    engine.register_fn("flex_row", SceneBuilder::flex_row);
+    engine.register_fn("flex_col", SceneBuilder::flex_col);
+    engine.register_fn("grid", SceneBuilder::grid);
+
+    engine.register_type_with_name::<RhaiLayout>("RhaiLayout");
+    engine.register_fn("rect", RhaiLayout::rect);
+    engine.register_fn("round_rect", RhaiLayout::round_rect);
+    engine.register_fn("circle", RhaiLayout::circle);
+    engine.register_fn("text", RhaiLayout::text);
+    engine.register_fn("text_bold", RhaiLayout::text_bold);
+    engine.register_fn("add", SceneBuilder::add);
+    engine.register_fn("add_layout", SceneBuilder::add_layout);
     engine.register_fn(
         "interpolate",
         |value: FLOAT,

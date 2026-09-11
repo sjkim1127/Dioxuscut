@@ -39,7 +39,7 @@ struct SimpleSelector {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ResolvedStyle {
+pub struct ResolvedStyle {
     pub layout: Style,
     pub color: Color,
     pub background: Option<Color>,
@@ -153,7 +153,23 @@ impl Stylesheet {
                 }
             }
         }
-        let inline_order = self.rules.len() + 1;
+        let tailwind_base_order = self.rules.len() + 1;
+        if let Some(classes) = element.attributes.get("class") {
+            for (idx, class_token) in classes.split_whitespace().enumerate() {
+                for (name, value) in crate::tailwind::parse_utility_class(class_token) {
+                    let specificity = 10;
+                    let order = tailwind_base_order + idx;
+                    let replace = winners.get(&name).is_none_or(|(score, prev_order, _)| {
+                        specificity > *score || (specificity == *score && order >= *prev_order)
+                    });
+                    if replace {
+                        winners.insert(name, (specificity, order, value));
+                    }
+                }
+            }
+        }
+
+        let inline_order = tailwind_base_order + 10_000;
         if let Some(style) = element.attributes.get("style") {
             for (name, value) in parse_declarations(style) {
                 winners.insert(name, (1_000, inline_order, value));
@@ -334,7 +350,7 @@ fn apply_html_attributes(style: &mut ResolvedStyle, element: &NativeElement) {
     }
 }
 
-fn apply_declarations(style: &mut ResolvedStyle, declarations: &[(String, String)]) {
+pub(crate) fn apply_declarations(style: &mut ResolvedStyle, declarations: &[(String, String)]) {
     for (name, value) in declarations {
         match name.as_str() {
             "display" => {

@@ -5,13 +5,15 @@
 //! Flexbox, and Grid layout with Taffy, and emits the shared native [`Scene`].
 
 mod composition;
-mod css;
+pub mod css;
 mod dom;
 mod scene;
+pub mod tailwind;
 
 pub use composition::{VdomComposition, VdomFactory};
-pub use css::{CssError, Stylesheet};
+pub use css::{CssError, ResolvedStyle, Stylesheet};
 pub use dom::{NativeDom, NativeDomError};
+pub use tailwind::apply_utility_class;
 
 use dioxus_core::VirtualDom;
 use dioxuscut_rasterizer::Scene;

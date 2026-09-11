@@ -37,6 +37,7 @@ tower-http         = { workspace = true }
 image              = { workspace = true }
 notify             = "6"
 base64             = "0.22"
+taffy              = { workspace = true }
 
 [dev-dependencies]
 dioxuscut-renderer = { workspace = true }
