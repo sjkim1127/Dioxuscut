@@ -1125,7 +1125,8 @@ fn compile_nodes(
             | SceneNode::Layer { .. }
             | SceneNode::Emoji { .. }
             | SceneNode::Lottie { .. }
-            | SceneNode::AudioVisualizer { .. } => return None,
+            | SceneNode::AudioVisualizer { .. }
+            | SceneNode::Shader { .. } => return None,
         }
     }
     Some(())

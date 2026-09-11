@@ -605,6 +605,25 @@ fn SceneNodeView(props: SceneNodeViewProps) -> Element {
                 }
             }
         }
+        dioxuscut_rasterizer::SceneNode::Shader {
+            x,
+            y,
+            w,
+            h,
+            opacity,
+            ..
+        } => {
+            rsx! {
+                rect {
+                    x,
+                    y,
+                    width: w,
+                    height: h,
+                    fill: "#6366f1",
+                    opacity,
+                }
+            }
+        }
     }
 }
 

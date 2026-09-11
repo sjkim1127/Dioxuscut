@@ -578,6 +578,24 @@ pub enum SceneNode {
         #[serde(default = "default_opacity")]
         opacity: f32,
     },
+
+    /// Custom GPU/Shadertoy fragment shader pass (WGSL).
+    Shader {
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        /// WGSL fragment shader code or Shadertoy-compatible mainImage.
+        source: String,
+        /// Elapsed animation time in seconds (e.g. `iTime`).
+        #[serde(default)]
+        time: f32,
+        /// 4-component uniform vector (`iParams`).
+        #[serde(default)]
+        params: [f32; 4],
+        #[serde(default = "default_opacity")]
+        opacity: f32,
+    },
 }
 
 const fn default_playback_rate() -> f32 {

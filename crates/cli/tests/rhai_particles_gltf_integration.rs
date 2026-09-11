@@ -205,3 +205,261 @@ fn test_rhai_gltf_loading_and_rendering() {
         panic!("Expected Path node for projected 3D face");
     }
 }
+
+#[test]
+fn test_rhai_gltf_skeletal_animation() {
+    let mut bin = Vec::new();
+
+    // Accessor 0: Positions (3 vertices of a triangle)
+    let pos_start = bin.len();
+    for &(x, y, z) in &[
+        (-10.0f32, 0.0f32, 0.0f32),
+        (10.0f32, 0.0f32, 0.0f32),
+        (0.0f32, 20.0f32, 0.0f32),
+    ] {
+        bin.extend_from_slice(&x.to_le_bytes());
+        bin.extend_from_slice(&y.to_le_bytes());
+        bin.extend_from_slice(&z.to_le_bytes());
+    }
+    let pos_len = bin.len() - pos_start;
+
+    // Accessor 1: Joints (vertex 0,1 bound to joint 0; vertex 2 bound to joint 1)
+    let joints_start = bin.len();
+    for j in &[[0u16, 0, 0, 0], [0u16, 0, 0, 0], [1u16, 0, 0, 0]] {
+        for &val in j {
+            bin.extend_from_slice(&val.to_le_bytes());
+        }
+    }
+    let joints_len = bin.len() - joints_start;
+
+    // Accessor 2: Weights (full weight 1.0 on first joint)
+    let weights_start = bin.len();
+    for _ in 0..3 {
+        bin.extend_from_slice(&1.0f32.to_le_bytes());
+        bin.extend_from_slice(&0.0f32.to_le_bytes());
+        bin.extend_from_slice(&0.0f32.to_le_bytes());
+        bin.extend_from_slice(&0.0f32.to_le_bytes());
+    }
+    let weights_len = bin.len() - weights_start;
+
+    // Accessor 3: Inverse Bind Matrices (2 x Mat4 Identity)
+    let ibm_start = bin.len();
+    for _ in 0..2 {
+        for c in 0..4 {
+            for r in 0..4 {
+                let v = if c == r { 1.0f32 } else { 0.0f32 };
+                bin.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+    }
+    let ibm_len = bin.len() - ibm_start;
+
+    // Accessor 4: Animation timestamps [0.0, 1.0]
+    let time_start = bin.len();
+    bin.extend_from_slice(&0.0f32.to_le_bytes());
+    bin.extend_from_slice(&1.0f32.to_le_bytes());
+    let time_len = bin.len() - time_start;
+
+    // Accessor 5: Animation rotations (2 x Quat: identity at t=0, 90 deg z-rot at t=1)
+    let rot_start = bin.len();
+    // t=0: Quat::IDENTITY = [0, 0, 0, 1]
+    bin.extend_from_slice(&0.0f32.to_le_bytes());
+    bin.extend_from_slice(&0.0f32.to_le_bytes());
+    bin.extend_from_slice(&0.0f32.to_le_bytes());
+    bin.extend_from_slice(&1.0f32.to_le_bytes());
+    // t=1: 45 deg z rot: sin(pi/8), cos(pi/8)
+    let half_angle = std::f32::consts::FRAC_PI_8;
+    let s = half_angle.sin();
+    let c = half_angle.cos();
+    bin.extend_from_slice(&0.0f32.to_le_bytes());
+    bin.extend_from_slice(&0.0f32.to_le_bytes());
+    bin.extend_from_slice(&s.to_le_bytes());
+    bin.extend_from_slice(&c.to_le_bytes());
+    let rot_len = bin.len() - rot_start;
+
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bin);
+
+    let gltf_json = format!(
+        r#"{{
+            "asset": {{ "version": "2.0" }},
+            "buffers": [{{ "byteLength": {}, "uri": "data:application/octet-stream;base64,{}" }}],
+            "bufferViews": [
+                {{ "buffer": 0, "byteOffset": {}, "byteLength": {} }},
+                {{ "buffer": 0, "byteOffset": {}, "byteLength": {} }},
+                {{ "buffer": 0, "byteOffset": {}, "byteLength": {} }},
+                {{ "buffer": 0, "byteOffset": {}, "byteLength": {} }},
+                {{ "buffer": 0, "byteOffset": {}, "byteLength": {} }},
+                {{ "buffer": 0, "byteOffset": {}, "byteLength": {} }}
+            ],
+            "accessors": [
+                {{ "bufferView": 0, "byteOffset": 0, "componentType": 5126, "count": 3, "type": "VEC3" }},
+                {{ "bufferView": 1, "byteOffset": 0, "componentType": 5123, "count": 3, "type": "VEC4" }},
+                {{ "bufferView": 2, "byteOffset": 0, "componentType": 5126, "count": 3, "type": "VEC4" }},
+                {{ "bufferView": 3, "byteOffset": 0, "componentType": 5126, "count": 2, "type": "MAT4" }},
+                {{ "bufferView": 4, "byteOffset": 0, "componentType": 5126, "count": 2, "type": "SCALAR" }},
+                {{ "bufferView": 5, "byteOffset": 0, "componentType": 5126, "count": 2, "type": "VEC4" }}
+            ],
+            "nodes": [
+                {{ "name": "RootBone", "children": [1] }},
+                {{ "name": "AnimatedBone" }}
+            ],
+            "skins": [
+                {{
+                    "name": "Armature",
+                    "inverseBindMatrices": 3,
+                    "joints": [0, 1]
+                }}
+            ],
+            "animations": [
+                {{
+                    "name": "BoneDance",
+                    "channels": [
+                        {{ "sampler": 0, "target": {{ "node": 1, "path": "rotation" }} }}
+                    ],
+                    "samplers": [
+                        {{ "input": 4, "output": 5 }}
+                    ]
+                }}
+            ],
+            "meshes": [{{
+                "name": "SkinnedMesh",
+                "primitives": [{{
+                    "attributes": {{
+                        "POSITION": 0,
+                        "JOINTS_0": 1,
+                        "WEIGHTS_0": 2
+                    }}
+                }}]
+            }}]
+        }}"#,
+        bin.len(),
+        b64,
+        pos_start,
+        pos_len,
+        joints_start,
+        joints_len,
+        weights_start,
+        weights_len,
+        ibm_start,
+        ibm_len,
+        time_start,
+        time_len,
+        rot_start,
+        rot_len
+    );
+
+    let script = format!(
+        r##"
+        fn render(context, props) {{
+            let scene = scene();
+            let gltf_str = `{}`;
+            scene.gltf(gltf_str, #{{
+                time: context.time,
+                x: 960.0,
+                y: 540.0,
+                scale: 100.0,
+                color: "#6366f1"
+            }});
+            return scene;
+        }}
+        "##,
+        gltf_json
+    );
+
+    let comp = RhaiComposition::from_source("test_skeletal_rhai", &script).expect("compile rhai");
+    let ctx = NativeCompositionContext {
+        width: 1920,
+        height: 1080,
+        fps: 30.0,
+        duration_in_frames: 60,
+    };
+    let prepared = comp.prepare(&json!({}), ctx).expect("prepare");
+
+    // Frame 0 (t = 0.0s)
+    let scene_f0 = prepared.render(0).expect("render frame 0");
+    // Frame 30 (t = 1.0s)
+    let scene_f30 = prepared.render(30).expect("render frame 30");
+
+    assert_eq!(scene_f0.nodes.len(), 1);
+    assert_eq!(scene_f30.nodes.len(), 1);
+
+    let d_f0 = match &scene_f0.nodes[0] {
+        SceneNode::Path { d, .. } => d.clone(),
+        _ => panic!("Expected Path node"),
+    };
+    let d_f30 = match &scene_f30.nodes[0] {
+        SceneNode::Path { d, .. } => d.clone(),
+        _ => panic!("Expected Path node"),
+    };
+
+    assert_ne!(
+        d_f0, d_f30,
+        "Projected SVG path must change as skeletal animation advances"
+    );
+}
+
+#[test]
+fn test_rhai_shader_pass() {
+    let script = r##"
+        fn render(context, props) {
+            let scene = scene();
+            scene.shader(`
+                let d = length(in.uv - vec2<f32>(0.5, 0.5));
+                return vec4<f32>(sin(d * 10.0 + time), cos(d * 8.0), 0.8, 1.0);
+            `, #{
+                x: 120.0,
+                y: 80.0,
+                width: 640.0,
+                height: 480.0,
+                time: context.time,
+                p0: 1.5,
+                opacity: 0.9
+            });
+            return scene;
+        }
+    "##;
+
+    let comp = RhaiComposition::from_source("test_shader", script).expect("compile rhai");
+    let ctx = NativeCompositionContext {
+        width: 1920,
+        height: 1080,
+        fps: 30.0,
+        duration_in_frames: 30,
+    };
+    let prepared = comp.prepare(&json!({}), ctx).expect("prepare");
+    let scene = prepared.render(0).expect("render shader frame");
+
+    assert_eq!(scene.nodes.len(), 1);
+    match &scene.nodes[0] {
+        SceneNode::Shader {
+            x,
+            y,
+            w,
+            h,
+            opacity,
+            params,
+            ..
+        } => {
+            assert_eq!(*x, 120.0);
+            assert_eq!(*y, 80.0);
+            assert_eq!(*w, 640.0);
+            assert_eq!(*h, 480.0);
+            assert_eq!(*opacity, 0.9);
+            assert_eq!(params[0], 1.5);
+        }
+        other => panic!("Expected SceneNode::Shader, got {other:?}"),
+    }
+
+    // Verify rasterization succeeds without errors
+    let backend = dioxuscut_rasterizer::tiny_skia_backend::TinySkiaBackend::new();
+    let cfg = dioxuscut_rasterizer::FrameConfig {
+        width: 1920,
+        height: 1080,
+        frame: 0,
+        fps: 30.0,
+    };
+    let img = dioxuscut_rasterizer::RasterizerBackend::render_frame(&backend, &scene, &cfg)
+        .expect("rasterize shader pass");
+    assert_eq!(img.width(), 1920);
+    assert_eq!(img.height(), 1080);
+}

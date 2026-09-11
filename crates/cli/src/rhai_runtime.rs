@@ -1185,7 +1185,7 @@ impl SceneBuilder {
         let light_dir = Vec3::new(light_x, light_y, light_z);
 
         let trimmed = gltf_source.trim();
-        let mut model = if trimmed.starts_with('{') {
+        let model = if trimmed.starts_with('{') {
             parse_gltf(trimmed, None)
                 .map_err(|e| runtime_error(format!("Failed to parse glTF: {e}")))?
         } else if let Some(b64) = trimmed.strip_prefix("data:model/gltf-binary;base64,") {
@@ -1214,12 +1214,33 @@ impl SceneBuilder {
             model.base_color
         };
 
-        if (scale - 1.0).abs() > 1e-4 {
-            model.mesh.scale(scale);
-        }
-        model.mesh.rotate(pitch, yaw, roll);
+        let time_sec = if let Some(t) = opts
+            .get("time")
+            .and_then(|v| v.as_float().ok().map(|f| f as f32))
+        {
+            t
+        } else if let Some(f) = opts.get("frame").and_then(|v| v.as_int().ok()) {
+            let fps = opts
+                .get("fps")
+                .and_then(|v| v.as_float().ok())
+                .unwrap_or(30.0) as f32;
+            f as f32 / fps
+        } else {
+            0.0
+        };
 
-        model.mesh.render_to_scene(
+        let mut mesh = if opts.contains_key("time") || opts.contains_key("frame") {
+            model.sample_pose(time_sec)
+        } else {
+            model.mesh
+        };
+
+        if (scale - 1.0).abs() > 1e-4 {
+            mesh.scale(scale);
+        }
+        mesh.rotate(pitch, yaw, roll);
+
+        mesh.render_to_scene(
             &mut self.scene,
             center_x,
             center_y,
@@ -1228,6 +1249,57 @@ impl SceneBuilder {
             light_dir,
             wireframe,
         );
+
+        Ok(())
+    }
+
+    fn shader(&mut self, source: &str, opts: Map) -> RhaiResult<()> {
+        let x = get_opt_f32(&opts, "x", 0.0);
+        let y = get_opt_f32(&opts, "y", 0.0);
+        let w = get_opt_f32(&opts, "w", get_opt_f32(&opts, "width", 1920.0));
+        let h = get_opt_f32(&opts, "h", get_opt_f32(&opts, "height", 1080.0));
+        let time = get_opt_f32(&opts, "time", 0.0);
+        let opacity = get_opt_f32(&opts, "opacity", 1.0);
+
+        let p0 = get_opt_f32(&opts, "p0", get_opt_f32(&opts, "param0", 1.0));
+        let p1 = get_opt_f32(&opts, "p1", get_opt_f32(&opts, "param1", 1.0));
+        let p2 = get_opt_f32(&opts, "p2", get_opt_f32(&opts, "param2", 1.0));
+        let p3 = get_opt_f32(&opts, "p3", get_opt_f32(&opts, "param3", 1.0));
+
+        let params = if let Some(arr) = opts.get("params").and_then(|v| v.clone().into_array().ok())
+        {
+            [
+                arr.first()
+                    .and_then(|v| v.as_float().ok())
+                    .map(|f| f as f32)
+                    .unwrap_or(p0),
+                arr.get(1)
+                    .and_then(|v| v.as_float().ok())
+                    .map(|f| f as f32)
+                    .unwrap_or(p1),
+                arr.get(2)
+                    .and_then(|v| v.as_float().ok())
+                    .map(|f| f as f32)
+                    .unwrap_or(p2),
+                arr.get(3)
+                    .and_then(|v| v.as_float().ok())
+                    .map(|f| f as f32)
+                    .unwrap_or(p3),
+            ]
+        } else {
+            [p0, p1, p2, p3]
+        };
+
+        self.scene.push(SceneNode::Shader {
+            x,
+            y,
+            w,
+            h,
+            source: source.to_string(),
+            time,
+            params,
+            opacity,
+        });
 
         Ok(())
     }
@@ -1587,6 +1659,13 @@ fn register_scene_api(engine: &mut Engine) {
     engine.register_fn("confetti_cannon", SceneBuilder::confetti_cannon);
     engine.register_fn("mesh_3d", SceneBuilder::mesh_3d);
     engine.register_fn("gltf", SceneBuilder::gltf);
+    engine.register_fn("gltf", |scene: &mut SceneBuilder, source: &str| {
+        scene.gltf(source, Map::new())
+    });
+    engine.register_fn("shader", SceneBuilder::shader);
+    engine.register_fn("shader", |scene: &mut SceneBuilder, source: &str| {
+        scene.shader(source, Map::new())
+    });
 
     engine.register_type_with_name::<RhaiLayout>("RhaiLayout");
     engine.register_fn("rect", RhaiLayout::rect);
@@ -1749,6 +1828,10 @@ fn register_scene_api(engine: &mut Engine) {
 fn context_map(frame: u32, context: NativeCompositionContext) -> Map {
     let mut map = Map::new();
     map.insert("frame".into(), Dynamic::from(frame as INT));
+    map.insert(
+        "time".into(),
+        Dynamic::from((frame as f64) / context.fps.max(0.001)),
+    );
     map.insert("width".into(), Dynamic::from(context.width as INT));
     map.insert("height".into(), Dynamic::from(context.height as INT));
     map.insert("fps".into(), Dynamic::from(context.fps as FLOAT));

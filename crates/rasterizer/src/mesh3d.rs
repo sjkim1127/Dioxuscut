@@ -83,6 +83,214 @@ impl Vec3 {
     }
 }
 
+/// A 4-component Quaternion representing 3D rotation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Quat {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub w: f32,
+}
+
+impl Default for Quat {
+    fn default() -> Self {
+        Self::IDENTITY
+    }
+}
+
+impl Quat {
+    pub const IDENTITY: Self = Self {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+        w: 1.0,
+    };
+
+    pub const fn new(x: f32, y: f32, z: f32, w: f32) -> Self {
+        Self { x, y, z, w }
+    }
+
+    pub fn dot(self, other: Self) -> f32 {
+        self.x * other.x + self.y * other.y + self.z * other.z + self.w * other.w
+    }
+
+    pub fn length(self) -> f32 {
+        self.dot(self).sqrt()
+    }
+
+    pub fn normalize(self) -> Self {
+        let len = self.length();
+        if len > 1e-6 {
+            Self {
+                x: self.x / len,
+                y: self.y / len,
+                z: self.z / len,
+                w: self.w / len,
+            }
+        } else {
+            Self::IDENTITY
+        }
+    }
+
+    /// Normalized linear interpolation (fast spherical interpolation approximation).
+    pub fn nlerp(self, mut other: Self, t: f32) -> Self {
+        let t = t.clamp(0.0, 1.0);
+        if self.dot(other) < 0.0 {
+            other.x = -other.x;
+            other.y = -other.y;
+            other.z = -other.z;
+            other.w = -other.w;
+        }
+        let one_minus_t = 1.0 - t;
+        Self {
+            x: self.x * one_minus_t + other.x * t,
+            y: self.y * one_minus_t + other.y * t,
+            z: self.z * one_minus_t + other.z * t,
+            w: self.w * one_minus_t + other.w * t,
+        }
+        .normalize()
+    }
+
+    /// Convert quaternion into a column-major 4x4 rotation matrix.
+    pub fn to_mat4(self) -> Mat4 {
+        let q = self.normalize();
+        let x2 = q.x + q.x;
+        let y2 = q.y + q.y;
+        let z2 = q.z + q.z;
+        let xx = q.x * x2;
+        let xy = q.x * y2;
+        let xz = q.x * z2;
+        let yy = q.y * y2;
+        let yz = q.y * z2;
+        let zz = q.z * z2;
+        let wx = q.w * x2;
+        let wy = q.w * y2;
+        let wz = q.w * z2;
+
+        Mat4([
+            1.0 - (yy + zz),
+            xy + wz,
+            xz - wy,
+            0.0,
+            xy - wz,
+            1.0 - (xx + zz),
+            yz + wx,
+            0.0,
+            xz + wy,
+            yz - wx,
+            1.0 - (xx + yy),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ])
+    }
+}
+
+/// A 4x4 column-major matrix for 3D affine transforms.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Mat4(pub [f32; 16]);
+
+impl Default for Mat4 {
+    fn default() -> Self {
+        Self::IDENTITY
+    }
+}
+
+impl Mat4 {
+    pub const IDENTITY: Self = Self([
+        1.0, 0.0, 0.0, 0.0, // col 0
+        0.0, 1.0, 0.0, 0.0, // col 1
+        0.0, 0.0, 1.0, 0.0, // col 2
+        0.0, 0.0, 0.0, 1.0, // col 3
+    ]);
+
+    pub fn from_cols(c0: [f32; 4], c1: [f32; 4], c2: [f32; 4], c3: [f32; 4]) -> Self {
+        Self([
+            c0[0], c0[1], c0[2], c0[3], c1[0], c1[1], c1[2], c1[3], c2[0], c2[1], c2[2], c2[3],
+            c3[0], c3[1], c3[2], c3[3],
+        ])
+    }
+
+    pub fn from_translation(t: Vec3) -> Self {
+        Self([
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, t.x, t.y, t.z, 1.0,
+        ])
+    }
+
+    pub fn from_scale(s: Vec3) -> Self {
+        Self([
+            s.x, 0.0, 0.0, 0.0, 0.0, s.y, 0.0, 0.0, 0.0, 0.0, s.z, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ])
+    }
+
+    pub fn from_translation_rotation_scale(t: Vec3, r: Quat, s: Vec3) -> Self {
+        let rot = r.to_mat4();
+        // M = T * R * S
+        Self([
+            rot.0[0] * s.x,
+            rot.0[1] * s.x,
+            rot.0[2] * s.x,
+            0.0,
+            rot.0[4] * s.y,
+            rot.0[5] * s.y,
+            rot.0[6] * s.y,
+            0.0,
+            rot.0[8] * s.z,
+            rot.0[9] * s.z,
+            rot.0[10] * s.z,
+            0.0,
+            t.x,
+            t.y,
+            t.z,
+            1.0,
+        ])
+    }
+
+    pub fn mul(&self, rhs: &Self) -> Self {
+        let mut out = [0.0f32; 16];
+        for col in 0..4 {
+            for row in 0..4 {
+                let mut sum = 0.0;
+                for k in 0..4 {
+                    sum += self.0[k * 4 + row] * rhs.0[col * 4 + k];
+                }
+                out[col * 4 + row] = sum;
+            }
+        }
+        Self(out)
+    }
+
+    pub fn transform_point(&self, p: Vec3) -> Vec3 {
+        let x = self.0[0] * p.x + self.0[4] * p.y + self.0[8] * p.z + self.0[12];
+        let y = self.0[1] * p.x + self.0[5] * p.y + self.0[9] * p.z + self.0[13];
+        let z = self.0[2] * p.x + self.0[6] * p.y + self.0[10] * p.z + self.0[14];
+        let w = self.0[3] * p.x + self.0[7] * p.y + self.0[11] * p.z + self.0[15];
+        if w.abs() > 1e-6 && (w - 1.0).abs() > 1e-6 {
+            Vec3::new(x / w, y / w, z / w)
+        } else {
+            Vec3::new(x, y, z)
+        }
+    }
+
+    pub fn transform_vector(&self, v: Vec3) -> Vec3 {
+        let x = self.0[0] * v.x + self.0[4] * v.y + self.0[8] * v.z;
+        let y = self.0[1] * v.x + self.0[5] * v.y + self.0[9] * v.z;
+        let z = self.0[2] * v.x + self.0[6] * v.y + self.0[10] * v.z;
+        Vec3::new(x, y, z)
+    }
+}
+
+/// Vertex with skeletal bone joint influences for GPU/CPU vertex skinning.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct SkinnedVertex {
+    pub position: Vec3,
+    pub normal: Vec3,
+    pub joints: [u16; 4],
+    pub weights: [f32; 4],
+}
+
 /// A 3D procedural mesh (SOP - Surface Operator).
 #[derive(Debug, Clone, Default)]
 pub struct Mesh3D {

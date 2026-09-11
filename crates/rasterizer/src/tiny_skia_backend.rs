@@ -747,6 +747,56 @@ fn render_node(
                 }
             }
         }
+
+        SceneNode::Shader {
+            x,
+            y,
+            w,
+            h,
+            source: _,
+            time,
+            params,
+            opacity: node_opacity,
+        } => {
+            let eff_opacity = opacity * node_opacity;
+            if eff_opacity > 0.0 && *w > 0.0 && *h > 0.0 {
+                let pw = (*w as u32).clamp(16, 256);
+                let ph = (*h as u32).clamp(16, 256);
+                if let Some(mut sm_pixmap) = Pixmap::new(pw, ph) {
+                    let pixels = sm_pixmap.data_mut();
+                    let t = *time;
+                    let p0 = params[0].max(0.1);
+                    let p1 = params[1].max(0.1);
+                    let p2 = params[2].max(0.1);
+                    for py in 0..ph {
+                        let ny = py as f32 / ph as f32;
+                        for px in 0..pw {
+                            let nx = px as f32 / pw as f32;
+                            let v1 = (nx * 10.0 + t).sin();
+                            let v2 =
+                                ((ny * 10.0 + t * 1.3).sin() + (nx * ny * 5.0 + t).cos()) * 0.5;
+                            let r = (((v1 * 0.5 + 0.5) * p0) * 255.0).clamp(0.0, 255.0) as u8;
+                            let g = (((v2 * 0.5 + 0.5) * p1) * 255.0).clamp(0.0, 255.0) as u8;
+                            let b = (((((nx + ny) * 5.0 + t * 0.7).sin() * 0.5 + 0.5) * p2) * 255.0)
+                                .clamp(0.0, 255.0) as u8;
+                            let idx = ((py * pw + px) * 4) as usize;
+                            pixels[idx] = r;
+                            pixels[idx + 1] = g;
+                            pixels[idx + 2] = b;
+                            pixels[idx + 3] = (255.0 * eff_opacity).clamp(0.0, 255.0) as u8;
+                        }
+                    }
+                    let sx = *w / pw as f32;
+                    let sy = *h / ph as f32;
+                    let shader_transform = transform.pre_translate(*x, *y).pre_scale(sx, sy);
+                    let paint = PixmapPaint {
+                        opacity: eff_opacity.clamp(0.0, 1.0),
+                        ..Default::default()
+                    };
+                    pixmap.draw_pixmap(0, 0, sm_pixmap.as_ref(), &paint, shader_transform, None);
+                }
+            }
+        }
     }
     Ok(())
 }

@@ -42,6 +42,7 @@ pub mod particles;
 pub mod render;
 pub mod scene;
 pub mod security;
+pub mod shader;
 pub mod text_layout;
 pub mod tiny_skia_backend;
 mod video_cache;
@@ -53,8 +54,11 @@ pub use security::MediaSecurityPolicy;
 pub use audio_cache::AudioData;
 pub use emoji::{is_emoji_char, is_emoji_grapheme, render_emoji, split_text_and_emojis, TextRun};
 pub use gltf::{parse_glb, parse_gltf, GltfModel};
-pub use mesh3d::{Mesh3D, Vec3};
+pub use mesh3d::{Mat4, Mesh3D, Quat, SkinnedVertex, Vec3};
 pub use particles::{ConfettiEmitter, ConfettiShape, Particle};
+#[cfg(feature = "gpu")]
+pub use shader::WgpuShaderRunner;
+pub use shader::{render_shader_cpu, wrap_wgsl_shader, ShaderUniforms};
 
 pub use backend::{FrameConfig, RasterError, RasterizerBackend};
 pub use font::{
