@@ -31,6 +31,8 @@ fn test_cli_flag_defaults() {
             crf,
             preset,
             hw_accel,
+            sandbox_roots,
+            permissive,
         } => {
             assert_eq!(composition, Some("HelloWorld".into()));
             assert_eq!(script, None);
@@ -49,6 +51,8 @@ fn test_cli_flag_defaults() {
             assert_eq!(crf, 18);
             assert_eq!(preset, "fast");
             assert_eq!(hw_accel, dioxuscut_cli::HwAccelArg::Auto);
+            assert!(sandbox_roots.is_empty());
+            assert!(!permissive);
         }
         _ => panic!("Expected Commands::Render"),
     }
@@ -98,6 +102,8 @@ fn test_cli_flag_custom_values() {
             crf,
             preset,
             hw_accel,
+            sandbox_roots,
+            permissive,
         } => {
             assert_eq!(composition, Some("CustomComposition".into()));
             assert_eq!(script, None);
@@ -116,6 +122,8 @@ fn test_cli_flag_custom_values() {
             assert_eq!(crf, 18);
             assert_eq!(preset, "fast");
             assert_eq!(hw_accel, dioxuscut_cli::HwAccelArg::Auto);
+            assert_eq!(sandbox_roots, Vec::<PathBuf>::new());
+            assert!(!permissive);
         }
         _ => panic!("Expected Commands::Render"),
     }

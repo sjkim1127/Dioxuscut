@@ -45,6 +45,8 @@ async fn rhai_example_renders_a_real_mp4() {
         crf: 18,
         preset: "fast".into(),
         hw_accel: dioxuscut_rasterizer::HwAccel::Disabled,
+        sandbox_roots: Vec::new(),
+        permissive: false,
     };
 
     execute_render_command(&request).await.unwrap();

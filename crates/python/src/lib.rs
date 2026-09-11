@@ -83,7 +83,9 @@ fn parse_hw_accel(hw_accel: &str) -> Result<dioxuscut_rasterizer::HwAccel, PyErr
     frame_end = None,
     crf = 18,
     preset = "fast",
-    hw_accel = "auto"
+    hw_accel = "auto",
+    sandbox_roots = None,
+    permissive = false
 ))]
 #[allow(clippy::too_many_arguments)]
 fn render_native(
@@ -103,10 +105,17 @@ fn render_native(
     crf: u32,
     preset: &str,
     hw_accel: &str,
+    sandbox_roots: Option<Vec<String>>,
+    permissive: bool,
 ) -> PyResult<()> {
     let parsed_codec = parse_codec(codec)?;
     let parsed_backend = parse_backend(backend)?;
     let parsed_hw_accel = parse_hw_accel(hw_accel)?;
+    let parsed_sandbox_roots: Vec<PathBuf> = sandbox_roots
+        .unwrap_or_default()
+        .into_iter()
+        .map(PathBuf::from)
+        .collect();
 
     // Handle props: if JSON string provided, write to a temporary file or validate
     let props_path = if let Some(ref json_str) = props_json {
@@ -137,6 +146,8 @@ fn render_native(
         crf,
         preset: preset.to_string(),
         hw_accel: parsed_hw_accel,
+        sandbox_roots: parsed_sandbox_roots,
+        permissive,
     };
 
     // Release GIL while rendering in a dedicated Tokio runtime

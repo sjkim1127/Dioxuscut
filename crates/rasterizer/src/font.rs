@@ -321,22 +321,27 @@ impl FontCache {
             }
         }
 
-        // Step 2: system search paths
-        for path in FONT_SEARCH_PATHS {
-            if let Ok(bytes) = std::fs::read(path) {
-                if let Ok(font) = LoadedFont::from_bytes(bytes) {
-                    tracing::debug!(font_path = %path, "Loaded system font");
-                    return Self {
-                        font: Some(Arc::new(font)),
-                        path: Some(path.to_string()),
-                        assets: Mutex::new(HashMap::new()),
-                    };
+        // Step 2: optional system font search if explicitly opted in
+        if std::env::var("DIOXUSCUT_USE_SYSTEM_FONTS")
+            .map(|v| v == "1" || v == "true")
+            .unwrap_or(false)
+        {
+            for path in FONT_SEARCH_PATHS {
+                if let Ok(bytes) = std::fs::read(path) {
+                    if let Ok(font) = LoadedFont::from_bytes(bytes) {
+                        tracing::debug!(font_path = %path, "Loaded system font");
+                        return Self {
+                            font: Some(Arc::new(font)),
+                            path: Some(path.to_string()),
+                            assets: Mutex::new(HashMap::new()),
+                        };
+                    }
                 }
             }
         }
 
-        // Step 3: bundled fallback — always succeeds
-        tracing::debug!("No system font found; using bundled NotoSans-Regular");
+        // Step 3: bundled NotoSans-Regular — guarantees deterministic cross-platform typography
+        tracing::debug!("Using bundled NotoSans-Regular as deterministic default font");
         Self::bundled()
     }
 
@@ -504,6 +509,16 @@ impl FontCache {
                 path: source.into(),
                 reason: "font source path must not be empty".into(),
             });
+        }
+        if path == "<bundled:NotoSans-Regular>" || path.starts_with("<bundled:") {
+            if let Some(font) = &self.font {
+                return Ok(font.clone());
+            }
+            let font = Arc::new(
+                LoadedFont::from_bytes(BUNDLED_FONT.to_vec())
+                    .expect("bundled NotoSans-Regular.ttf is valid"),
+            );
+            return Ok(font);
         }
         if source.contains("://") && !source.starts_with("file://") {
             return Err(FontLoadError {

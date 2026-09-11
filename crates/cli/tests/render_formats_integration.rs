@@ -38,6 +38,8 @@ fn request(output: &Path, codec: RenderCodec) -> RenderRequest {
         crf: 18,
         preset: "fast".into(),
         hw_accel: dioxuscut_rasterizer::HwAccel::Disabled,
+        sandbox_roots: Vec::new(),
+        permissive: false,
     }
 }
 

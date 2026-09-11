@@ -84,6 +84,8 @@ def render(
     crf: int = 18,
     preset: str = "fast",
     hw_accel: str = "auto",
+    sandbox_roots: Optional[List[Union[str, Path]]] = None,
+    permissive: bool = False,
 ) -> None:
     """
     Render a registered video composition to an output video or still image.
@@ -103,8 +105,11 @@ def render(
         crf: Encoding quality factor (lower is higher quality, default: 18)
         preset: FFmpeg x264 preset ('fast', 'medium', 'slow', etc.)
         hw_accel: Hardware acceleration mode ('auto', 'disabled', 'videotoolbox', 'nvenc')
+        sandbox_roots: List of allowed root paths for media security isolation
+        permissive: Run in permissive mode without media sandbox jail
     """
     props_json = json.dumps(props) if props is not None else None
+    roots = [str(r) for r in sandbox_roots] if sandbox_roots is not None else None
     render_native(
         output=str(output),
         composition=composition,
@@ -121,6 +126,8 @@ def render(
         crf=crf,
         preset=preset,
         hw_accel=hw_accel,
+        sandbox_roots=roots,
+        permissive=permissive,
     )
 
 
@@ -133,6 +140,8 @@ def render_still(
     height: int = 1080,
     fps: float = 30.0,
     backend: str = "native",
+    sandbox_roots: Optional[List[Union[str, Path]]] = None,
+    permissive: bool = False,
 ) -> None:
     """
     Render a single still image frame (PNG, JPEG, WebP) from a composition.
@@ -146,10 +155,13 @@ def render_still(
         height: Image height in pixels
         fps: Frame rate context
         backend: 'native' or 'gpu'
+        sandbox_roots: List of allowed root paths for media security isolation
+        permissive: Run in permissive mode without media sandbox jail
     """
     ext = Path(output).suffix.lstrip(".").lower()
     codec = ext if ext in ("png", "jpeg", "jpg", "webp") else "png"
     props_json = json.dumps(props) if props is not None else None
+    roots = [str(r) for r in sandbox_roots] if sandbox_roots is not None else None
 
     is_script = str(composition).endswith(".rhai") or Path(composition).is_file()
     comp_arg = None if is_script else composition
@@ -171,6 +183,8 @@ def render_still(
         crf=18,
         preset="fast",
         hw_accel="disabled",
+        sandbox_roots=roots,
+        permissive=permissive,
     )
 
 
@@ -187,6 +201,8 @@ def render_script(
     crf: int = 18,
     preset: str = "fast",
     hw_accel: str = "auto",
+    sandbox_roots: Optional[List[Union[str, Path]]] = None,
+    permissive: bool = False,
 ) -> None:
     """
     Render a dynamic Rhai video script (.rhai) without recompiling Rust code.
@@ -202,8 +218,11 @@ def render_script(
         backend: 'native' or 'gpu'
         codec: Output video codec
         hw_accel: Hardware acceleration mode ('auto', 'disabled', 'videotoolbox', 'nvenc')
+        sandbox_roots: List of allowed root paths for media security isolation
+        permissive: Run in permissive mode without media sandbox jail
     """
     props_json = json.dumps(props) if props is not None else None
+    roots = [str(r) for r in sandbox_roots] if sandbox_roots is not None else None
     render_native(
         output=str(output),
         composition=None,
@@ -220,6 +239,8 @@ def render_script(
         crf=crf,
         preset=preset,
         hw_accel=hw_accel,
+        sandbox_roots=roots,
+        permissive=permissive,
     )
 
 
@@ -252,6 +273,8 @@ class Composition:
         crf: int = 18,
         preset: str = "fast",
         hw_accel: str = "auto",
+        sandbox_roots: Optional[List[Union[str, Path]]] = None,
+        permissive: bool = False,
     ) -> None:
         """Render the complete video."""
         if self.is_script:
@@ -268,6 +291,8 @@ class Composition:
                 crf=crf,
                 preset=preset,
                 hw_accel=hw_accel,
+                sandbox_roots=sandbox_roots,
+                permissive=permissive,
             )
         else:
             render(
@@ -283,6 +308,8 @@ class Composition:
                 crf=crf,
                 preset=preset,
                 hw_accel=hw_accel,
+                sandbox_roots=sandbox_roots,
+                permissive=permissive,
             )
 
     def render_still(

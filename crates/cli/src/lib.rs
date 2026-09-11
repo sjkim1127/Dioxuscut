@@ -218,6 +218,14 @@ pub enum Commands {
         /// Hardware acceleration mode for video encoding.
         #[arg(long, value_enum, default_value_t = HwAccelArg::Auto)]
         hw_accel: HwAccelArg,
+
+        /// Allowed root directory for media assets. May be repeated.
+        #[arg(long = "sandbox-root", value_name = "DIR")]
+        sandbox_roots: Vec<PathBuf>,
+
+        /// Run in permissive mode without sandbox jail (unrestricted filesystem access).
+        #[arg(long, default_value_t = false)]
+        permissive: bool,
     },
 
     /// (Experimental) Scaffold a Dioxuscut component from a Remotion (.tsx) file.
@@ -287,6 +295,45 @@ pub struct RenderRequest {
     pub crf: u32,
     pub preset: String,
     pub hw_accel: dioxuscut_rasterizer::HwAccel,
+    pub sandbox_roots: Vec<PathBuf>,
+    pub permissive: bool,
+}
+
+impl RenderRequest {
+    /// Determines the active MediaSecurityPolicy.
+    ///
+    /// - If `permissive` is true, returns `MediaSecurityPolicy::Permissive`.
+    /// - If `sandbox_roots` is non-empty, returns `MediaSecurityPolicy::sandboxed(sandbox_roots)`.
+    /// - If rendering an external Rhai script (`self.script.is_some()`), automatically defaults
+    ///   to `MediaSecurityPolicy::sandboxed([script_dir, current_dir])` to safely sandbox untrusted scripts.
+    /// - Otherwise (built-in Rust composition with no roots specified), defaults to `MediaSecurityPolicy::Permissive`.
+    pub fn effective_security_policy(&self) -> dioxuscut_rasterizer::MediaSecurityPolicy {
+        if self.permissive {
+            return dioxuscut_rasterizer::MediaSecurityPolicy::Permissive;
+        }
+        if !self.sandbox_roots.is_empty() {
+            return dioxuscut_rasterizer::MediaSecurityPolicy::sandboxed(
+                self.sandbox_roots.clone(),
+            );
+        }
+        if let Some(ref script_path) = self.script {
+            let mut roots = Vec::new();
+            if let Some(parent) = script_path.parent() {
+                if let Ok(canon) = parent.canonicalize() {
+                    roots.push(canon);
+                } else if !parent.as_os_str().is_empty() {
+                    roots.push(parent.to_path_buf());
+                }
+            }
+            if let Ok(cwd) = std::env::current_dir() {
+                if !roots.contains(&cwd) {
+                    roots.push(cwd);
+                }
+            }
+            return dioxuscut_rasterizer::MediaSecurityPolicy::sandboxed(roots);
+        }
+        dioxuscut_rasterizer::MediaSecurityPolicy::Permissive
+    }
 }
 
 /// Validates that a render request selects exactly one available composition source.
@@ -604,13 +651,15 @@ pub async fn execute_render_command_with_registry_and_control(
         "Starting browser-free native render"
     );
 
+    let security_policy = request.effective_security_policy();
+
     match request.backend {
         RenderBackend::Native => {
             use dioxuscut_rasterizer::{
                 render_still_fallible, render_to_ffmpeg_pipe_fallible, PipeConfig, TinySkiaBackend,
             };
 
-            let rasterizer = TinySkiaBackend::new();
+            let rasterizer = TinySkiaBackend::new().with_security_policy(security_policy.clone());
             if let Some(format) = request.codec.still_format() {
                 render_still_fallible(
                     &rasterizer,
@@ -636,7 +685,8 @@ pub async fn execute_render_command_with_registry_and_control(
                 .with_hw_accel(request.hw_accel)
                 .with_quality(request.crf, &request.preset)
                 .with_audio_tracks(audio_tracks.clone())
-                .with_control(control.clone());
+                .with_control(control.clone())
+                .with_security_policy(security_policy.clone());
                 render_to_ffmpeg_pipe_fallible(&rasterizer, &pipe_config, |frame| {
                     prepared.render(frame)
                 })?;
@@ -682,7 +732,8 @@ pub async fn execute_render_command_with_registry_and_control(
                     .with_hw_accel(request.hw_accel)
                     .with_quality(request.crf, &request.preset)
                     .with_audio_tracks(audio_tracks.clone())
-                    .with_control(control.clone());
+                    .with_control(control.clone())
+                    .with_security_policy(security_policy.clone());
                     render_to_ffmpeg_pipe_fallible(&rasterizer, &pipe_config, |frame| {
                         prepared.render(frame)
                     })?;

@@ -52,47 +52,68 @@ jobs:
       - name: Create snapshots directory
         run: mkdir -p snapshots
 
-      # Render frame 0 (intro — first rendered frame)
-      - name: Render frame 0
+      # Render multi-scene golden gallery (9 frames across 4 compositions)
+      - name: Render snapshots
         run: |
           ./target/release/dioxuscut render \
             --composition HelloWorld \
-            --frame-start 0 \
-            --frame-end 0 \
-            --output snapshots/frame_0000.png \
-            --codec png \
-            --width 960 \
-            --height 540
+            --frame-start 0 --frame-end 0 \
+            --output snapshots/hello_world_0000.png \
+            --codec png --width 960 --height 540
 
-      # Render frame 30 (1 s into the composition at 30 fps)
-      - name: Render frame 30
-        run: |
           ./target/release/dioxuscut render \
             --composition HelloWorld \
-            --frame-start 30 \
-            --frame-end 30 \
-            --output snapshots/frame_0030.png \
-            --codec png \
-            --width 960 \
-            --height 540
+            --frame-start 30 --frame-end 30 \
+            --output snapshots/hello_world_0030.png \
+            --codec png --width 960 --height 540
 
-      # Render frame 90 (3 s — late animation)
-      - name: Render frame 90
-        run: |
           ./target/release/dioxuscut render \
             --composition HelloWorld \
-            --frame-start 90 \
-            --frame-end 90 \
-            --output snapshots/frame_0090.png \
-            --codec png \
-            --width 960 \
-            --height 540
+            --frame-start 90 --frame-end 90 \
+            --output snapshots/hello_world_0090.png \
+            --codec png --width 960 --height 540
+
+          ./target/release/dioxuscut render \
+            --composition ShapesAndFilters \
+            --frame-start 0 --frame-end 0 \
+            --output snapshots/shapes_filters_0000.png \
+            --codec png --width 960 --height 540
+
+          ./target/release/dioxuscut render \
+            --composition ShapesAndFilters \
+            --frame-start 30 --frame-end 30 \
+            --output snapshots/shapes_filters_0030.png \
+            --codec png --width 960 --height 540
+
+          ./target/release/dioxuscut render \
+            --composition CyberpunkGrid \
+            --frame-start 0 --frame-end 0 \
+            --output snapshots/cyberpunk_grid_0000.png \
+            --codec png --width 960 --height 540
+
+          ./target/release/dioxuscut render \
+            --composition CyberpunkGrid \
+            --frame-start 30 --frame-end 30 \
+            --output snapshots/cyberpunk_grid_0030.png \
+            --codec png --width 960 --height 540
+
+          ./target/release/dioxuscut render \
+            --composition ComplexGradients \
+            --frame-start 0 --frame-end 0 \
+            --output snapshots/complex_gradients_0000.png \
+            --codec png --width 960 --height 540
+
+          ./target/release/dioxuscut render \
+            --composition ComplexGradients \
+            --frame-start 30 --frame-end 30 \
+            --output snapshots/complex_gradients_0030.png \
+            --codec png --width 960 --height 540
 
       - name: Verify snapshots were created
         run: |
-          for f in snapshots/frame_0000.png snapshots/frame_0030.png snapshots/frame_0090.png; do
+          for f in snapshots/*.png; do
             if [[ ! -f "$f" ]]; then
-              echo "::error::Missing snapshot: $f"
+              echo "::error::No snapshots found in snapshots/"
               exit 1
             fi
             size=$(stat -c%s "$f")
@@ -127,7 +148,7 @@ jobs:
 
             // Get the workspace version from Cargo.toml for the badge
             const { execSync } = require('child_process');
-            let version = '0.1.x';
+            let version = '0.2.0';
             try {
               version = execSync(
                 "cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == \"dioxuscut-cli\") | .version'",
@@ -136,17 +157,23 @@ jobs:
             } catch (_) {}
 
             const body = [
-              '## 🎬 Visual Regression Snapshots — HelloWorld',
+              '## 🎬 Visual Regression Snapshots — Multi-Scene Gallery',
               '',
-              `Rendered **3 frames** at 960 × 540 from commit \`${sha}\`.`,
+              `Rendered **9 frames across 4 compositions** at 960 × 540 from commit \`${sha}\`.`,
               '',
-              '| Frame | Timestamp (30 fps) | Description |',
-              '|-------|--------------------|-------------|',
-              '| **0** | 0.0 s | First frame — intro |',
-              '| **30** | 1.0 s | Mid-animation |',
-              '| **90** | 3.0 s | Late animation |',
+              '| Scene | Frame | Timestamp (30 fps) | Features Tested |',
+              '|:------|:-----:|:-------------------|:----------------|',
+              '| **HelloWorld** | 0 | 0.0 s | Bundled typography, linear gradient, circles |',
+              '| **HelloWorld** | 30 | 1.0 s | Dynamic text, expanding progress bar |',
+              '| **HelloWorld** | 90 | 3.0 s | Fully expanded progress bar |',
+              '| **ShapesAndFilters** | 0 | 0.0 s | Rounded rects, SVG star, drop shadow, vignette |',
+              '| **ShapesAndFilters** | 30 | 1.0 s | Animated transform, blur filter, vignette |',
+              '| **CyberpunkGrid** | 0 | 0.0 s | Perspective grid lines, neon glow shadow |',
+              '| **CyberpunkGrid** | 30 | 1.0 s | Horizon offset, pulsing neon, chromatic aberration |',
+              '| **ComplexGradients** | 0 | 0.0 s | 4-stop linear gradient, dual radial gradients |',
+              '| **ComplexGradients** | 30 | 1.0 s | Rotated linear gradient, pulsating radial gradients |',
               '',
-              `📦 **[Download all 3 PNGs](${artifactUrl})**`,
+              `📦 **[Download all 9 PNGs](${artifactUrl})**`,
               `> Artifact: \`visual-snapshots-${context.sha}\` · login required to download`,
               '',
               `🔗 [View full CI run](${runUrl})`,

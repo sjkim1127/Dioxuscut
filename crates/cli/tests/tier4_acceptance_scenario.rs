@@ -49,6 +49,8 @@ async fn test_tier4_real_world_acceptance_scenario() {
         crf: 18,
         preset: "fast".into(),
         hw_accel: dioxuscut_rasterizer::HwAccel::Disabled,
+        sandbox_roots: Vec::new(),
+        permissive: false,
     };
     let result = execute_render_command(&request).await;
 

@@ -30,6 +30,8 @@ async fn main() -> anyhow::Result<()> {
             crf,
             preset,
             hw_accel,
+            sandbox_roots,
+            permissive,
         } => {
             let request = RenderRequest {
                 composition: composition.clone(),
@@ -49,6 +51,8 @@ async fn main() -> anyhow::Result<()> {
                 crf: *crf,
                 preset: preset.clone(),
                 hw_accel: (*hw_accel).into(),
+                sandbox_roots: sandbox_roots.clone(),
+                permissive: *permissive,
             };
             let control = default_render_control(&request);
             let cancellation = control.cancellation_token();
