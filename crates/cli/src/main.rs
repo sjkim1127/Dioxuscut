@@ -1,6 +1,7 @@
 use clap::Parser;
 use dioxuscut_cli::{
-    default_render_control, execute_render_command_with_control, Cli, Commands, RenderRequest,
+    default_render_control, execute_render_command_with_control, serve::ServeConfig, Cli, Commands,
+    RenderRequest,
 };
 
 #[tokio::main]
@@ -121,6 +122,28 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
+        }
+        Commands::Serve {
+            script,
+            props,
+            port,
+            frame,
+            width,
+            height,
+            fps,
+            duration,
+        } => {
+            dioxuscut_cli::serve::run(ServeConfig {
+                script: script.clone(),
+                props: props.clone(),
+                port: *port,
+                default_frame: *frame,
+                width: *width,
+                height: *height,
+                fps: *fps,
+                duration: *duration,
+            })
+            .await?;
         }
     }
 

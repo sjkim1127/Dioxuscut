@@ -4,6 +4,7 @@ pub mod composition;
 pub mod migrate;
 #[cfg(feature = "rhai")]
 pub mod rhai_runtime;
+pub mod serve;
 
 pub use composition::{
     built_in_registry, BarChartRaceComposition, CodeTerminalComposition,
@@ -252,6 +253,41 @@ pub enum Commands {
     Probe {
         /// Media file path to inspect.
         path: PathBuf,
+    },
+
+    /// Start a hot-reloading web studio with a live WebSocket frame preview.
+    Serve {
+        /// Path to the Rhai composition script to preview.
+        #[arg(long, short)]
+        script: PathBuf,
+
+        /// Path to a JSON props file (optional).
+        #[arg(long, short)]
+        props: Option<PathBuf>,
+
+        /// TCP port to bind on.
+        #[arg(long, default_value_t = 7890)]
+        port: u16,
+
+        /// Default frame index to render on change.
+        #[arg(long, short, default_value_t = 0)]
+        frame: u32,
+
+        /// Render width.
+        #[arg(long, default_value_t = 1920)]
+        width: u32,
+
+        /// Render height.
+        #[arg(long, default_value_t = 1080)]
+        height: u32,
+
+        /// Frames per second (used for composition context).
+        #[arg(long, default_value_t = 30.0)]
+        fps: f64,
+
+        /// Duration in frames (used for composition context).
+        #[arg(long, default_value_t = 150)]
+        duration: u32,
     },
 }
 
