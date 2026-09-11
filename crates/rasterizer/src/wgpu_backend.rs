@@ -29,6 +29,20 @@
 //! Rectangles, circles, and gradients use analytic screen-space quads. SVG
 //! paths and strokes are tessellated into indexed triangle meshes, while
 //! nested groups share the CPU renderer's affine transform composition.
+//!
+//! # Colour Pipeline
+//!
+//! All internal rendering uses `Rgba8Unorm` (linear light, **not** sRGB) to
+//! avoid the double-gamma problem that would arise if the fragment shader
+//! received sRGB-pre-linearised colour values and wrote them into an sRGB
+//! framebuffer. Input `Color` values (u8 sRGB) are converted to linear float
+//! via [`srgb_to_linear`] before being stored in GPU uniforms.
+//!
+//! # Resource Pool
+//!
+//! [`GpuFrameResources`] caches per-resolution textures and the readback
+//! buffer inside `WgpuBackend`, eliminating the allocation pressure of
+//! re-creating GPU objects on every `render_frame` call.
 
 #![cfg(feature = "gpu")]
 
@@ -40,11 +54,15 @@ use lyon_tessellation::geometry_builder::{BuffersBuilder, FillVertexConstructor,
 use lyon_tessellation::math::point;
 use lyon_tessellation::path::Path as LyonPath;
 use lyon_tessellation::{FillOptions, FillTessellator, FillVertex};
+use std::collections::HashMap;
+use std::sync::Mutex;
 use tiny_skia::{Path as TinyPath, PathSegment, Stroke, Transform};
 use wgpu::util::DeviceExt;
 
 const MAX_GRADIENT_STOPS: usize = 16;
 const SAMPLE_COUNT: u32 = 4;
+/// Internal linear-light render format. **Not** sRGB to avoid double-gamma.
+const RENDER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const MESH_ATTRIBUTES: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![0 => Float32x2];
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -231,6 +249,7 @@ struct GpuContext {
     mesh_pipeline: wgpu::RenderPipeline,
     globals_layout: wgpu::BindGroupLayout,
     instance_layout: wgpu::BindGroupLayout,
+    max_texture_dimension_2d: u32,
 }
 
 impl GpuContext {
@@ -258,12 +277,15 @@ impl GpuContext {
                 )
             })?;
 
+        let limits = adapter.limits();
+        let max_texture_dimension_2d = limits.max_texture_dimension_2d;
+
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("dioxuscut-rasterizer"),
                     required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::downlevel_defaults(),
+                    required_limits: limits,
                     memory_hints: Default::default(),
                 },
                 None,
@@ -323,7 +345,7 @@ impl GpuContext {
                 module: &shader,
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    format: RENDER_FORMAT,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -359,7 +381,7 @@ impl GpuContext {
                 module: &shader,
                 entry_point: "fs_solid",
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    format: RENDER_FORMAT,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -385,7 +407,84 @@ impl GpuContext {
             mesh_pipeline,
             globals_layout,
             instance_layout,
+            max_texture_dimension_2d,
         })
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Per-resolution GPU resource pool
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Cached GPU resources for a specific frame resolution.
+///
+/// Re-creating textures and readback buffers on every frame is expensive.
+/// `GpuFrameResources` keeps one set per `(width, height)` pair alive for the
+/// lifetime of the backend, so subsequent calls with the same resolution reuse
+/// the GPU allocations.
+struct GpuFrameResources {
+    /// Resolve target (1x MSAA, COPY_SRC). Pixels are read back from here.
+    texture: wgpu::Texture,
+    texture_view: wgpu::TextureView,
+    /// MSAA intermediate texture (4x). Fragment writes land here. Held alive for msaa_view.
+    _msaa_texture: wgpu::Texture,
+    msaa_view: wgpu::TextureView,
+    /// CPU-mapped readback buffer (padded to 256-byte row alignment).
+    readback: wgpu::Buffer,
+    bytes_per_row: u32,
+}
+
+impl GpuFrameResources {
+    fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
+        let bytes_per_row = align_to_256(width * 4);
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("frame_texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: RENDER_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let msaa_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("frame_msaa_texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: SAMPLE_COUNT,
+            dimension: wgpu::TextureDimension::D2,
+            format: RENDER_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let msaa_view = msaa_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("readback_buf"),
+            size: (bytes_per_row * height) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        Self {
+            texture,
+            texture_view,
+            _msaa_texture: msaa_texture,
+            msaa_view,
+            readback,
+            bytes_per_row,
+        }
     }
 }
 
@@ -397,17 +496,24 @@ impl GpuContext {
 ///
 /// Requires a compatible GPU with Vulkan, Metal, DX12, or WebGPU support.
 /// Use `TinySkiaBackend` if GPU access is unavailable (e.g. Docker/CI).
+///
+/// Textures and readback buffers are cached per resolution in a `Mutex`-
+/// protected `HashMap`. This eliminates the per-frame allocation pressure
+/// that existed in earlier versions.
 pub struct WgpuBackend {
     ctx: GpuContext,
+    /// Per-resolution GPU resource pool.  Key = `(width, height)`.
+    frame_resources: Mutex<HashMap<(u32, u32), GpuFrameResources>>,
     fallback: TinySkiaBackend,
 }
 
 impl WgpuBackend {
-    /// Create a new GPU backend. Initialises the device and pipeline.
+    /// Create a new GPU backend. Initialises the device and render pipeline.
     pub fn new() -> Result<Self, RasterError> {
         let ctx = GpuContext::new()?;
         Ok(Self {
             ctx,
+            frame_resources: Mutex::new(HashMap::new()),
             fallback: TinySkiaBackend::new(),
         })
     }
@@ -419,45 +525,27 @@ impl RasterizerBackend for WgpuBackend {
             return self.fallback.render_frame(scene, config);
         };
 
+        if config.width > self.ctx.max_texture_dimension_2d
+            || config.height > self.ctx.max_texture_dimension_2d
+        {
+            return self.fallback.render_frame(scene, config);
+        }
+
         let width = config.width;
         let height = config.height;
         let device = &self.ctx.device;
         let queue = &self.ctx.queue;
 
-        // ── Offscreen render target ──────────────────────────────────────────
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("frame_texture"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let multisampled_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("frame_msaa_texture"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: SAMPLE_COUNT,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-        let multisampled_view =
-            multisampled_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        // ── Obtain or create per-resolution GPU resources ────────────────────
+        let mut pool = self
+            .frame_resources
+            .lock()
+            .map_err(|_| RasterError::Init("GPU resource pool mutex poisoned".into()))?;
+        let res = pool
+            .entry((width, height))
+            .or_insert_with(|| GpuFrameResources::new(device, width, height));
 
-        // ── Globals uniform buffer ───────────────────────────────────────────
+        // ── Globals uniform (resolution) ─────────────────────────────────────
         let globals_data: [f32; 4] = [width as f32, height as f32, 0.0, 0.0];
         let globals_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("globals_buf"),
@@ -478,13 +566,13 @@ impl RasterizerBackend for WgpuBackend {
             label: Some("frame_encoder"),
         });
 
-        // Clear pass
+        // Clear pass — renders to MSAA, resolves into the resolve texture.
         {
             let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("clear_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &multisampled_view,
-                    resolve_target: Some(&texture_view),
+                    view: &res.msaa_view,
+                    resolve_target: Some(&res.texture_view),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                         store: wgpu::StoreOp::Store,
@@ -494,7 +582,7 @@ impl RasterizerBackend for WgpuBackend {
             });
         }
 
-        // Draw each compiled node in scene order.
+        // Draw each compiled node in painter's order.
         for command in &commands {
             let instance_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("instance_buf"),
@@ -534,8 +622,8 @@ impl RasterizerBackend for WgpuBackend {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("draw_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &multisampled_view,
-                    resolve_target: Some(&texture_view),
+                    view: &res.msaa_view,
+                    resolve_target: Some(&res.texture_view),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
@@ -566,22 +654,14 @@ impl RasterizerBackend for WgpuBackend {
             }
         }
 
-        // ── Pixel readback ───────────────────────────────────────────────────
-        let bytes_per_row = align_to_256(width * 4);
-        let readback_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("readback_buf"),
-            size: (bytes_per_row * height) as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-
+        // ── Copy resolved texture → readback buffer ──────────────────────────
         encoder.copy_texture_to_buffer(
-            texture.as_image_copy(),
+            res.texture.as_image_copy(),
             wgpu::ImageCopyBuffer {
-                buffer: &readback_buf,
+                buffer: &res.readback,
                 layout: wgpu::ImageDataLayout {
                     offset: 0,
-                    bytes_per_row: Some(bytes_per_row),
+                    bytes_per_row: Some(res.bytes_per_row),
                     rows_per_image: Some(height),
                 },
             },
@@ -594,8 +674,8 @@ impl RasterizerBackend for WgpuBackend {
 
         queue.submit([encoder.finish()]);
 
-        // Map and read
-        let slice = readback_buf.slice(..);
+        // ── Map, read, and unmap ─────────────────────────────────────────────
+        let slice = res.readback.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = tx.send(result);
@@ -611,8 +691,9 @@ impl RasterizerBackend for WgpuBackend {
                 reason: format!("GPU map error: {e:?}"),
             })?;
 
+        let bytes_per_row = res.bytes_per_row;
         let data = slice.get_mapped_range();
-        // Strip row padding
+        // Strip wgpu's 256-byte row padding.
         let mut pixels = Vec::with_capacity((width * height * 4) as usize);
         for row in 0..height {
             let start = (row * bytes_per_row) as usize;
@@ -620,7 +701,7 @@ impl RasterizerBackend for WgpuBackend {
             pixels.extend_from_slice(&data[start..end]);
         }
         drop(data);
-        readback_buf.unmap();
+        res.readback.unmap();
 
         RgbaImage::from_raw(width, height, pixels).ok_or_else(|| {
             RasterError::ImageEncode("Failed to assemble RgbaImage from GPU readback".into())
@@ -953,12 +1034,27 @@ fn transform_rows(transform: Transform) -> ([f32; 4], [f32; 4]) {
     )
 }
 
+/// Convert a u8 sRGB channel value (0–255) to linear float (0.0–1.0).
+///
+/// The render target is `Rgba8Unorm` (linear), so fragment colour uniforms
+/// must be in linear light to avoid the double-gamma problem.
+#[inline]
+fn srgb_to_linear(channel: u8) -> f32 {
+    let s = channel as f32 / 255.0;
+    // IEC 61966-2-1 sRGB transfer function (precise form)
+    if s <= 0.04045 {
+        s / 12.92
+    } else {
+        ((s + 0.055) / 1.055).powf(2.4)
+    }
+}
+
 fn color_to_f32(c: Color) -> [f32; 4] {
     [
-        c.r as f32 / 255.0,
-        c.g as f32 / 255.0,
-        c.b as f32 / 255.0,
-        c.a as f32 / 255.0,
+        srgb_to_linear(c.r),
+        srgb_to_linear(c.g),
+        srgb_to_linear(c.b),
+        c.a as f32 / 255.0, // alpha is always linear
     ]
 }
 

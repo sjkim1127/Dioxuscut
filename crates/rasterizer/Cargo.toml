@@ -31,3 +31,11 @@ lyon_tessellation = { workspace = true, optional = true }
 default = []
 # Enable wgpu GPU-accelerated offscreen rendering
 gpu = ["wgpu", "pollster", "lyon_tessellation"]
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "render_bench"
+harness = false
+required-features = []
