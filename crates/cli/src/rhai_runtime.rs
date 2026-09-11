@@ -7,8 +7,8 @@ use crate::composition::{
     Composition, CompositionError, NativeCompositionContext, PreparedComposition,
 };
 use dioxuscut_rasterizer::{
-    layout_text_box, AudioTrack, Color, ImageFit, Scene, SceneNode, TextBox, TextHorizontalAlign,
-    TextOverflow, Transform2D, VisualizerStyle,
+    layout_text_box, AudioTrack, Color, GradientStop, ImageFit, Scene, SceneNode, TextBox,
+    TextHorizontalAlign, TextOverflow, Transform2D, VisualizerStyle,
 };
 use rhai::module_resolvers::DummyModuleResolver;
 use rhai::{
@@ -84,6 +84,121 @@ impl SceneBuilder {
             fill: parse_color(fill)?,
             stroke: None,
             stroke_width: 0.0,
+        });
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn rect_stroke(
+        &mut self,
+        x: FLOAT,
+        y: FLOAT,
+        w: FLOAT,
+        h: FLOAT,
+        fill: &str,
+        stroke: &str,
+        stroke_width: FLOAT,
+        radius: FLOAT,
+    ) -> RhaiResult<()> {
+        let stroke_color = if stroke.trim().is_empty() {
+            None
+        } else {
+            Some(parse_color(stroke)?)
+        };
+        self.scene.push(SceneNode::Rect {
+            x: finite_f32("x", x)?,
+            y: finite_f32("y", y)?,
+            w: non_negative_f32("width", w)?,
+            h: non_negative_f32("height", h)?,
+            fill: parse_color(fill)?,
+            stroke: stroke_color,
+            stroke_width: non_negative_f32("stroke width", stroke_width)?,
+            corner_radius: non_negative_f32("corner radius", radius)?,
+        });
+        Ok(())
+    }
+
+    fn circle_stroke(
+        &mut self,
+        cx: FLOAT,
+        cy: FLOAT,
+        radius: FLOAT,
+        fill: &str,
+        stroke: &str,
+        stroke_width: FLOAT,
+    ) -> RhaiResult<()> {
+        let stroke_color = if stroke.trim().is_empty() {
+            None
+        } else {
+            Some(parse_color(stroke)?)
+        };
+        self.scene.push(SceneNode::Circle {
+            cx: finite_f32("center x", cx)?,
+            cy: finite_f32("center y", cy)?,
+            r: non_negative_f32("radius", radius)?,
+            fill: parse_color(fill)?,
+            stroke: stroke_color,
+            stroke_width: non_negative_f32("stroke width", stroke_width)?,
+        });
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn linear_gradient(
+        &mut self,
+        x: FLOAT,
+        y: FLOAT,
+        w: FLOAT,
+        h: FLOAT,
+        angle_deg: FLOAT,
+        color_start: &str,
+        color_end: &str,
+    ) -> RhaiResult<()> {
+        self.scene.push(SceneNode::LinearGradient {
+            x: finite_f32("x", x)?,
+            y: finite_f32("y", y)?,
+            w: non_negative_f32("width", w)?,
+            h: non_negative_f32("height", h)?,
+            angle_deg: finite_f32("angle", angle_deg)?,
+            stops: vec![
+                GradientStop {
+                    position: 0.0,
+                    color: parse_color(color_start)?,
+                },
+                GradientStop {
+                    position: 1.0,
+                    color: parse_color(color_end)?,
+                },
+            ],
+        });
+        Ok(())
+    }
+
+    fn path(
+        &mut self,
+        d: ImmutableString,
+        fill: &str,
+        stroke: &str,
+        stroke_width: FLOAT,
+        opacity: FLOAT,
+    ) -> RhaiResult<()> {
+        let fill_color = if fill.trim().is_empty() {
+            None
+        } else {
+            Some(parse_color(fill)?)
+        };
+        let stroke_color = if stroke.trim().is_empty() {
+            None
+        } else {
+            Some(parse_color(stroke)?)
+        };
+        let opacity = unit_f32("opacity", opacity)?;
+        self.scene.push(SceneNode::Path {
+            d: d.into_owned(),
+            fill: fill_color,
+            stroke: stroke_color,
+            stroke_width: non_negative_f32("stroke width", stroke_width)?,
+            opacity,
         });
         Ok(())
     }
@@ -668,7 +783,11 @@ fn register_scene_api(engine: &mut Engine) {
     engine.register_fn("scene", SceneBuilder::new);
     engine.register_fn("rect", SceneBuilder::rect);
     engine.register_fn("round_rect", SceneBuilder::round_rect);
+    engine.register_fn("rect_stroke", SceneBuilder::rect_stroke);
     engine.register_fn("circle", SceneBuilder::circle);
+    engine.register_fn("circle_stroke", SceneBuilder::circle_stroke);
+    engine.register_fn("linear_gradient", SceneBuilder::linear_gradient);
+    engine.register_fn("path", SceneBuilder::path);
     engine.register_fn("text", SceneBuilder::text);
     engine.register_fn("text_bold", SceneBuilder::text_bold);
     engine.register_fn("text_font", SceneBuilder::text_font);
@@ -1188,5 +1307,42 @@ mod tests {
             !scene.nodes.is_empty(),
             "3D meshes should emit projected Path nodes into the scene"
         );
+    }
+
+    #[test]
+    fn script_renders_extended_drawing_primitives() {
+        let script = r##"
+            fn render(ctx, props) {
+                let output = scene();
+                output.linear_gradient(0.0, 0.0, 320.0, 180.0, 45.0, "#ff0000", "#0000ff");
+                output.rect_stroke(10.0, 10.0, 100.0, 50.0, "#112233", "#ffffff", 2.0, 8.0);
+                output.circle_stroke(160.0, 90.0, 30.0, "#445566", "#00ffcc", 3.0);
+                output.path("M 0 0 L 100 100 Z", "#aabbcc", "#ffffff", 1.5, 0.9);
+                output
+            }
+        "##;
+        let composition = RhaiComposition::from_source("extended_draw", script).unwrap();
+        let prepared = composition
+            .prepare(&serde_json::json!({}), context())
+            .unwrap();
+        let scene = prepared.render(0).unwrap();
+        assert_eq!(scene.nodes.len(), 4);
+        assert!(matches!(&scene.nodes[0], SceneNode::LinearGradient { .. }));
+        assert!(matches!(
+            &scene.nodes[1],
+            SceneNode::Rect {
+                stroke: Some(_),
+                corner_radius,
+                ..
+            } if *corner_radius == 8.0
+        ));
+        assert!(matches!(
+            &scene.nodes[2],
+            SceneNode::Circle {
+                stroke: Some(_),
+                ..
+            }
+        ));
+        assert!(matches!(&scene.nodes[3], SceneNode::Path { .. }));
     }
 }

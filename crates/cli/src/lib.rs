@@ -6,9 +6,11 @@ pub mod migrate;
 pub mod rhai_runtime;
 
 pub use composition::{
-    built_in_registry, Composition, CompositionError, CompositionRegistry,
-    CompositionRegistryError, HelloWorldComposition, NativeComposition, NativeCompositionContext,
-    PreparedComposition,
+    built_in_registry, BarChartRaceComposition, CodeTerminalComposition,
+    ComplexGradientsComposition, Composition, CompositionError, CompositionRegistry,
+    CompositionRegistryError, CyberpunkGridComposition, HelloWorldComposition,
+    KaraokeCaptionsComposition, NativeComposition, NativeCompositionContext,
+    PodcastWaveformComposition, PreparedComposition, ShapesAndFiltersComposition,
 };
 pub use dioxuscut_media::{
     get_audio_metadata, get_video_metadata, static_file, AudioMetadata, VideoMetadata,
