@@ -287,7 +287,7 @@ impl SceneBuilder {
     ) -> RhaiResult<()> {
         self.scene.push(SceneNode::Lottie {
             src: src.into_owned(),
-            time: time.max(0.0) as f64,
+            time: time.max(0.0),
             x: finite_f32("x", x)?,
             y: finite_f32("y", y)?,
             w: non_negative_f32("width", w)?,
@@ -337,7 +337,7 @@ impl SceneBuilder {
             height: non_negative_f32("height", h)?,
             color: Color::from_hex(&color).unwrap_or(Color::WHITE),
             style,
-            time: time.max(0.0) as f64,
+            time: time.max(0.0),
             opacity: 1.0,
         });
         Ok(())
@@ -422,12 +422,12 @@ impl SceneBuilder {
         for item in keyframes {
             if let Ok(arr) = item.into_typed_array::<FLOAT>() {
                 if arr.len() >= 2 {
-                    kfs.push((arr[0] as f64, arr[1] as f64));
+                    kfs.push((arr[0], arr[1]));
                 }
             }
         }
         let mut track = AudioTrack::new(src.into_owned());
-        track.volume = volume.clamp(0.0, 2.0) as f64;
+        track.volume = volume.clamp(0.0, 2.0);
         track.volume_keyframes = kfs;
         self.scene.push(SceneNode::Audio { track });
         Ok(())

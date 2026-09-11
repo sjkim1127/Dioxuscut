@@ -848,7 +848,10 @@ fn compile_nodes(
             | SceneNode::Image { .. }
             | SceneNode::Video { .. }
             | SceneNode::Gif { .. }
-            | SceneNode::Layer { .. } => return None,
+            | SceneNode::Layer { .. }
+            | SceneNode::Emoji { .. }
+            | SceneNode::Lottie { .. }
+            | SceneNode::AudioVisualizer { .. } => return None,
         }
     }
     Some(())
