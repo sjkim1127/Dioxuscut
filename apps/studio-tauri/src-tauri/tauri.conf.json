@@ -13,5 +13,10 @@
     "windows": [{ "title": "Dioxuscut Studio", "width": 1440, "height": 900 }],
     "security": { "csp": null }
   },
-  "bundle": { "active": false, "targets": "all", "icon": ["../../../assets/logo.svg"] }
+  "bundle": {
+    "active": false,
+    "targets": "all",
+    "icon": ["../../../assets/logo.svg"],
+    "resources": ["../scripts/three-render-worker.mjs"]
+  }
 }

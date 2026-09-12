@@ -60,6 +60,31 @@ fn project_still_format(path: &std::path::Path) -> Option<StillImageFormat> {
     }
 }
 
+fn browser_worker_path() -> Result<PathBuf, String> {
+    if let Some(path) = std::env::var_os("DIOXUSCUT_BROWSER_WORKER") {
+        return Ok(PathBuf::from(path));
+    }
+
+    let mut candidates = Vec::new();
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(parent) = executable.parent() {
+            candidates.push(parent.join("resources/scripts/three-render-worker.mjs"));
+            candidates.push(parent.join("../Resources/scripts/three-render-worker.mjs"));
+            candidates.push(parent.join("scripts/three-render-worker.mjs"));
+        }
+    }
+    candidates
+        .push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../scripts/three-render-worker.mjs"));
+
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or_else(|| {
+            "Browser backend requires DIOXUSCUT_BROWSER_WORKER or a bundled three-render-worker.mjs"
+                .to_string()
+        })
+}
+
 struct AppState {
     jobs: Arc<Mutex<JobStore>>,
     cancellations: Arc<Mutex<HashMap<String, RenderCancellationToken>>>,
@@ -200,8 +225,7 @@ fn start_render_job(
         });
         return Ok(());
     }
-    let worker = std::env::var_os("DIOXUSCUT_BROWSER_WORKER")
-        .ok_or_else(|| "Browser backend requires DIOXUSCUT_BROWSER_WORKER".to_string())?;
+    let worker = browser_worker_path()?;
     let url = std::env::var("DIOXUSCUT_BROWSER_URL")
         .unwrap_or_else(|_| "http://localhost:1420".to_string());
     let concurrency = project
@@ -485,8 +509,7 @@ fn web_worker_protocol() -> serde_json::Value {
 
 #[tauri::command]
 fn list_browser_compositions() -> Result<Vec<String>, String> {
-    let worker = std::env::var_os("DIOXUSCUT_BROWSER_WORKER")
-        .ok_or_else(|| "Browser backend requires DIOXUSCUT_BROWSER_WORKER".to_string())?;
+    let worker = browser_worker_path()?;
     let url = std::env::var("DIOXUSCUT_BROWSER_URL")
         .unwrap_or_else(|_| "http://localhost:1420".to_string());
     let node = std::env::var_os("DIOXUSCUT_BROWSER_NODE").unwrap_or_else(|| "node".into());
