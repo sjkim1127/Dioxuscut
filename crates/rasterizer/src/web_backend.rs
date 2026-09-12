@@ -1,6 +1,7 @@
 //! Browser-backed frame transport for Three.js and other web compositions.
 
 use crate::backend::{BackendCapabilities, FrameConfig, RasterError, RasterizerBackend};
+use crate::frame_cache::{FrameCacheKey, FrameCacheManager};
 use crate::scene::Scene;
 use crate::web::{
     WebFrameRequest, WebFrameResponse, WebWorkerMessage, WEB_WORKER_PROTOCOL_VERSION,
@@ -10,6 +11,7 @@ use image::RgbaImage;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::sync::Mutex;
 
 struct BrowserWorker {
@@ -22,6 +24,7 @@ pub struct BrowserFrameBackend {
     workers: Vec<BrowserWorker>,
     next_worker: AtomicUsize,
     props: Mutex<serde_json::Value>,
+    cache: FrameCacheManager,
 }
 
 impl BrowserFrameBackend {
@@ -53,6 +56,7 @@ impl BrowserFrameBackend {
             workers,
             next_worker: AtomicUsize::new(0),
             props: Mutex::new(serde_json::Value::Null),
+            cache: FrameCacheManager::default(),
         })
     }
 }
@@ -118,6 +122,16 @@ impl BrowserFrameBackend {
         Ok(())
     }
     pub fn render_web_frame(&self, request: &WebFrameRequest) -> Result<RgbaImage, RasterError> {
+        let cache_key = FrameCacheKey::from_props(
+            "browser",
+            request.frame as u64,
+            request.width,
+            request.height,
+            &request.props,
+        );
+        if let Some(image) = self.cache.get(&cache_key) {
+            return Ok((*image).clone());
+        }
         let encoded =
             serde_json::to_string(&WebWorkerMessage::Render(request.clone())).map_err(|e| {
                 RasterError::Frame {
@@ -140,7 +154,7 @@ impl BrowserFrameBackend {
             .map_err(|_| RasterError::Init("browser worker stdout lock poisoned".into()))?;
         let mut line = String::new();
         stdout.read_line(&mut line)?;
-        match serde_json::from_str::<WebWorkerMessage>(&line) {
+        let result = match serde_json::from_str::<WebWorkerMessage>(&line) {
             Ok(WebWorkerMessage::Frame(WebFrameResponse {
                 frame,
                 width,
@@ -191,7 +205,11 @@ impl BrowserFrameBackend {
                 frame: request.frame,
                 reason: format!("invalid worker response: {error}"),
             }),
+        };
+        if let Ok(ref image) = result {
+            self.cache.insert(cache_key, Arc::new(image.clone()));
         }
+        result
     }
 }
 impl Drop for BrowserFrameBackend {
