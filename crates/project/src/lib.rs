@@ -391,6 +391,7 @@ impl Project {
             .map_err(|error| ProjectError::File(error.to_string()))?;
         let client = reqwest::blocking::Client::builder()
             .redirect(reqwest::redirect::Policy::limited(5))
+            .timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|error| ProjectError::AssetRead {
                 asset: "remote".into(),
