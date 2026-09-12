@@ -1,5 +1,6 @@
 import { createInterface } from 'node:readline';
 import { Buffer } from 'node:buffer';
+import { existsSync } from 'node:fs';
 import { chromium } from 'playwright-core';
 
 const args = new Map(process.argv.slice(2).flatMap((arg) => {
@@ -8,8 +9,7 @@ const args = new Map(process.argv.slice(2).flatMap((arg) => {
 }));
 const url = args.get('url') ?? 'http://localhost:1420';
 const compositionModule = args.get('composition-module') ?? process.env.DIOXUSCUT_BROWSER_COMPOSITION_MODULE;
-const executablePath = args.get('browser') ?? process.env.CHROME_PATH ??
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const executablePath = args.get('browser') ?? process.env.CHROME_PATH ?? findBrowserExecutable();
 const configuredFrameTimeoutMs = Number(args.get('frame-timeout-ms') ?? process.env.DIOXUSCUT_BROWSER_FRAME_TIMEOUT_MS ?? 30000);
 const frameTimeoutMs = Number.isFinite(configuredFrameTimeoutMs) && configuredFrameTimeoutMs > 0
   ? configuredFrameTimeoutMs
@@ -37,7 +37,7 @@ const renderFrame = (request) => new Promise((resolve, reject) => {
     );
 });
 
-const browser = await chromium.launch({ executablePath, headless: true });
+const browser = await chromium.launch({ ...(executablePath ? { executablePath } : {}), headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
 let viewportWidth = 1280;
 let viewportHeight = 720;
@@ -103,3 +103,26 @@ rl.on('line', (line) => { queue = queue.then(async () => {
 }); });
 
 process.once('SIGTERM', async () => { await browser.close(); process.exit(0); });
+
+function findBrowserExecutable() {
+  const candidates = process.platform === 'darwin'
+    ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium', 'google-chrome', 'chromium']
+    : process.platform === 'win32'
+      ? [
+        `${process.env.PROGRAMFILES ?? 'C:\\Program Files'}\\Google\\Chrome\\Application\\chrome.exe`,
+        `${process.env['PROGRAMFILES(X86)'] ?? 'C:\\Program Files (x86)'}\\Google\\Chrome\\Application\\chrome.exe`,
+        `${process.env.LOCALAPPDATA ?? ''}\\Google\\Chrome\\Application\\chrome.exe`,
+        'chrome.exe',
+      ]
+      : ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'];
+  const pathEntries = (process.env.PATH ?? '').split(process.platform === 'win32' ? ';' : ':');
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+    if (!candidate.includes('/') && !candidate.includes('\\')) {
+      const onPath = pathEntries.map((entry) => `${entry}/${candidate}`).find(existsSync);
+      if (onPath) return onPath;
+    }
+  }
+  return undefined;
+}
