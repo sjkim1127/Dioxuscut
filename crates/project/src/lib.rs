@@ -174,6 +174,12 @@ pub enum ProjectError {
     InvalidFrameStep,
     #[error("project concurrency must be greater than zero")]
     InvalidConcurrency,
+    #[error("browser image format must be png or jpeg")]
+    InvalidBrowserImageFormat,
+    #[error("browser JPEG quality must be between 1 and 100")]
+    InvalidBrowserJpegQuality,
+    #[error("browser frame timeout must be greater than zero")]
+    InvalidBrowserFrameTimeout,
     #[error("project asset id cannot be empty")]
     EmptyAssetId,
     #[error("project asset path cannot be empty for '{0}'")]
@@ -232,6 +238,26 @@ impl Project {
         }
         if self.settings.concurrency == Some(0) {
             return Err(ProjectError::InvalidConcurrency);
+        }
+        if let Some(format) = &self.settings.browser_image_format {
+            let format = format.trim().to_ascii_lowercase();
+            if format != "png" && format != "jpeg" {
+                return Err(ProjectError::InvalidBrowserImageFormat);
+            }
+        }
+        if self
+            .settings
+            .browser_jpeg_quality
+            .is_some_and(|quality| !(1..=100).contains(&quality))
+        {
+            return Err(ProjectError::InvalidBrowserJpegQuality);
+        }
+        if self
+            .settings
+            .browser_frame_timeout_ms
+            .is_some_and(|timeout| timeout == 0)
+        {
+            return Err(ProjectError::InvalidBrowserFrameTimeout);
         }
         if let Some(end) = self.settings.frame_end {
             let start = self.settings.frame_start.unwrap_or(0);
@@ -1026,6 +1052,32 @@ mod tests {
             Err(ProjectError::InvalidConcurrency)
         );
     }
+
+    #[test]
+    fn project_rejects_invalid_browser_capture_settings() {
+        let mut p = project();
+        p.settings.browser_image_format = Some("webp".into());
+        assert_eq!(p.validate(), Err(ProjectError::InvalidBrowserImageFormat));
+
+        let mut p = project();
+        p.settings.browser_jpeg_quality = Some(0);
+        assert_eq!(p.validate(), Err(ProjectError::InvalidBrowserJpegQuality));
+
+        let mut p = project();
+        p.settings.browser_frame_timeout_ms = Some(0);
+        assert_eq!(p.validate(), Err(ProjectError::InvalidBrowserFrameTimeout));
+    }
+
+    #[test]
+    fn project_accepts_valid_browser_capture_settings() {
+        let mut p = project();
+        p.settings.browser_image_format = Some(" JPEG ".into());
+        p.settings.browser_jpeg_quality = Some(90);
+        p.settings.browser_frame_timeout_ms = Some(5_000);
+        p.settings.browser_transport_retries = Some(2);
+        assert!(p.validate().is_ok());
+    }
+
     #[test]
     fn job_store_validates_and_tracks_progress() {
         let mut store = JobStore::default();
