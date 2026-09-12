@@ -596,7 +596,10 @@ fn parse_box_shadow(value: &str) -> Option<dioxuscut_rasterizer::SceneShadow> {
         let end = value[start..].find(')')? + start + 1;
         Color::from_css(&value[start..end])?
     } else {
-        parts.iter().find_map(|part| Color::from_css(part))?
+        parts
+            .iter()
+            .find_map(|part| Color::from_css(part))
+            .unwrap_or(Color::BLACK)
     };
     Some(dioxuscut_rasterizer::SceneShadow {
         offset_x: lengths[0],
@@ -1275,5 +1278,19 @@ mod tests {
             (3.0, 4.0, 5.0)
         );
         assert_eq!(shadow.color, Color::rgba(1, 2, 3, 128));
+    }
+
+    #[test]
+    fn shadow_color_defaults_to_black_when_omitted() {
+        let stylesheet = Stylesheet::parse(".hero { box-shadow: 2px 3px 4px; }").unwrap();
+        let mut element = NativeElement {
+            tag: "div".into(),
+            ..Default::default()
+        };
+        element.attributes.insert("class".into(), "hero".into());
+        assert_eq!(
+            stylesheet.resolve(&element, None).box_shadow.unwrap().color,
+            Color::BLACK
+        );
     }
 }
