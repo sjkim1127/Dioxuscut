@@ -1155,6 +1155,20 @@ fn validate_audio_tracks(
                 "playback_rate must be between 0.5 and 2.0",
             ));
         }
+        for (time, volume) in &track.volume_keyframes {
+            if !time.is_finite() || *time < 0.0 {
+                return Err(invalid_audio(
+                    track,
+                    "volume keyframe time must be finite and non-negative",
+                ));
+            }
+            if !volume.is_finite() || !(0.0..=1.0).contains(volume) {
+                return Err(invalid_audio(
+                    track,
+                    "volume keyframe gain must be between 0.0 and 1.0",
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -1984,6 +1998,22 @@ mod tests {
         track.volume = 1.5;
         let error = validate_audio_tracks(&[track], &MediaSecurityPolicy::default()).unwrap_err();
         assert!(error.to_string().contains("volume must be between"));
+    }
+
+    #[test]
+    fn test_audio_track_validation_rejects_invalid_volume_keyframes() {
+        let src = std::env::current_exe().unwrap().display().to_string();
+        let mut negative_time = AudioTrack::new(&src);
+        negative_time.volume_keyframes = vec![(-0.1, 0.5)];
+        let error =
+            validate_audio_tracks(&[negative_time], &MediaSecurityPolicy::default()).unwrap_err();
+        assert!(error.to_string().contains("keyframe time"));
+
+        let mut invalid_gain = AudioTrack::new(src);
+        invalid_gain.volume_keyframes = vec![(0.0, 1.1)];
+        let error =
+            validate_audio_tracks(&[invalid_gain], &MediaSecurityPolicy::default()).unwrap_err();
+        assert!(error.to_string().contains("keyframe gain"));
     }
 
     #[test]
