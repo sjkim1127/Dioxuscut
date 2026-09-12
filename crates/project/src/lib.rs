@@ -355,7 +355,7 @@ impl Project {
         fn rewrite(value: &mut serde_json::Value, replacements: &[(String, String)]) {
             match value {
                 serde_json::Value::String(text) => {
-                    if let Some((resolved, relative)) =
+                    if let Some((_resolved, relative)) =
                         replacements.iter().find(|(resolved, _)| resolved == text)
                     {
                         *text = relative.clone();
