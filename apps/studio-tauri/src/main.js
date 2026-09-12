@@ -227,6 +227,8 @@ resize();
 let frame = 0;
 let playing = true;
 let currentJobId = null;
+let playbackStartedAt = performance.now();
+let lastPlaybackFrame = -1;
 let project = {
   version: 1,
   composition: 'three_preview',
@@ -255,10 +257,12 @@ function setFrame(nextFrame) {
 
 document.querySelector('#play-toggle').addEventListener('click', (event) => {
   playing = !playing;
+  if (playing) playbackStartedAt = performance.now() - (frame * 1000 / project.settings.fps);
   event.currentTarget.textContent = playing ? 'Pause' : 'Play';
 });
 document.querySelector('#timeline-slider').addEventListener('input', (event) => {
   playing = false;
+  lastPlaybackFrame = -1;
   document.querySelector('#play-toggle').textContent = 'Play';
   setFrame(Number(event.currentTarget.value));
 });
@@ -314,6 +318,8 @@ document.querySelector('#load-project').addEventListener('click', async () => {
     if (!selected || Array.isArray(selected)) return;
     document.querySelector('#project-path').value = selected;
     project = await invoke('load_project', { path: selected });
+    playbackStartedAt = performance.now();
+    lastPlaybackFrame = -1;
     showMessage(`loaded ${project.composition}`);
     setFrame(frame);
   } catch (error) { showMessage(`load error: ${error}`); }
@@ -361,8 +367,13 @@ document.querySelector('#cancel-render').addEventListener('click', async (event)
 function renderPreview() {
   if (window.__DIOXUSCUT_HEADLESS_RENDER__) return;
   if (playing) {
-    setFrame(frame);
-    frame = (frame + 1) % project.settings.duration;
+    const elapsed = Math.max(0, performance.now() - playbackStartedAt);
+    const duration = Math.max(project.settings.duration, 1);
+    const nextFrame = Math.floor(elapsed * project.settings.fps / 1000) % duration;
+    if (nextFrame !== lastPlaybackFrame) {
+      lastPlaybackFrame = nextFrame;
+      setFrame(nextFrame);
+    }
   }
   requestAnimationFrame(renderPreview);
 }
