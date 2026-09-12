@@ -119,6 +119,12 @@ pub enum ProjectError {
     InvalidDimensions,
     #[error("project fps must be finite and greater than zero")]
     InvalidFps,
+    #[error("track '{track}' contains invalid clip '{clip}': {reason}")]
+    InvalidClip {
+        track: String,
+        clip: String,
+        reason: String,
+    },
     #[error("invalid render job transition from {from:?} to {to:?}")]
     InvalidJobTransition { from: JobStatus, to: JobStatus },
     #[error("render job '{0}' was not found")]
@@ -146,6 +152,24 @@ impl Project {
         }
         if !self.settings.fps.is_finite() || self.settings.fps <= 0.0 {
             return Err(ProjectError::InvalidFps);
+        }
+        for track in &self.tracks {
+            for clip in &track.clips {
+                let reason = if clip.composition.trim().is_empty() {
+                    Some("composition cannot be empty")
+                } else if clip.duration == 0 {
+                    Some("duration must be greater than zero")
+                } else {
+                    None
+                };
+                if let Some(reason) = reason {
+                    return Err(ProjectError::InvalidClip {
+                        track: track.id.clone(),
+                        clip: clip.id.clone(),
+                        reason: reason.into(),
+                    });
+                }
+            }
         }
         Ok(())
     }
