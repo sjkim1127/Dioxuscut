@@ -114,10 +114,19 @@ pub enum ProjectError {
     JobNotFound(String),
     #[error("render progress cannot regress from {previous} to {next}")]
     ProgressRegressed { previous: u32, next: u32 },
+    #[error("unsupported project schema version {0}")]
+    UnsupportedVersion(u32),
+    #[error("project file error: {0}")]
+    File(String),
+    #[error("project JSON error: {0}")]
+    Json(String),
 }
 
 impl Project {
     pub fn validate(&self) -> Result<(), ProjectError> {
+        if self.version != 1 {
+            return Err(ProjectError::UnsupportedVersion(self.version));
+        }
         if self.composition.trim().is_empty() {
             return Err(ProjectError::EmptyComposition);
         }
@@ -128,6 +137,26 @@ impl Project {
             return Err(ProjectError::InvalidFps);
         }
         Ok(())
+    }
+
+    pub fn from_json_str(source: &str) -> Result<Self, ProjectError> {
+        let project: Self =
+            serde_json::from_str(source).map_err(|error| ProjectError::Json(error.to_string()))?;
+        project.validate()?;
+        Ok(project)
+    }
+
+    pub fn load(path: impl AsRef<std::path::Path>) -> Result<Self, ProjectError> {
+        let source =
+            std::fs::read_to_string(path).map_err(|error| ProjectError::File(error.to_string()))?;
+        Self::from_json_str(&source)
+    }
+
+    pub fn save(&self, path: impl AsRef<std::path::Path>) -> Result<(), ProjectError> {
+        self.validate()?;
+        let source = serde_json::to_vec_pretty(self)
+            .map_err(|error| ProjectError::Json(error.to_string()))?;
+        std::fs::write(path, source).map_err(|error| ProjectError::File(error.to_string()))
     }
 }
 
@@ -255,6 +284,15 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Project>(&serde_json::to_string(&p).unwrap()).unwrap(),
             p
+        );
+    }
+    #[test]
+    fn project_json_loader_validates_schema() {
+        let mut value = serde_json::to_value(project()).unwrap();
+        value["version"] = serde_json::json!(2);
+        assert_eq!(
+            Project::from_json_str(&value.to_string()),
+            Err(ProjectError::UnsupportedVersion(2))
         );
     }
     #[test]
