@@ -90,13 +90,13 @@ rl.on('line', (line) => { queue = queue.then(async () => {
     }
     if (lastError) throw lastError;
     const imageType = request.image_format === 'jpeg' ? 'jpeg' : 'png';
-    const screenshot = await page.screenshot({ type: imageType,
+    const screenshot = await page.screenshot({ type: imageType, encoding: 'base64',
       omitBackground: imageType === 'png' && request.transparent === true,
       quality: imageType === 'jpeg' ? (request.jpeg_quality ?? 90) : undefined });
     write({ type: 'frame', frame: request.frame, width: request.width, height: request.height,
       ...(imageType === 'png'
-        ? { png_base64: Buffer.from(screenshot).toString('base64') }
-        : { jpeg_base64: Buffer.from(screenshot).toString('base64') }) });
+        ? { png_base64: screenshot }
+        : { jpeg_base64: screenshot }) });
   } catch (error) {
     write({ type: 'error', frame: message.frame ?? null, message: String(error) });
   }
