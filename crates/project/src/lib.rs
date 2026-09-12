@@ -817,6 +817,63 @@ mod tests {
         std::fs::remove_dir_all(base).unwrap();
     }
 
+    #[test]
+    fn materializes_remote_assets_and_rewrites_clip_props() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let payload = b"remote project asset".to_vec();
+        let server_payload = payload.clone();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 1024];
+            let _ = stream.read(&mut request);
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                server_payload.len()
+            )
+            .unwrap();
+            stream.write_all(&server_payload).unwrap();
+        });
+
+        let cache =
+            std::env::temp_dir().join(format!("dioxuscut-remote-assets-{}", std::process::id()));
+        let url = format!("http://{address}/poster.png");
+        let digest = format!("{:x}", Sha256::digest(&payload));
+        let mut p = project();
+        p.assets = vec![AssetRef {
+            id: "poster".into(),
+            path: url.clone(),
+            kind: AssetKind::Image,
+            sha256: Some(digest),
+        }];
+        p.props = serde_json::json!({"poster": "asset://poster"});
+        p.tracks = vec![Track {
+            id: "track".into(),
+            clips: vec![Clip {
+                id: "clip".into(),
+                composition: "shorts".into(),
+                start: 0,
+                duration: 1,
+                props: serde_json::json!({"src": url}),
+            }],
+        }];
+
+        p.materialize_remote_assets(&cache, 1024).unwrap();
+        let local = std::path::PathBuf::from(&p.assets[0].path);
+        assert_eq!(std::fs::read(&local).unwrap(), payload);
+        assert_eq!(p.props["poster"], local.to_string_lossy().as_ref());
+        assert_eq!(
+            p.tracks[0].clips[0].props["src"],
+            local.to_string_lossy().as_ref()
+        );
+        server.join().unwrap();
+        std::fs::remove_dir_all(cache).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn project_asset_files_reject_symlink_escape() {
