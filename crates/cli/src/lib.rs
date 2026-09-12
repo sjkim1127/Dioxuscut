@@ -18,6 +18,63 @@ pub use dioxuscut_media::{
 };
 use dioxuscut_project::{Clip, Project};
 pub use migrate::{transpile_remotion, MigrationStats, MigrationTarget};
+
+/// Resolve audio assets declared by a project into encoder input paths.
+///
+/// Keeping this mapping in the shared host layer makes CLI and Tauri project
+/// renders agree on which assets become audio streams.
+pub fn project_audio_assets(project: &Project) -> Vec<std::path::PathBuf> {
+    project
+        .assets
+        .iter()
+        .filter(|asset| asset.kind == dioxuscut_project::AssetKind::Audio)
+        .map(|asset| std::path::PathBuf::from(&asset.path))
+        .collect()
+}
+
+#[cfg(test)]
+mod project_asset_tests {
+    use super::*;
+
+    #[test]
+    fn project_audio_assets_selects_only_audio_assets() {
+        let project = Project {
+            version: 1,
+            composition: "test".into(),
+            settings: dioxuscut_project::ProjectSettings {
+                width: 320,
+                height: 240,
+                fps: 30.0,
+                duration: 30,
+                frame_step: 1,
+                frame_start: None,
+                frame_end: None,
+                backend: dioxuscut_project::BackendKind::Native,
+            },
+            props: serde_json::json!({}),
+            assets: vec![
+                dioxuscut_project::AssetRef {
+                    id: "music".into(),
+                    path: "music.wav".into(),
+                    kind: dioxuscut_project::AssetKind::Audio,
+                    sha256: None,
+                },
+                dioxuscut_project::AssetRef {
+                    id: "logo".into(),
+                    path: "logo.png".into(),
+                    kind: dioxuscut_project::AssetKind::Image,
+                    sha256: None,
+                },
+            ],
+            tracks: vec![],
+        };
+
+        assert_eq!(
+            project_audio_assets(&project),
+            vec![std::path::PathBuf::from("music.wav")]
+        );
+    }
+}
 #[cfg(feature = "rhai")]
 pub use rhai_runtime::{RhaiComposition, SceneBuilder};
 
