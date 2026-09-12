@@ -67,6 +67,17 @@ Render the validated project directly:
 DIOXUSCUT_JSON=1 dioxuscut render-project project.dioxuscut.json --output out.mp4
 ```
 
+Native/GPU hosts can opt into downloading HTTP(S) assets before rendering:
+
+```bash
+dioxuscut render-project project.dioxuscut.json --asset-cache-dir .dioxuscut-assets
+```
+
+The materializer applies a 256 MiB per-asset limit, verifies a declared
+`sha256`, and rewrites `asset://<id>` references to the cached local file.
+Without this option, remote assets remain Browser-backend URLs and are not
+fetched by the CLI.
+
 `render-project` maps the project backend to the shared renderer and emits the
 same machine-readable success/error result as `render`.
 
