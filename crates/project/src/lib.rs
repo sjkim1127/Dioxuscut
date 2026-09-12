@@ -168,6 +168,8 @@ pub enum ProjectError {
     DuplicateAssetId(String),
     #[error("project asset '{asset}' could not be read: {reason}")]
     AssetRead { asset: String, reason: String },
+    #[error("project asset '{0}' resolves outside the project directory")]
+    AssetOutsideProject(String),
     #[error("project asset '{asset}' SHA-256 mismatch: expected {expected}, got {actual}")]
     AssetHashMismatch {
         asset: String,
@@ -276,14 +278,31 @@ impl Project {
         &self,
         base_dir: impl AsRef<std::path::Path>,
     ) -> Result<(), ProjectError> {
+        let base_dir =
+            base_dir
+                .as_ref()
+                .canonicalize()
+                .map_err(|error| ProjectError::AssetRead {
+                    asset: "<project>".into(),
+                    reason: error.to_string(),
+                })?;
         for asset in &self.assets {
             if asset.path.contains("://") || asset.path.starts_with("data:") {
                 continue;
             }
-            let path = base_dir.as_ref().join(&asset.path);
-            let bytes = std::fs::read(&path).map_err(|error| ProjectError::AssetRead {
+            let path = base_dir.join(&asset.path);
+            let canonical = path
+                .canonicalize()
+                .map_err(|error| ProjectError::AssetRead {
+                    asset: asset.id.clone(),
+                    reason: format!("{} ({})", error, path.display()),
+                })?;
+            if !canonical.starts_with(&base_dir) {
+                return Err(ProjectError::AssetOutsideProject(asset.id.clone()));
+            }
+            let bytes = std::fs::read(&canonical).map_err(|error| ProjectError::AssetRead {
                 asset: asset.id.clone(),
-                reason: format!("{} ({})", error, path.display()),
+                reason: format!("{} ({})", error, canonical.display()),
             })?;
             if let Some(expected) = &asset.sha256 {
                 let actual = format!("{:x}", Sha256::digest(bytes));
@@ -633,6 +652,13 @@ mod tests {
             p.validate_asset_files(&base),
             Err(ProjectError::AssetHashMismatch { .. })
         ));
+        p.assets[0].path = "../outside.bin".into();
+        std::fs::write(base.join("../outside.bin"), b"outside").unwrap();
+        assert_eq!(
+            p.validate_asset_files(&base),
+            Err(ProjectError::AssetOutsideProject("logo".into()))
+        );
+        std::fs::remove_file(base.join("../outside.bin")).unwrap();
         std::fs::remove_dir_all(base).unwrap();
     }
 
