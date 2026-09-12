@@ -14,7 +14,8 @@ pub struct CanvasImageProps {
     pub width: Option<f32>,
     #[props(default)]
     pub height: Option<f32>,
-    #[props(default)]
+    /// How the source fills the canvas (vendor default: `fill`).
+    #[props(default = ImageFit::Fill)]
     pub fit: ImageFit,
     #[props(default)]
     pub class: Option<String>,
