@@ -57,6 +57,30 @@ pub fn project_audio_assets_from_dir(
 mod project_asset_tests {
     use super::*;
 
+    fn project_fixture() -> Project {
+        Project {
+            version: 1,
+            composition: "test".into(),
+            settings: dioxuscut_project::ProjectSettings {
+                width: 320,
+                height: 240,
+                fps: 30.0,
+                duration: 30,
+                scale: 1.0,
+                crf: None,
+                preset: None,
+                concurrency: None,
+                frame_step: 1,
+                frame_start: None,
+                frame_end: None,
+                backend: dioxuscut_project::BackendKind::Native,
+            },
+            props: serde_json::json!({}),
+            assets: vec![],
+            tracks: vec![],
+        }
+    }
+
     #[test]
     fn project_audio_assets_selects_only_audio_assets() {
         let project = Project {
@@ -97,6 +121,34 @@ mod project_asset_tests {
         assert_eq!(
             project_audio_assets(&project),
             vec![std::path::PathBuf::from("music.wav")]
+        );
+    }
+
+    #[test]
+    fn project_audio_assets_from_dir_resolves_local_paths_without_touching_urls() {
+        let project = Project {
+            assets: vec![
+                dioxuscut_project::AssetRef {
+                    id: "local".into(),
+                    path: "audio/music.wav".into(),
+                    kind: dioxuscut_project::AssetKind::Audio,
+                    sha256: None,
+                },
+                dioxuscut_project::AssetRef {
+                    id: "remote".into(),
+                    path: "https://cdn.example/music.wav".into(),
+                    kind: dioxuscut_project::AssetKind::Audio,
+                    sha256: None,
+                },
+            ],
+            ..project_fixture()
+        };
+        assert_eq!(
+            project_audio_assets_from_dir(&project, "/tmp/project"),
+            vec![
+                std::path::PathBuf::from("/tmp/project/audio/music.wav"),
+                std::path::PathBuf::from("https://cdn.example/music.wav")
+            ]
         );
     }
 }
