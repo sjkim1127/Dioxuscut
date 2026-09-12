@@ -21,6 +21,7 @@ app.innerHTML = `
       <span id="timeline-frame">0 / 149</span>
     </section>
     <section class="preview"><canvas id="preview-canvas"></canvas></section>
+    <section class="job-queue"><h2>Render queue</h2><div id="job-list">No jobs</div></section>
     <footer><span id="frame">frame 0</span><span id="protocol">worker protocol…</span><span id="job">job store…</span></footer>
   </main>`;
 
@@ -100,8 +101,22 @@ async function refreshJob(id) {
   if (terminal && job.error) showMessage(job.error);
 }
 
+async function refreshJobList() {
+  const jobs = await invoke('list_render_jobs');
+  const list = document.querySelector('#job-list');
+  if (!jobs.length) { list.textContent = 'No jobs'; return; }
+  list.replaceChildren(...jobs.map((job) => {
+    const item = document.createElement('div');
+    item.className = 'job-item';
+    const progress = `${job.completed_frames}/${job.project.settings.duration}`;
+    item.textContent = `${job.id} · ${job.status} · ${progress}${job.error ? ` · ${job.error}` : ''}`;
+    return item;
+  }));
+}
+
 setInterval(() => {
   if (currentJobId) refreshJob(currentJobId).catch((error) => showMessage(`job error: ${error}`));
+  refreshJobList().catch((error) => showMessage(`queue error: ${error}`));
 }, 250);
 
 document.querySelector('#load-project').addEventListener('click', async () => {
@@ -137,6 +152,7 @@ document.querySelector('#submit-render').addEventListener('click', async () => {
     document.querySelector('#cancel-render').dataset.jobId = id;
     showMessage(`${id} queued`);
     await refreshJob(id);
+    await refreshJobList();
   } catch (error) { showMessage(`queue error: ${error}`); }
 });
 
@@ -146,6 +162,7 @@ document.querySelector('#cancel-render').addEventListener('click', async (event)
   try {
     await invoke('cancel_render_job', { id });
     await refreshJob(id);
+    await refreshJobList();
     showMessage('render cancelled');
   } catch (error) { showMessage(`cancel error: ${error}`); }
 });
