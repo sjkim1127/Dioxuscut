@@ -1,0 +1,25 @@
+{
+  "workload": "1080p Cyberpunk Title Reel (1920x1080, 30fps, 180 frames)",
+  "features": [
+    "Text Auto-Fitting",
+    "Drop-Shadow Glow",
+    "Chromatic Aberration",
+    "Vignette",
+    "Layer Composition"
+  ],
+  "concurrency": 4,
+  "platform": "darwin (arm64)",
+  "cpu": "Apple M4 Pro",
+  "bundle_ms": 458.257083,
+  "browser_startup_ms": 368.468125,
+  "remotion": {
+    "render_ms": 13544.699708,
+    "fps": 13.289331168684777
+  },
+  "dioxuscut": {
+    "process_ms": 8633.442458,
+    "render_ms": 8622.04,
+    "fps": 20.84915731768233
+  },
+  "speedup": 1.5688643057380995
+}

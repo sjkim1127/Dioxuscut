@@ -89,5 +89,5 @@ try {
   writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n');
   console.log(`[+] Report saved to ${reportPath}`);
 } finally {
-  await browser.close();
+  await browser.close({silent: true});
 }

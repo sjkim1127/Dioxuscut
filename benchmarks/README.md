@@ -80,10 +80,12 @@ directional snapshot rather than a production latency budget. Earlier batches
 in this repository report different absolute timings; always use a fresh run
 on the target machine when making a performance claim.
 
-This scene does not exercise text shaping, media decoding, audio, masks, or
-complex filters. Extend the paired scenes and output gates before making speed
-claims about those workloads. A kernel speedup must not be presented as the
-same speedup for a whole video export.
+This scene does not exercise media decoding or audio, and its browser SVG/CSS
+effects are only a representative subset of complex filters. The recorded
+paired 1080p result is available in `cyberpunk-bench-result.json`; it measured
+1.57x Native speedup on the tested M4 Pro batch. Extend the paired scenes and
+output gates before generalizing that result to other workloads. A kernel or
+scene speedup must not be presented as the same speedup for every export.
 
 To measure the persistent Three.js/Chromium transport under the same 1280x720,
 180-frame workload, start the Studio Vite app and run:
