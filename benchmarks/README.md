@@ -168,6 +168,20 @@ python3 benchmarks/cost_calculator.py
 
 See `benchmarks/BATTLE_REPORT.md` for the latest comprehensive battle report.
 
+### OrbStack/Linux container validation
+
+The native Docker image must be built with the Linux multi-stage Dockerfile;
+do not copy `target/release/dioxuscut` from macOS or Windows into the image.
+From the repository root, OrbStack or Docker can build and execute it with:
+
+```sh
+docker build -f benchmarks/docker/Dockerfile.dioxuscut -t dioxuscut:local .
+docker run --rm dioxuscut:local render --help
+```
+
+The builder compiles `dioxuscut-cli` inside Linux and the Debian runtime keeps
+FFmpeg and CA certificates available for native exports.
+
 
 ## Native buffer and export pipeline comparison
 

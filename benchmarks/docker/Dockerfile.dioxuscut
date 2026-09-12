@@ -1,13 +1,21 @@
-# Dioxuscut Ultra-Light Container Image (Zero Browser, Single Binary + FFmpeg)
-FROM alpine:3.20
+# Dioxuscut Linux image. The build stage is intentional: a macOS or Windows
+# host must never copy its native executable into a Linux image.
+FROM rust:1.97-bookworm AS builder
+
+WORKDIR /src
+COPY . .
+RUN cargo build --locked --release -p dioxuscut-cli --bin dioxuscut
+
+FROM debian:bookworm-slim
 
 WORKDIR /app
 
-# Only lightweight system FFmpeg and CA certs are required
-RUN apk add --no-cache ffmpeg ca-certificates libgcc libstdc++
+# FFmpeg and CA certificates are the only runtime packages required.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy the pre-built single static Rust binary (typically 15-30MB)
-COPY target/release/dioxuscut /usr/local/bin/dioxuscut
+COPY --from=builder /src/target/release/dioxuscut /usr/local/bin/dioxuscut
 
 ENTRYPOINT ["dioxuscut"]
 CMD ["render", "--help"]
