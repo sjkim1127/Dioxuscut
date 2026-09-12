@@ -25,6 +25,21 @@ try {
       media.dataset.volume = '0.35';
       media.dataset.playbackRate = '1.5';
       media.setAttribute('loop', '');
+
+      let lottie = document.querySelector('[data-dioxuscut-lottie-smoke]');
+      if (!lottie) {
+        lottie = document.createElement('div');
+        lottie.dataset.dioxuscutLottieSmoke = '1';
+        lottie.dataset.dioxuscutLottie = `data:application/json,${encodeURIComponent(JSON.stringify({
+          v: '5.5.7', fr: 30, ip: 0, op: 30, w: 16, h: 16, nm: 'smoke', ddd: 0,
+          assets: [], layers: [],
+        }))}`;
+        lottie.dataset.playbackRate = '1';
+        lottie.dataset.time = String(frame / 10);
+        lottie.dataset.loop = 'Loop';
+        document.body.append(lottie);
+      }
+      lottie.dataset.time = String(frame / 10);
     });
 
     await window.dioxuscut.renderFrame({
@@ -32,6 +47,7 @@ try {
       props: {}, assets: [], timeline: [],
     });
     const media = document.querySelector('video[data-dioxuscut-smoke]');
+    const lottie = document.querySelector('[data-dioxuscut-lottie-smoke]');
     const active = {
       time: media.currentTime,
       visibility: media.style.visibility,
@@ -44,7 +60,12 @@ try {
       composition: 'media_sync_smoke', frame: 40, fps: 10,
       props: {}, assets: [], timeline: [],
     });
-    return { active, inactiveVisibility: media.style.visibility };
+    return {
+      active,
+      inactiveVisibility: media.style.visibility,
+      lottieSvg: Boolean(lottie.querySelector('svg')),
+      lottieFrame: lottie.dataset.frame,
+    };
   });
 
   const assert = (condition, message) => {
@@ -56,6 +77,8 @@ try {
   assert(Math.abs(result.active.rate - 1.5) < 0.001, `unexpected playbackRate: ${result.active.rate}`);
   assert(result.active.loop, 'loop was not enabled');
   assert(result.inactiveVisibility === 'hidden', 'inactive media was not hidden');
+  assert(result.lottieSvg, 'Lottie adapter did not create an SVG');
+  assert(result.lottieFrame === '40', `unexpected Lottie frame: ${result.lottieFrame}`);
   console.log('browser media sync smoke: passed');
 } finally {
   await browser.close();

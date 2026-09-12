@@ -217,14 +217,17 @@ async function syncMediaElements({ frame: nextFrame, fps }) {
 async function syncLottieElements({ frame: nextFrame, fps }) {
   if (!lottieAdapter) return;
   const elements = document.querySelectorAll('[data-dioxuscut-lottie]');
-  await Promise.all([...elements].map((element) => lottieAdapter.render(element, {
-    src: element.dataset.dioxuscutLottie,
-    frame: nextFrame,
-    fps,
-    time: Number(element.dataset.time ?? 0),
-    playbackRate: Number(element.dataset.playbackRate ?? 1),
-    loopBehavior: element.dataset.loop ?? 'Loop',
-  })));
+  await Promise.all([...elements].map(async (element) => {
+    await lottieAdapter.render(element, {
+      src: element.dataset.dioxuscutLottie,
+      frame: nextFrame,
+      fps,
+      time: Number(element.dataset.time ?? 0),
+      playbackRate: Number(element.dataset.playbackRate ?? 1),
+      loopBehavior: element.dataset.loop ?? 'Loop',
+    });
+    element.dataset.frame = String(nextFrame);
+  }));
 }
 
 export async function renderFrame({ composition = 'three_preview', frame: nextFrame, fps = 30, props: inputProps = {}, assets = [], timeline = [] }) {
