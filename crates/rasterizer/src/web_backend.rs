@@ -269,7 +269,7 @@ impl BrowserFrameBackend {
                 jpeg_base64,
                 rgba_base64,
             })) if frame == request.frame => {
-                if let Some(encoded) = png_base64.or(jpeg_base64) {
+                if let Some(encoded) = png_base64 {
                     let bytes = base64::engine::general_purpose::STANDARD
                         .decode(encoded)
                         .map_err(|e| RasterError::Frame {
@@ -277,6 +277,19 @@ impl BrowserFrameBackend {
                             reason: e.to_string(),
                         })?;
                     image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)
+                        .map(|image| image.into_rgba8())
+                        .map_err(|e| RasterError::Frame {
+                            frame,
+                            reason: e.to_string(),
+                        })
+                } else if let Some(encoded) = jpeg_base64 {
+                    let bytes = base64::engine::general_purpose::STANDARD
+                        .decode(encoded)
+                        .map_err(|e| RasterError::Frame {
+                            frame,
+                            reason: e.to_string(),
+                        })?;
+                    image::load_from_memory_with_format(&bytes, image::ImageFormat::Jpeg)
                         .map(|image| image.into_rgba8())
                         .map_err(|e| RasterError::Frame {
                             frame,
