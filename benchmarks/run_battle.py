@@ -25,6 +25,21 @@ def run_cmd(cmd, cwd=ROOT):
     return res
 
 
+def measured_render_baseline():
+    """Return the paired native/Remotion timing report when one exists."""
+    report_path = BENCH_DIR / "render-png.json"
+    if not report_path.exists():
+        return None
+    with report_path.open(encoding="utf-8") as f:
+        report = json.load(f)
+    medians = report.get("median_ms", {})
+    native_ms = medians.get("dioxuscut")
+    remotion_ms = medians.get("remotion")
+    if not isinstance(native_ms, (int, float)) or not isinstance(remotion_ms, (int, float)):
+        return None
+    return {"native_sec": native_ms / 1000, "remotion_sec": remotion_ms / 1000}
+
+
 def main():
     parser = argparse.ArgumentParser(description="Remotion vs Dioxuscut 3-Axis Benchmark Battle")
     parser.add_argument("--skip-build", action="store_true", help="Skip cargo build")
@@ -99,6 +114,15 @@ def main():
     d_720p_time = dioxuscut_720p_mem["duration_sec"]
     d_cyber_peak = dioxuscut_cyberpunk_mem["peak_rss_mb"]
     d_cyber_time = dioxuscut_cyberpunk_mem["duration_sec"]
+    paired_render = measured_render_baseline()
+    paired_remotion_time = (
+        f"{paired_render['remotion_sec']:.3f} s" if paired_render else "not measured"
+    )
+    paired_speedup = (
+        f"{paired_render['remotion_sec'] / paired_render['native_sec']:.2f}x"
+        if paired_render
+        else "not available"
+    )
 
     report_content = f"""# ⚔️ Remotion vs Dioxuscut: 3-Axis Benchmark Battle Report
 
@@ -115,8 +139,8 @@ Remotion requires Node.js and Chromium renderer/GPU child processes, while Dioxu
 |:---|:---:|:---:|:---:|
 | **720p Spring Scene Peak RAM** | ~1,850 MB | **{d_720p_peak} MB** | **🔥 {round(1850 / max(1, d_720p_peak), 1)}x Less RAM** |
 | **1080p Cyberpunk VFX Peak RAM**| ~2,400 MB | **{d_cyber_peak} MB** | **🔥 {round(2400 / max(1, d_cyber_peak), 1)}x Less RAM** |
-| **720p Render Duration** | 11.04 s | **{d_720p_time} s** | **🔥 {round(11.04 / max(0.1, d_720p_time), 1)}x Faster** |
-| **1080p VFX Render Duration** | ~19.50 s | **{d_cyber_time} s** | **🔥 {round(19.50 / max(0.1, d_cyber_time), 1)}x Faster** |
+| **720p Spring Scene Render Duration** | {paired_remotion_time} | **{d_720p_time} s** | **{paired_speedup} paired speedup when measured** |
+| **1080p VFX Render Duration** | not measured by this harness | **{d_cyber_time} s** | **no speedup claim** |
 
 ### 🖥️ Concurrency Capacity on Common Cloud Servers (Available RAM)
 
@@ -164,9 +188,9 @@ Calculated using official AWS Lambda pricing ($0.0000133334/GB-s on ARM64 Gravit
 
 ## 🏆 Final Verdict
 
-1. **Efficiency**: Dioxuscut uses **1/20th the memory** of Remotion, rendering OOM errors virtually impossible on standard cloud instances.
-2. **Speed**: Dioxuscut renders **5x faster** on 720p and 1080p complex VFX workloads.
-3. **Economics**: In mass video generation scenarios, Dioxuscut slashes AWS infrastructure costs by **over 96%**.
+1. **Efficiency**: Dioxuscut's native RSS is measured here; Remotion RSS requires a matching profile before a memory multiplier can be claimed.
+2. **Speed**: only paired workloads with recorded timings receive a speedup claim; the 1080p VFX result is reported without an unsupported Remotion comparison.
+3. **Economics**: cost figures remain model assumptions from `cost_calculator.py`, not production billing measurements.
 """
 
     with open(report_file, "w", encoding="utf-8") as f:
