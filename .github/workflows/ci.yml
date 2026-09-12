@@ -55,6 +55,9 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev
 
+      - name: Prepare Tauri frontend directory for macro checks
+        run: mkdir -p apps/studio-tauri/dist
+
       - name: Check Formatting
         run: cargo fmt --all -- --check
 
