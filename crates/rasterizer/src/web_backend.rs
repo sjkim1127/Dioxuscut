@@ -317,6 +317,7 @@ impl BrowserFrameBackend {
             .assets
             .lock()
             .map_err(|_| RasterError::Init("browser assets lock poisoned".into()))? = assets;
+        self.cache.clear();
         Ok(())
     }
 
@@ -326,6 +327,7 @@ impl BrowserFrameBackend {
             .timeline
             .lock()
             .map_err(|_| RasterError::Init("browser timeline lock poisoned".into()))? = timeline;
+        self.cache.clear();
         Ok(())
     }
 
@@ -341,6 +343,7 @@ impl BrowserFrameBackend {
             .lock()
             .map_err(|_| RasterError::Init("browser composition lock poisoned".into()))? =
             Some(composition.into());
+        self.cache.clear();
         Ok(())
     }
 
@@ -349,7 +352,13 @@ impl BrowserFrameBackend {
             .props
             .lock()
             .map_err(|_| RasterError::Init("browser worker props lock poisoned".into()))? = props;
+        self.cache.clear();
         Ok(())
+    }
+
+    /// Clear all decoded frames retained for interactive preview reuse.
+    pub fn clear_frame_cache(&self) {
+        self.cache.clear();
     }
 
     /// Return cache counters for host UIs and performance telemetry.
