@@ -115,7 +115,10 @@ jobs:
         run: cargo check --locked --workspace --all-targets --all-features
 
       - name: Run All Workspace Tests
-        run: cargo test --locked --workspace --exclude dioxuscut-python --all-features
+        run: cargo test --locked --workspace --exclude dioxuscut-python
+
+      - name: Test GPU scene compilation without device initialization
+        run: cargo test --locked -p dioxuscut-rasterizer --features gpu support_tests::
 
   # ── 3. Tauri app bundle and bundled browser worker ────────────────────────
   tauri_app_bundle:
