@@ -302,6 +302,20 @@ fn start_render_job(
                 .with_codec(project_video_codec(&output_path))
                 .with_frame_step(project.settings.frame_step)
                 .with_frame_start(render_frame_start)
+                .with_quality(
+                    project.settings.crf.unwrap_or(18),
+                    project
+                        .settings
+                        .preset
+                        .clone()
+                        .unwrap_or_else(|| "fast".into()),
+                )
+                .with_audio_tracks(
+                    dioxuscut_cli::project_audio_assets(&project)
+                        .into_iter()
+                        .map(|path| dioxuscut_rasterizer::AudioTrack::new(path.to_string_lossy()))
+                        .collect::<Vec<_>>(),
+                )
                 .with_control(control);
                 render_web_to_ffmpeg_pipe_fallible(&backend, &config, project.props.clone())
                     .map_err(|error| error.to_string())?;
