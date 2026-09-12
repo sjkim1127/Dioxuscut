@@ -185,6 +185,12 @@ and loop behavior. This keeps the Rust protocol independent of a particular
 JavaScript animation library while allowing Dioxus Lottie elements to render
 in the Chromium compatibility backend.
 
+`CanvasImage` follows the same boundary. Dioxus emits a stable
+`data-dioxuscut-canvas-image` marker with `data-src` and `data-fit`, and the
+browser host draws the preloaded drawable onto the canvas for each requested
+frame. Native VDOM converts the marker to a cached `SceneNode::Image` fallback;
+it does not emulate arbitrary Canvas or WebGL APIs.
+
 Each worker owns one Chromium page and serializes its own requests; the shared
 streaming pipeline schedules different frames across the pool while preserving
 output order. Use concurrency greater than one only after measuring the target
