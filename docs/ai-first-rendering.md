@@ -56,9 +56,10 @@ DIOXUSCUT_JSON=1 dioxuscut render-project project.dioxuscut.json --output out.mp
 `render-project` maps the project backend to the shared renderer and emits the
 same machine-readable success/error result as `render`.
 
-GIF renders may use `--frame-step N` to follow Remotion's `everyNthFrame`
+Video renders may use `--frame-step N` to follow Remotion's `everyNthFrame`
 behavior: source frames are sampled every N frames and the output FPS is
-reduced accordingly. The option is rejected for video codecs and for zero.
+reduced accordingly. Still-image codecs remain single-frame operations; zero
+is always rejected.
 
 For Browser projects, asset paths and timeline clips are passed to the worker
 before the first frame. Images, fonts, and video metadata are loaded once and

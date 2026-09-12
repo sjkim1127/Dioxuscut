@@ -331,7 +331,7 @@ pub enum Commands {
         #[arg(long)]
         frame_end: Option<u32>,
 
-        /// Render every nth source frame (GIF output only).
+        /// Render every nth source frame for video output.
         #[arg(long, default_value_t = 1)]
         frame_step: u32,
 
@@ -608,7 +608,7 @@ fn validate_render_options(request: &RenderRequest) -> Result<(u32, u32), Valida
     if request.frame_step == 0 {
         return Err(ValidationError::InvalidFrameStep(request.frame_step));
     }
-    if request.frame_step > 1 && request.codec != RenderCodec::Gif {
+    if request.frame_step > 1 && request.codec.still_format().is_some() {
         return Err(ValidationError::InvalidFrameStep(request.frame_step));
     }
     let end = request.frame_end.unwrap_or_else(|| {
@@ -795,7 +795,7 @@ pub async fn execute_render_command_with_registry_and_control(
     )?;
     let (frame_start, frame_end) = validate_render_options(request)?;
     let frame_count = frame_end - frame_start + 1;
-    let output_frame_count = if request.codec == RenderCodec::Gif {
+    let output_frame_count = if request.codec.still_format().is_none() {
         frame_count.div_ceil(request.frame_step)
     } else {
         frame_count

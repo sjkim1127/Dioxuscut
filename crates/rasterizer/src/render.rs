@@ -203,7 +203,7 @@ pub struct PipeConfig {
     pub duration_in_frames: u32,
     /// First composition frame included in the output.
     pub start_frame: u32,
-    /// Source-frame stride. Only GIF output may skip source frames.
+    /// Source-frame stride for video output; still images always render one frame.
     pub frame_step: u32,
     /// Output media file path.
     pub output: PathBuf,
@@ -286,7 +286,7 @@ impl PipeConfig {
         self
     }
 
-    /// Render every `step`th source frame, lowering GIF output FPS accordingly.
+    /// Render every `step`th source frame, lowering output FPS accordingly.
     pub fn with_frame_step(mut self, step: u32) -> Self {
         self.frame_step = step;
         self
@@ -731,11 +731,6 @@ fn validate_pipe_config(config: &PipeConfig) -> Result<(), RasterError> {
     if config.frame_step == 0 {
         return Err(RasterError::Init(
             "render frame step must be greater than zero".into(),
-        ));
-    }
-    if config.frame_step > 1 && config.codec != VideoCodec::Gif {
-        return Err(RasterError::Init(
-            "render frame step is supported only for GIF output".into(),
         ));
     }
     config
@@ -1581,7 +1576,7 @@ mod tests {
     }
 
     #[test]
-    fn gif_frame_step_maps_source_frames_and_output_fps() {
+    fn video_frame_step_maps_source_frames_and_output_fps() {
         let config = PipeConfig::new(64, 64, 30.0, 3, "out.gif")
             .with_codec(VideoCodec::Gif)
             .with_frame_start(10)
@@ -1590,8 +1585,12 @@ mod tests {
         assert!(args.windows(2).any(|pair| pair == ["-r", "15"]));
         assert!(validate_pipe_config(&config).is_ok());
 
-        let video = PipeConfig::new(64, 64, 30.0, 3, "out.mp4").with_frame_step(2);
-        assert!(validate_pipe_config(&video).is_err());
+        let video = PipeConfig::new(64, 64, 30.0, 3, "out.mp4")
+            .with_frame_step(2)
+            .with_codec(VideoCodec::H264);
+        let args = build_pipe_ffmpeg_args(&video);
+        assert!(args.windows(2).any(|pair| pair == ["-r", "15"]));
+        assert!(validate_pipe_config(&video).is_ok());
     }
 
     #[test]
