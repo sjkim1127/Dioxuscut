@@ -156,6 +156,10 @@ async fn health_handler(State(state): State<AppState>) -> impl IntoResponse {
         "width": state.config.width,
         "height": state.config.height,
         "fps": state.config.fps,
+        "preview_cache": {
+            "entries": state.frame_cache.lock().map(|cache| cache.len()).unwrap_or(0),
+            "capacity": 8,
+        },
     }))
 }
 
