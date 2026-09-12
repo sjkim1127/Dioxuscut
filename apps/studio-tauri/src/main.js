@@ -172,6 +172,10 @@ async function syncMediaElements({ frame: nextFrame, fps }) {
 
 export async function renderFrame({ composition = 'three_preview', frame: nextFrame, fps = 30, props: inputProps = {}, assets = [], timeline = [] }) {
   const props = inputProps && typeof inputProps === 'object' ? inputProps : {};
+  // A cancelled gate belongs to the current frame only. Reset it before the
+  // next request so a transient asset/render cancellation does not poison the
+  // rest of the composition.
+  renderGateError = null;
   await preloadAssets(assets);
   // Match Remotion's render-ready gate: a frame is not capturable until all
   // declared font faces have finished loading.
