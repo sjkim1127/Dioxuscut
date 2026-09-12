@@ -199,6 +199,9 @@ impl RenderControl {
 pub struct PipeConfig {
     pub width: u32,
     pub height: u32,
+    /// Output scale applied after composition rendering, matching Remotion's
+    /// `scale` option. The composition is evaluated at its logical size.
+    pub scale: f64,
     pub fps: f64,
     pub duration_in_frames: u32,
     /// First composition frame included in the output.
@@ -234,6 +237,7 @@ impl PipeConfig {
         Self {
             width,
             height,
+            scale: 1.0,
             fps,
             duration_in_frames,
             start_frame: 0,
@@ -295,6 +299,28 @@ impl PipeConfig {
     pub fn with_control(mut self, control: RenderControl) -> Self {
         self.control = control;
         self
+    }
+
+    /// Scale the encoded output dimensions while preserving logical scene coordinates.
+    pub fn with_scale(mut self, scale: f64) -> Self {
+        self.scale = scale;
+        self
+    }
+
+    fn output_dimensions(&self) -> Result<(u32, u32), RasterError> {
+        if !self.scale.is_finite() || self.scale <= 0.0 {
+            return Err(RasterError::Init(
+                "render scale must be finite and positive".into(),
+            ));
+        }
+        let width = (self.width as f64 * self.scale).round();
+        let height = (self.height as f64 * self.scale).round();
+        if width < 1.0 || height < 1.0 || width > u32::MAX as f64 || height > u32::MAX as f64 {
+            return Err(RasterError::Init(
+                "render scale produces dimensions outside the supported range".into(),
+            ));
+        }
+        Ok((width as u32, height as u32))
     }
 }
 
@@ -489,6 +515,7 @@ where
 {
     let width = config.width;
     let height = config.height;
+    let (output_width, output_height) = config.output_dimensions()?;
     let fps = config.fps;
     let total = config.duration_in_frames;
     let started = Instant::now();
@@ -545,7 +572,8 @@ where
             },
             &mut |frame, rgba| {
                 config.control.check(started)?;
-                stdin.write_all(rgba).map_err(|e| {
+                let scaled = scale_rgba_frame(rgba, width, height, output_width, output_height)?;
+                stdin.write_all(&scaled).map_err(|e| {
                     RasterError::ImageEncode(format!("FFmpeg pipe write error: {e}"))
                 })?;
                 if let Some(callback) = &config.control.progress {
@@ -582,7 +610,8 @@ where
                 let frame_cfg = FrameConfig::new(width, height, composition_frame, fps);
                 let img = backend.render_frame(&scene, &frame_cfg)?;
                 config.control.check(started)?;
-                Ok(img.into_raw())
+                let rgba = img.into_raw();
+                scale_rgba_frame(&rgba, width, height, output_width, output_height)
             },
             |frame, rgba| {
                 config.control.check(started)?;
@@ -703,6 +732,7 @@ where
 }
 
 fn validate_pipe_config(config: &PipeConfig) -> Result<(), RasterError> {
+    let (output_width, output_height) = config.output_dimensions()?;
     if config.width == 0 || config.height == 0 {
         return Err(RasterError::Init(
             "render width and height must be positive".into(),
@@ -728,7 +758,7 @@ fn validate_pipe_config(config: &PipeConfig) -> Result<(), RasterError> {
         .checked_add((config.duration_in_frames - 1).saturating_mul(config.frame_step))
         .ok_or_else(|| RasterError::Init("render frame range overflows u32".into()))?;
     if config.codec != VideoCodec::Gif
-        && (!config.width.is_multiple_of(2) || !config.height.is_multiple_of(2))
+        && (!output_width.is_multiple_of(2) || !output_height.is_multiple_of(2))
     {
         return Err(RasterError::Init(
             "video render width and height must be even".into(),
@@ -753,6 +783,28 @@ fn validate_pipe_config(config: &PipeConfig) -> Result<(), RasterError> {
         ));
     }
     validate_audio_tracks(&config.audio_tracks, &config.security_policy)
+}
+
+fn scale_rgba_frame(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    output_width: u32,
+    output_height: u32,
+) -> Result<Vec<u8>, RasterError> {
+    if width == output_width && height == output_height {
+        return Ok(rgba.to_vec());
+    }
+    let image = image::RgbaImage::from_raw(width, height, rgba.to_vec()).ok_or_else(|| {
+        RasterError::ImageEncode("rendered RGBA buffer has an invalid length".into())
+    })?;
+    Ok(image::imageops::resize(
+        &image,
+        output_width,
+        output_height,
+        image::imageops::FilterType::Lanczos3,
+    )
+    .into_raw())
 }
 
 fn wait_for_ffmpeg(
@@ -794,6 +846,9 @@ fn wait_for_ffmpeg(
 
 /// Build FFmpeg arguments for rawvideo stdin pipe and the selected codec.
 pub fn build_pipe_ffmpeg_args(config: &PipeConfig) -> Vec<String> {
+    let (width, height) = config
+        .output_dimensions()
+        .unwrap_or((config.width, config.height));
     let mut args = vec![
         "-y".into(), // overwrite output
         "-loglevel".into(),
@@ -803,7 +858,7 @@ pub fn build_pipe_ffmpeg_args(config: &PipeConfig) -> Vec<String> {
         "-pix_fmt".into(),
         "rgba".into(), // pixel format
         "-s".into(),
-        format!("{}x{}", config.width, config.height),
+        format!("{}x{}", width, height),
         "-r".into(),
         format!("{}", config.fps / config.frame_step as f64),
         "-i".into(),
@@ -863,7 +918,7 @@ pub fn build_pipe_ffmpeg_args(config: &PipeConfig) -> Vec<String> {
     };
 
     let auto_bitrate = {
-        let pixels = (config.width as u64) * (config.height as u64);
+        let pixels = (width as u64) * (height as u64);
         if pixels >= 3840 * 2160 {
             "30M"
         } else if pixels >= 1920 * 1080 {
@@ -1519,6 +1574,14 @@ mod tests {
             "args should contain output path"
         );
         assert!(args.contains(&"-an".to_string()));
+    }
+
+    #[test]
+    fn scaled_pipe_uses_scaled_rawvideo_dimensions() {
+        let config = PipeConfig::new(640, 360, 30.0, 2, "/tmp/out.mp4").with_scale(1.5);
+        let args = build_pipe_ffmpeg_args(&config);
+        assert!(args.contains(&"960x540".to_string()));
+        assert_eq!(config.output_dimensions().unwrap(), (960, 540));
     }
 
     #[test]
