@@ -190,6 +190,7 @@ async fn main() -> anyhow::Result<()> {
                 permissive: true,
             };
             let previous_browser_assets = std::env::var_os("DIOXUSCUT_BROWSER_ASSETS");
+            let previous_browser_timeline = std::env::var_os("DIOXUSCUT_BROWSER_TIMELINE");
             if request.backend == dioxuscut_cli::RenderBackend::Browser {
                 let asset_separator = if cfg!(windows) { ';' } else { ':' };
                 std::env::set_var(
@@ -201,6 +202,22 @@ async fn main() -> anyhow::Result<()> {
                         .collect::<Vec<_>>()
                         .join(&asset_separator.to_string()),
                 );
+                let timeline = project
+                    .tracks
+                    .iter()
+                    .flat_map(|track| track.clips.iter())
+                    .map(|clip| dioxuscut_rasterizer::WebTimelineClip {
+                        id: clip.id.clone(),
+                        composition: clip.composition.clone(),
+                        start: clip.start,
+                        duration: clip.duration,
+                        props: clip.props.clone(),
+                    })
+                    .collect::<Vec<_>>();
+                std::env::set_var(
+                    "DIOXUSCUT_BROWSER_TIMELINE",
+                    serde_json::to_string(&timeline)?,
+                );
             }
             let result = dioxuscut_cli::execute_project_render_command_with_control(
                 &request,
@@ -211,6 +228,10 @@ async fn main() -> anyhow::Result<()> {
             match previous_browser_assets {
                 Some(value) => std::env::set_var("DIOXUSCUT_BROWSER_ASSETS", value),
                 None => std::env::remove_var("DIOXUSCUT_BROWSER_ASSETS"),
+            }
+            match previous_browser_timeline {
+                Some(value) => std::env::set_var("DIOXUSCUT_BROWSER_TIMELINE", value),
+                None => std::env::remove_var("DIOXUSCUT_BROWSER_TIMELINE"),
             }
             let _ = std::fs::remove_file(props_path);
             result?;

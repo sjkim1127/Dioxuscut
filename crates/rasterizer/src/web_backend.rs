@@ -73,7 +73,12 @@ impl BrowserFrameBackend {
                     })
                     .unwrap_or_default(),
             ),
-            timeline: Mutex::new(vec![]),
+            timeline: Mutex::new(
+                std::env::var("DIOXUSCUT_BROWSER_TIMELINE")
+                    .ok()
+                    .and_then(|value| serde_json::from_str(&value).ok())
+                    .unwrap_or_default(),
+            ),
             props: Mutex::new(serde_json::json!({})),
             cache: FrameCacheManager::default(),
         })
