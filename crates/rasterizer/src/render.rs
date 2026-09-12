@@ -203,6 +203,8 @@ pub struct PipeConfig {
     pub duration_in_frames: u32,
     /// First composition frame included in the output.
     pub start_frame: u32,
+    /// Source-frame stride. Only GIF output may skip source frames.
+    pub frame_step: u32,
     /// Output media file path.
     pub output: PathBuf,
     /// Number of parallel render workers. `None` = auto.
@@ -235,6 +237,7 @@ impl PipeConfig {
             fps,
             duration_in_frames,
             start_frame: 0,
+            frame_step: 1,
             output: output.into(),
             concurrency: None,
             crf: 18,
@@ -280,6 +283,12 @@ impl PipeConfig {
 
     pub fn with_frame_start(mut self, start_frame: u32) -> Self {
         self.start_frame = start_frame;
+        self
+    }
+
+    /// Render every `step`th source frame, lowering GIF output FPS accordingly.
+    pub fn with_frame_step(mut self, step: u32) -> Self {
+        self.frame_step = step;
         self
     }
 
@@ -534,14 +543,14 @@ where
             total,
             &|frame| {
                 config.control.check(started)?;
-                let composition_frame = config.start_frame + frame;
+                let composition_frame = config.start_frame + frame * config.frame_step;
                 scene_fn(composition_frame).map_err(|error| RasterError::Frame {
                     frame: composition_frame,
                     reason: error.to_string(),
                 })
             },
             &|frame| {
-                let composition_frame = config.start_frame + frame;
+                let composition_frame = config.start_frame + frame * config.frame_step;
                 FrameConfig::new(width, height, composition_frame, fps)
             },
             &mut |frame, rgba| {
@@ -575,7 +584,7 @@ where
             concurrency,
             |frame| {
                 config.control.check(started)?;
-                let composition_frame = config.start_frame + frame; // validated above
+                let composition_frame = config.start_frame + frame * config.frame_step; // validated above
                 let scene = scene_fn(composition_frame).map_err(|error| RasterError::Frame {
                     frame: composition_frame,
                     reason: error.to_string(),
@@ -719,9 +728,19 @@ fn validate_pipe_config(config: &PipeConfig) -> Result<(), RasterError> {
             "render duration must contain at least one frame".into(),
         ));
     }
+    if config.frame_step == 0 {
+        return Err(RasterError::Init(
+            "render frame step must be greater than zero".into(),
+        ));
+    }
+    if config.frame_step > 1 && config.codec != VideoCodec::Gif {
+        return Err(RasterError::Init(
+            "render frame step is supported only for GIF output".into(),
+        ));
+    }
     config
         .start_frame
-        .checked_add(config.duration_in_frames - 1)
+        .checked_add((config.duration_in_frames - 1).saturating_mul(config.frame_step))
         .ok_or_else(|| RasterError::Init("render frame range overflows u32".into()))?;
     if config.codec != VideoCodec::Gif
         && (!config.width.is_multiple_of(2) || !config.height.is_multiple_of(2))
@@ -801,7 +820,7 @@ pub fn build_pipe_ffmpeg_args(config: &PipeConfig) -> Vec<String> {
         "-s".into(),
         format!("{}x{}", config.width, config.height),
         "-r".into(),
-        format!("{}", config.fps),
+        format!("{}", config.fps / config.frame_step as f64),
         "-i".into(),
         "pipe:0".into(), // read from stdin
     ];
@@ -997,7 +1016,10 @@ pub fn build_pipe_ffmpeg_args(config: &PipeConfig) -> Vec<String> {
     }
     args.extend([
         "-t".into(),
-        format!("{:.9}", config.duration_in_frames as f64 / config.fps),
+        format!(
+            "{:.9}",
+            config.duration_in_frames as f64 / (config.fps / config.frame_step as f64)
+        ),
         config.output.to_string_lossy().to_string(),
     ]);
     args
@@ -1556,6 +1578,20 @@ mod tests {
         );
         assert!(gif.iter().any(|arg| arg.contains("palettegen")));
         assert!(gif.contains(&"-an".to_string()));
+    }
+
+    #[test]
+    fn gif_frame_step_maps_source_frames_and_output_fps() {
+        let config = PipeConfig::new(64, 64, 30.0, 3, "out.gif")
+            .with_codec(VideoCodec::Gif)
+            .with_frame_start(10)
+            .with_frame_step(2);
+        let args = build_pipe_ffmpeg_args(&config);
+        assert!(args.windows(2).any(|pair| pair == ["-r", "15"]));
+        assert!(validate_pipe_config(&config).is_ok());
+
+        let video = PipeConfig::new(64, 64, 30.0, 3, "out.mp4").with_frame_step(2);
+        assert!(validate_pipe_config(&video).is_err());
     }
 
     #[test]
