@@ -741,18 +741,30 @@ fn parse_transform(value: &str) -> Option<Transform2D> {
     let mut scale = None;
     let mut rotate = None;
     for function in value.split(')').filter_map(|part| part.split_once('(')) {
-        let name = function.0.trim();
+        let name = function.0.trim().to_ascii_lowercase();
         let args = split_css_arguments(function.1);
-        match name {
+        match name.as_str() {
             "translate" => {
                 let x = parse_px(args.first().copied()?)?;
                 let y = args.get(1).and_then(|v| parse_px(v)).unwrap_or(0.0);
                 translate = Some((x, y));
             }
+            "translatex" => {
+                translate = Some((parse_px(args.first().copied()?)?, 0.0));
+            }
+            "translatey" => {
+                translate = Some((0.0, parse_px(args.first().copied()?)?));
+            }
             "scale" => {
                 let x = args.first()?.parse().ok()?;
                 let y = args.get(1).and_then(|v| v.parse().ok()).unwrap_or(x);
                 scale = Some((x, y));
+            }
+            "scalex" => {
+                scale = Some((args.first()?.parse().ok()?, 1.0));
+            }
+            "scaley" => {
+                scale = Some((1.0, args.first()?.parse().ok()?));
             }
             "rotate" => rotate = Some(args.first()?.strip_suffix("deg")?.parse().ok()?),
             _ => {}
@@ -894,5 +906,21 @@ mod tests {
         assert_eq!(style.transform.scale_x, 2.0);
         assert_eq!(style.transform.scale_y, 2.0);
         assert_eq!(style.transform.rotate_deg, 15.0);
+    }
+
+    #[test]
+    fn parses_axis_transform_functions() {
+        let stylesheet =
+            Stylesheet::parse(".hero { transform: translateX(12px) scaleY(0.5); }").unwrap();
+        let mut element = NativeElement {
+            tag: "div".into(),
+            ..Default::default()
+        };
+        element.attributes.insert("class".into(), "hero".into());
+        let style = stylesheet.resolve(&element, None);
+        assert_eq!(style.transform.tx, 12.0);
+        assert_eq!(style.transform.ty, 0.0);
+        assert_eq!(style.transform.scale_x, 1.0);
+        assert_eq!(style.transform.scale_y, 0.5);
     }
 }
