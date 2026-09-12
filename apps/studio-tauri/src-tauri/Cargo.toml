@@ -16,6 +16,7 @@ dioxuscut-composition = { workspace = true }
 dioxuscut-rasterizer = { workspace = true }
 dioxuscut-project = { workspace = true }
 dioxuscut-cli = { workspace = true }
+dioxuscut-renderer = { workspace = true }
 tokio = { workspace = true }
 
 [features]

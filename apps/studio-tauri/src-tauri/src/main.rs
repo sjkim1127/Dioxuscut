@@ -3,6 +3,7 @@
 use dioxuscut_cli::{
     execute_project_render_command_with_control, RenderBackend, RenderCodec, RenderRequest,
 };
+use dioxuscut_renderer::spawn_server;
 use dioxuscut_project::{JobStatus, JobStore, Project, RenderJob};
 use dioxuscut_rasterizer::{
     make_cancel_signal, render_still_fallible_scaled, render_web_to_ffmpeg_pipe_fallible,
@@ -85,6 +86,22 @@ fn browser_worker_path() -> Result<PathBuf, String> {
             "Browser backend requires DIOXUSCUT_BROWSER_WORKER or a bundled three-render-worker.mjs"
                 .to_string()
         })
+}
+
+fn browser_frontend_path() -> Result<PathBuf, String> {
+    let mut candidates = Vec::new();
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(parent) = executable.parent() {
+            candidates.push(parent.join("resources/_up_/dist"));
+            candidates.push(parent.join("resources/dist"));
+            candidates.push(parent.join("../Resources/_up_/dist"));
+        }
+    }
+    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist"));
+    candidates
+        .into_iter()
+        .find(|path| path.join("index.html").is_file())
+        .ok_or_else(|| "bundled browser frontend dist/index.html was not found".to_string())
 }
 
 struct AppState {
@@ -228,8 +245,12 @@ fn start_render_job(
         return Ok(());
     }
     let worker = browser_worker_path()?;
-    let url = std::env::var("DIOXUSCUT_BROWSER_URL")
-        .unwrap_or_else(|_| "http://localhost:1420".to_string());
+    let configured_url = std::env::var("DIOXUSCUT_BROWSER_URL").ok();
+    let frontend_path = if configured_url.is_none() {
+        Some(browser_frontend_path()?)
+    } else {
+        None
+    };
     let concurrency = project
         .settings
         .concurrency
@@ -261,6 +282,16 @@ fn start_render_job(
         .insert(id.clone(), cancellation.clone());
     thread::spawn(move || {
         let result = (|| -> Result<(), String> {
+            let runtime = tokio::runtime::Runtime::new().map_err(|error| error.to_string())?;
+            let local_server = frontend_path
+                .as_ref()
+                .map(|root| runtime.block_on(spawn_server(0, root)))
+                .transpose()
+                .map_err(|error| error.to_string())?;
+            let url = configured_url
+                .clone()
+                .or_else(|| local_server.as_ref().map(|server| server.url().to_string()))
+                .ok_or_else(|| "browser rendering URL is unavailable".to_string())?;
             let node = std::env::var_os("DIOXUSCUT_BROWSER_NODE").unwrap_or_else(|| "node".into());
             let backend = BrowserFrameBackend::with_concurrency(node, worker, url, concurrency)
                 .map_err(|error| error.to_string())?;

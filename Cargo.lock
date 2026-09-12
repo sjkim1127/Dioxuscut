@@ -2106,6 +2106,7 @@ dependencies = [
  "dioxuscut-composition",
  "dioxuscut-project",
  "dioxuscut-rasterizer",
+ "dioxuscut-renderer",
  "serde",
  "serde_json",
  "tauri",
