@@ -46,11 +46,30 @@ const preloadedAssets = new Map();
 async function preloadAssets(assets = []) {
   await Promise.all(assets.map(async (source) => {
     if (preloadedAssets.has(source)) return preloadedAssets.get(source);
-    const task = new Promise((resolve, reject) => {
-      const image = new Image();
-      image.onload = () => resolve(image);
-      image.onerror = () => reject(new Error(`failed to preload asset: ${source}`));
-      image.src = source;
+    const extension = source.split(/[?#]/, 1)[0].split('.').pop()?.toLowerCase();
+    let task;
+    if (['ttf', 'otf', 'woff', 'woff2'].includes(extension)) {
+      task = new FontFace(`dioxuscut-${preloadedAssets.size}`, `url(${source})`).load();
+      task = task.then((font) => { document.fonts.add(font); return font; });
+    } else if (['mp4', 'webm', 'mov', 'm4v'].includes(extension)) {
+      task = new Promise((resolve, reject) => {
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.onloadedmetadata = () => resolve(video);
+        video.onerror = () => reject(new Error(`failed to preload asset: ${source}`));
+        video.src = source;
+      });
+    } else {
+      task = new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => image.decode().then(() => resolve(image), () => resolve(image));
+        image.onerror = () => reject(new Error(`failed to preload asset: ${source}`));
+        image.src = source;
+      });
+    }
+    task = task.catch((error) => {
+      preloadedAssets.delete(source);
+      throw error;
     });
     preloadedAssets.set(source, task);
     return task;
