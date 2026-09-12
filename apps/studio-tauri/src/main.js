@@ -101,6 +101,9 @@ function renderDefaultFrame({ composition, frame: nextFrame, fps, props }) {
 export async function renderFrame({ composition = 'three_preview', frame: nextFrame, fps = 30, props: inputProps = {}, assets = [], timeline = [] }) {
   const props = inputProps && typeof inputProps === 'object' ? inputProps : {};
   await preloadAssets(assets);
+  // Match Remotion's render-ready gate: a frame is not capturable until all
+  // declared font faces have finished loading.
+  await document.fonts.ready;
   if (timeline.length > 0) {
     for (const clip of timeline) {
       if (nextFrame < clip.start || nextFrame >= clip.start + clip.duration) continue;
