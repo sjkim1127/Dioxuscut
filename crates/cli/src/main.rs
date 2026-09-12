@@ -188,7 +188,6 @@ async fn main() -> anyhow::Result<()> {
                 frame_end: project.settings.frame_end,
                 frame_step: project.settings.frame_step,
                 concurrency: project.settings.concurrency.map(|value| value as usize),
-                concurrency: None,
                 timeout_seconds: None,
                 crf: 18,
                 preset: "fast".into(),

@@ -199,9 +199,15 @@ fn start_render_job(
         .ok_or_else(|| "Browser backend requires DIOXUSCUT_BROWSER_WORKER".to_string())?;
     let url = std::env::var("DIOXUSCUT_BROWSER_URL")
         .unwrap_or_else(|_| "http://localhost:1420".to_string());
-    let concurrency = std::env::var("DIOXUSCUT_BROWSER_CONCURRENCY")
-        .ok()
-        .and_then(|value| value.parse().ok())
+    let concurrency = project
+        .settings
+        .concurrency
+        .map(|value| value as usize)
+        .or_else(|| {
+            std::env::var("DIOXUSCUT_BROWSER_CONCURRENCY")
+                .ok()
+                .and_then(|value| value.parse().ok())
+        })
         .unwrap_or(1);
     {
         let mut store = state
