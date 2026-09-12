@@ -112,6 +112,8 @@ pub enum ProjectError {
     InvalidJobTransition { from: JobStatus, to: JobStatus },
     #[error("render job '{0}' was not found")]
     JobNotFound(String),
+    #[error("render progress cannot regress from {previous} to {next}")]
+    ProgressRegressed { previous: u32, next: u32 },
 }
 
 impl Project {
@@ -194,8 +196,36 @@ impl JobStore {
                 to: status,
             });
         }
+        if completed_frames < job.completed_frames {
+            return Err(ProjectError::ProgressRegressed {
+                previous: job.completed_frames,
+                next: completed_frames,
+            });
+        }
         job.status = status;
         job.completed_frames = completed_frames;
+        Ok(())
+    }
+    pub fn fail(&mut self, id: &str, message: impl Into<String>) -> Result<(), ProjectError> {
+        let job = self
+            .jobs
+            .get_mut(id)
+            .ok_or_else(|| ProjectError::JobNotFound(id.to_string()))?;
+        if !matches!(
+            job.status,
+            JobStatus::Queued
+                | JobStatus::Preparing
+                | JobStatus::Rendering
+                | JobStatus::Encoding
+                | JobStatus::Failed
+        ) {
+            return Err(ProjectError::InvalidJobTransition {
+                from: job.status.clone(),
+                to: JobStatus::Failed,
+            });
+        }
+        job.status = JobStatus::Failed;
+        job.error = Some(message.into());
         Ok(())
     }
 }
@@ -248,5 +278,19 @@ mod tests {
         let id = store.submit(project()).unwrap();
         assert!(store.try_update(&id, JobStatus::Encoding, 0).is_err());
         assert!(store.try_update(&id, JobStatus::Preparing, 0).is_ok());
+    }
+    #[test]
+    fn progress_regression_and_failure_are_recorded() {
+        let mut store = JobStore::default();
+        let id = store.submit(project()).unwrap();
+        store.try_update(&id, JobStatus::Preparing, 4).unwrap();
+        assert!(matches!(
+            store.try_update(&id, JobStatus::Rendering, 3),
+            Err(ProjectError::ProgressRegressed { .. })
+        ));
+        store.fail(&id, "worker exited").unwrap();
+        let job = store.get(&id).unwrap();
+        assert_eq!(job.status, JobStatus::Failed);
+        assert_eq!(job.error.as_deref(), Some("worker exited"));
     }
 }

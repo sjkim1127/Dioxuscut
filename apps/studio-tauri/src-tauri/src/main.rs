@@ -47,6 +47,20 @@ fn update_render_job(
 }
 
 #[tauri::command]
+fn fail_render_job(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    message: String,
+) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "job store lock poisoned".to_string())?
+        .fail(&id, message)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn validate_frame_request(request: WebFrameRequest) -> Result<WebFrameRequest, String> {
     if request.width == 0 || request.height == 0 {
         return Err("preview dimensions must be greater than zero".into());
@@ -87,7 +101,8 @@ fn main() {
             validate_frame_request,
             submit_project,
             get_render_job,
-            update_render_job
+            update_render_job,
+            fail_render_job
         ])
         .run(tauri::generate_context!())
         .expect("error while running Dioxuscut Studio");
