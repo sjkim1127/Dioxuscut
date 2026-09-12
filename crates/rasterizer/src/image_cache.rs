@@ -174,12 +174,13 @@ impl ImageCache {
             })
             .ok_or_else(|| RasterError::ImageAsset {
                 path: src.to_string(),
-                reason: "only PNG, JPEG, WebP, and base64 SVG data URIs are supported".into(),
+                reason: "only PNG, JPEG, WebP, and SVG data URIs are supported".into(),
             })?;
-        if !metadata.split(';').any(|part| part == "base64") {
+        let is_base64 = metadata.split(';').any(|part| part == "base64");
+        if !is_base64 && mime != "image/svg+xml" {
             return Err(RasterError::ImageAsset {
                 path: src.to_string(),
-                reason: "only base64-encoded image data URIs are supported".into(),
+                reason: "PNG, JPEG, and WebP data URIs must be base64-encoded".into(),
             });
         }
         if encoded.len() > (MAX_DATA_URI_BYTES * 4 / 3) + 4 {
@@ -188,12 +189,22 @@ impl ImageCache {
                 reason: format!("data URI exceeds the {MAX_DATA_URI_BYTES} byte limit"),
             });
         }
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(encoded)
-            .map_err(|error| RasterError::ImageAsset {
-                path: src.to_string(),
-                reason: format!("invalid base64 image data: {error}"),
-            })?;
+        let bytes = if is_base64 {
+            base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .map_err(|error| RasterError::ImageAsset {
+                    path: src.to_string(),
+                    reason: format!("invalid base64 image data: {error}"),
+                })?
+        } else {
+            urlencoding::decode(encoded)
+                .map_err(|error| RasterError::ImageAsset {
+                    path: src.to_string(),
+                    reason: format!("invalid percent-encoded SVG data: {error}"),
+                })?
+                .into_owned()
+                .into_bytes()
+        };
         if bytes.len() > MAX_DATA_URI_BYTES {
             return Err(RasterError::ImageAsset {
                 path: src.to_string(),
@@ -261,5 +272,14 @@ mod tests {
         let image = cache.load(source).unwrap();
         assert_eq!((image.width(), image.height()), (2, 1));
         assert_eq!(image.get_pixel(0, 0).0, [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn rasterizes_percent_encoded_svg_data_uri() {
+        let cache = ImageCache::default();
+        let source = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221%22%20height%3D%221%22%3E%3Crect%20width%3D%221%22%20height%3D%221%22%20fill%3D%22%2300ff00%22%2F%3E%3C%2Fsvg%3E";
+        let image = cache.load(source).unwrap();
+        assert_eq!((image.width(), image.height()), (1, 1));
+        assert_eq!(image.get_pixel(0, 0).0, [0, 255, 0, 255]);
     }
 }
