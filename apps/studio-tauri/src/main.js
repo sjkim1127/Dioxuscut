@@ -46,6 +46,7 @@ const compositions = new Map();
 const preloadedAssets = new Map();
 const imageDimensionsCache = new Map();
 const videoMetadataCache = new Map();
+const audioDurationCache = new Map();
 const videoTextureCache = new Map();
 const renderGates = new Map();
 let lottieAdapter = null;
@@ -182,6 +183,35 @@ export async function getVideoMetadata(source) {
   videoMetadataCache.set(source, metadata);
   return metadata;
 }
+
+// Browser equivalent of @remotion/media-utils/getAudioDurationInSeconds.
+export async function getAudioDurationInSeconds(source) {
+  if (typeof source !== 'string' || !source) throw new TypeError('getAudioDurationInSeconds expects a source URL');
+  if (audioDurationCache.has(source)) return audioDurationCache.get(source);
+  const duration = new Promise((resolve, reject) => {
+    const audio = document.createElement('audio');
+    const cleanup = () => { audio.removeAttribute('src'); audio.load(); };
+    audio.preload = 'metadata';
+    audio.onloadedmetadata = () => {
+      if (!Number.isFinite(audio.duration)) {
+        reject(new Error(`unable to determine audio duration: ${source}`));
+        cleanup();
+        return;
+      }
+      resolve(audio.duration);
+      cleanup();
+    };
+    audio.onerror = () => { reject(new Error(`failed to load audio metadata: ${source}`)); cleanup(); };
+    audio.src = source;
+  }).catch((error) => {
+    audioDurationCache.delete(source);
+    throw error;
+  });
+  audioDurationCache.set(source, duration);
+  return duration;
+}
+
+export const getAudioDuration = getAudioDurationInSeconds;
 
 // Browser equivalent of Remotion's useVideoTexture for non-React Three.js
 // compositions. The element and texture are cached by source so a frame
@@ -472,6 +502,8 @@ window.dioxuscut = {
   useVideoTexture,
   getImageDimensions,
   getVideoMetadata,
+  getAudioDurationInSeconds,
+  getAudioDuration,
   releaseVideoTexture,
 };
 

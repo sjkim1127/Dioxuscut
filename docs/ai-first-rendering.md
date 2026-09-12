@@ -214,6 +214,8 @@ same Promise-based query. Results are cached by source and expose
 Browser compositions can likewise call `window.dioxuscut.getVideoMetadata(src)`
 to receive `{durationInSeconds, width, height, aspectRatio, isRemote}` with
 source-level caching.
+`window.dioxuscut.getAudioDurationInSeconds(src)` (also available as
+`getAudioDuration`) provides the cached duration for audio-driven compositions.
 
 Each worker owns one Chromium page and serializes its own requests; the shared
 streaming pipeline schedules different frames across the pool while preserving
