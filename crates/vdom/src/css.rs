@@ -506,7 +506,12 @@ pub(crate) fn apply_declarations(style: &mut ResolvedStyle, declarations: &[(Str
             }
             "border-radius" => style.border_radius = parse_px(value).unwrap_or(0.0).max(0.0),
             "box-shadow" => style.box_shadow = parse_box_shadow(value),
-            "filter" => style.filters = parse_filters(value),
+            "filter" => {
+                style.filters = parse_filters(value);
+                if let Some(shadow) = parse_drop_shadow(value) {
+                    style.box_shadow = Some(shadow);
+                }
+            }
             "mix-blend-mode" => style.blend_mode = parse_blend_mode(value),
             "font-size" => style.font_size = parse_px(value).unwrap_or(style.font_size).max(1.0),
             "font-weight" => {
@@ -635,6 +640,12 @@ fn parse_filters(value: &str) -> Vec<SceneFilter> {
         }
     }
     filters
+}
+
+fn parse_drop_shadow(value: &str) -> Option<dioxuscut_rasterizer::SceneShadow> {
+    let start = value.find("drop-shadow(")? + "drop-shadow(".len();
+    let end = value.rfind(')')?;
+    parse_box_shadow(&value[start..end])
 }
 
 fn parse_blend_mode(value: &str) -> BlendMode {
@@ -1243,5 +1254,26 @@ mod tests {
             stylesheet.resolve(&element, None).blend_mode,
             BlendMode::Screen
         );
+    }
+
+    #[test]
+    fn parses_drop_shadow_filter_as_native_shadow() {
+        let stylesheet =
+            Stylesheet::parse(".hero { filter: drop-shadow(3px 4px 5px rgba(1, 2, 3, 0.5)); }")
+                .unwrap();
+        let mut element = NativeElement {
+            tag: "div".into(),
+            ..Default::default()
+        };
+        element.attributes.insert("class".into(), "hero".into());
+        let shadow = stylesheet
+            .resolve(&element, None)
+            .box_shadow
+            .expect("drop shadow");
+        assert_eq!(
+            (shadow.offset_x, shadow.offset_y, shadow.blur_sigma),
+            (3.0, 4.0, 5.0)
+        );
+        assert_eq!(shadow.color, Color::rgba(1, 2, 3, 128));
     }
 }
