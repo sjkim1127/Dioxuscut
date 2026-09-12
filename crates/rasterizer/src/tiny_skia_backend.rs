@@ -910,14 +910,14 @@ fn apply_filter(pixmap: &mut Pixmap, filter: &SceneFilter) -> Result<(), RasterE
                     "brightness must be finite and between 0 and 10, got {amount}"
                 )));
             }
-            for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+            pixmap.data_mut().par_chunks_exact_mut(4).for_each(|pixel| {
                 let alpha = pixel[3];
                 for channel in &mut pixel[..3] {
                     *channel = (f32::from(*channel) * amount)
                         .round()
                         .clamp(0.0, f32::from(alpha)) as u8;
                 }
-            }
+            });
         }
         SceneFilter::Grayscale { amount } => {
             if !amount.is_finite() || !(0.0..=1.0).contains(&amount) {
@@ -925,7 +925,7 @@ fn apply_filter(pixmap: &mut Pixmap, filter: &SceneFilter) -> Result<(), RasterE
                     "grayscale must be finite and between 0 and 1, got {amount}"
                 )));
             }
-            for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+            pixmap.data_mut().par_chunks_exact_mut(4).for_each(|pixel| {
                 let alpha = pixel[3];
                 let gray = 0.2126 * f32::from(pixel[0])
                     + 0.7152 * f32::from(pixel[1])
@@ -935,7 +935,7 @@ fn apply_filter(pixmap: &mut Pixmap, filter: &SceneFilter) -> Result<(), RasterE
                         .round()
                         .clamp(0.0, f32::from(alpha)) as u8;
                 }
-            }
+            });
         }
         SceneFilter::Opacity { amount } => {
             if !amount.is_finite() || !(0.0..=1.0).contains(&amount) {
@@ -1079,17 +1079,17 @@ fn apply_filter(pixmap: &mut Pixmap, filter: &SceneFilter) -> Result<(), RasterE
                     "contrast factor must be non-negative and finite".into(),
                 ));
             }
-            for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+            pixmap.data_mut().par_chunks_exact_mut(4).for_each(|pixel| {
                 let alpha = pixel[3] as f32;
                 if alpha == 0.0 {
-                    continue;
+                    return;
                 }
                 for channel in &mut pixel[..3] {
                     let unpre = (*channel as f32 / alpha) * 255.0;
                     let contrasted = (unpre - 128.0) * factor + 128.0;
                     *channel = ((contrasted / 255.0) * alpha).round().clamp(0.0, alpha) as u8;
                 }
-            }
+            });
         }
         SceneFilter::Saturation { factor } => {
             if !factor.is_finite() || factor < 0.0 {
@@ -1097,10 +1097,10 @@ fn apply_filter(pixmap: &mut Pixmap, filter: &SceneFilter) -> Result<(), RasterE
                     "saturation factor must be non-negative and finite".into(),
                 ));
             }
-            for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+            pixmap.data_mut().par_chunks_exact_mut(4).for_each(|pixel| {
                 let alpha = pixel[3] as f32;
                 if alpha == 0.0 {
-                    continue;
+                    return;
                 }
                 let r_unpre = (pixel[0] as f32 / alpha) * 255.0;
                 let g_unpre = (pixel[1] as f32 / alpha) * 255.0;
@@ -1115,7 +1115,7 @@ fn apply_filter(pixmap: &mut Pixmap, filter: &SceneFilter) -> Result<(), RasterE
                 pixel[0] = ((r_sat / 255.0) * alpha).round().clamp(0.0, alpha) as u8;
                 pixel[1] = ((g_sat / 255.0) * alpha).round().clamp(0.0, alpha) as u8;
                 pixel[2] = ((b_sat / 255.0) * alpha).round().clamp(0.0, alpha) as u8;
-            }
+            });
         }
         SceneFilter::HueRotate { degrees } => {
             if !degrees.is_finite() {
@@ -1126,10 +1126,10 @@ fn apply_filter(pixmap: &mut Pixmap, filter: &SceneFilter) -> Result<(), RasterE
                 return Ok(());
             }
 
-            for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+            pixmap.data_mut().par_chunks_exact_mut(4).for_each(|pixel| {
                 let alpha = pixel[3] as f32;
                 if alpha == 0.0 {
-                    continue;
+                    return;
                 }
                 let r_u = pixel[0] as f32 / alpha;
                 let g_u = pixel[1] as f32 / alpha;
@@ -1171,7 +1171,7 @@ fn apply_filter(pixmap: &mut Pixmap, filter: &SceneFilter) -> Result<(), RasterE
                 pixel[0] = ((r_norm + m) * alpha).round().clamp(0.0, alpha) as u8;
                 pixel[1] = ((g_norm + m) * alpha).round().clamp(0.0, alpha) as u8;
                 pixel[2] = ((b_norm + m) * alpha).round().clamp(0.0, alpha) as u8;
-            }
+            });
         }
         SceneFilter::Invert { amount } => {
             if !amount.is_finite() || !(0.0..=1.0).contains(&amount) {
@@ -1179,17 +1179,17 @@ fn apply_filter(pixmap: &mut Pixmap, filter: &SceneFilter) -> Result<(), RasterE
                     "invert amount must be finite and between 0 and 1, got {amount}"
                 )));
             }
-            for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+            pixmap.data_mut().par_chunks_exact_mut(4).for_each(|pixel| {
                 let alpha = pixel[3] as f32;
                 if alpha == 0.0 {
-                    continue;
+                    return;
                 }
                 for channel in &mut pixel[..3] {
                     let unpre = (*channel as f32 / alpha) * 255.0;
                     let inverted = unpre + (255.0 - 2.0 * unpre) * amount;
                     *channel = ((inverted / 255.0) * alpha).round().clamp(0.0, alpha) as u8;
                 }
-            }
+            });
         }
         SceneFilter::Tint { color, amount } => {
             if !amount.is_finite() || !(0.0..=1.0).contains(&amount) {
@@ -1202,10 +1202,10 @@ fn apply_filter(pixmap: &mut Pixmap, filter: &SceneFilter) -> Result<(), RasterE
             let tb = color[2] as f32;
             let ta = (color[3] as f32 / 255.0) * amount;
 
-            for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+            pixmap.data_mut().par_chunks_exact_mut(4).for_each(|pixel| {
                 let alpha = pixel[3] as f32;
                 if alpha == 0.0 {
-                    continue;
+                    return;
                 }
                 let r_unpre = (pixel[0] as f32 / alpha) * 255.0;
                 let g_unpre = (pixel[1] as f32 / alpha) * 255.0;
@@ -1218,7 +1218,7 @@ fn apply_filter(pixmap: &mut Pixmap, filter: &SceneFilter) -> Result<(), RasterE
                 pixel[0] = ((r_tint / 255.0) * alpha).round().clamp(0.0, alpha) as u8;
                 pixel[1] = ((g_tint / 255.0) * alpha).round().clamp(0.0, alpha) as u8;
                 pixel[2] = ((b_tint / 255.0) * alpha).round().clamp(0.0, alpha) as u8;
-            }
+            });
         }
         SceneFilter::Duotone { primary, secondary } => {
             let pr = primary[0] as f32;
