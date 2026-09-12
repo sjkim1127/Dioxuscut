@@ -284,7 +284,9 @@ async function refreshJobList() {
       retry.addEventListener('click', async () => {
         try {
           currentJobId = await invoke('retry_render_job', { id: job.id });
-          showMessage(`${currentJobId} queued`);
+          const output = await join(await tempDir(), `dioxuscut-${currentJobId}.mp4`);
+          await invoke('start_render_job', { id: currentJobId, output });
+          showMessage(`${currentJobId} rendering → ${output}`);
           await refreshJobList();
         } catch (error) { showMessage(`retry error: ${error}`); }
       });
