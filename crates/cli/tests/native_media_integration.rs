@@ -203,6 +203,7 @@ async fn rhai_media_nodes_flow_through_the_cli_renderer() {
         frame_start: 0,
         frame_end: None,
         frame_step: 1,
+        concurrency: None,
         timeout_seconds: None,
         crf: 18,
         preset: "fast".into(),

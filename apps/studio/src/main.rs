@@ -390,6 +390,7 @@ fn TopBar(mut props: TopBarProps) -> Element {
             frame_start: 0,
             frame_end: None,
             frame_step: 1,
+            concurrency: None,
             timeout_seconds: Some(300),
             crf: 18,
             preset: "fast".into(),

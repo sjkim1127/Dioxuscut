@@ -34,6 +34,7 @@ fn test_cli_flag_defaults() {
             hw_accel,
             sandbox_roots,
             permissive,
+            concurrency: _,
         } => {
             assert_eq!(composition, Some("HelloWorld".into()));
             assert_eq!(script, None);
@@ -106,6 +107,7 @@ fn test_cli_flag_custom_values() {
             hw_accel,
             sandbox_roots,
             permissive,
+            concurrency: _,
         } => {
             assert_eq!(composition, Some("CustomComposition".into()));
             assert_eq!(script, None);

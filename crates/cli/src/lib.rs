@@ -232,6 +232,8 @@ pub enum ValidationError {
     InvalidFrameRange { start: u32, end: u32, duration: u32 },
     #[error("Invalid frame step: {0}; expected a value greater than zero")]
     InvalidFrameStep(u32),
+    #[error("Invalid concurrency: expected a value greater than zero")]
+    InvalidConcurrency,
     #[error("Output extension '.{actual}' is invalid for {codec}; expected {expected}")]
     InvalidOutputExtension {
         codec: String,
@@ -392,6 +394,10 @@ pub enum Commands {
         #[arg(long, default_value_t = 1)]
         frame_step: u32,
 
+        /// Number of parallel frame workers. Omit to use host defaults.
+        #[arg(long)]
+        concurrency: Option<usize>,
+
         /// Abort the render after this many seconds.
         #[arg(long)]
         timeout_seconds: Option<u64>,
@@ -534,6 +540,7 @@ pub struct RenderRequest {
     pub frame_start: u32,
     pub frame_end: Option<u32>,
     pub frame_step: u32,
+    pub concurrency: Option<usize>,
     pub timeout_seconds: Option<u64>,
     pub crf: u32,
     pub preset: String,
@@ -664,6 +671,9 @@ fn validate_render_params_for_codec(
 fn validate_render_options(request: &RenderRequest) -> Result<(u32, u32), ValidationError> {
     if request.frame_step == 0 {
         return Err(ValidationError::InvalidFrameStep(request.frame_step));
+    }
+    if request.concurrency == Some(0) {
+        return Err(ValidationError::InvalidConcurrency);
     }
     if request.frame_step > 1 && request.codec.still_format().is_some() {
         return Err(ValidationError::InvalidFrameStep(request.frame_step));
@@ -987,6 +997,11 @@ pub async fn execute_render_command_with_registry_and_control(
                     output_frame_count,
                     &request.output,
                 )
+                .with_concurrency(request.concurrency.unwrap_or_else(|| {
+                    std::thread::available_parallelism()
+                        .map(|n| n.get())
+                        .unwrap_or(4)
+                }))
                 .with_frame_start(frame_start)
                 .with_frame_step(request.frame_step)
                 .with_codec(request.codec.video_codec().expect("video codec validated"))
@@ -1010,9 +1025,13 @@ pub async fn execute_render_command_with_registry_and_control(
             })?;
             let url = std::env::var("DIOXUSCUT_BROWSER_URL")
                 .unwrap_or_else(|_| "http://localhost:1420".to_string());
-            let concurrency = std::env::var("DIOXUSCUT_BROWSER_CONCURRENCY")
-                .ok()
-                .and_then(|value| value.parse::<usize>().ok())
+            let concurrency = request
+                .concurrency
+                .or_else(|| {
+                    std::env::var("DIOXUSCUT_BROWSER_CONCURRENCY")
+                        .ok()
+                        .and_then(|value| value.parse::<usize>().ok())
+                })
                 .unwrap_or(1);
             let rasterizer =
                 BrowserFrameBackend::with_concurrency("node", worker, url, concurrency)
@@ -1046,6 +1065,7 @@ pub async fn execute_render_command_with_registry_and_control(
                     output_frame_count,
                     &request.output,
                 )
+                .with_concurrency(request.concurrency.unwrap_or(rasterizer.worker_count()))
                 .with_frame_start(frame_start)
                 .with_frame_step(request.frame_step)
                 .with_codec(request.codec.video_codec().expect("video codec validated"))
@@ -1092,6 +1112,11 @@ pub async fn execute_render_command_with_registry_and_control(
                         output_frame_count,
                         &request.output,
                     )
+                    .with_concurrency(request.concurrency.unwrap_or_else(|| {
+                        std::thread::available_parallelism()
+                            .map(|n| n.get())
+                            .unwrap_or(4)
+                    }))
                     .with_frame_start(frame_start)
                     .with_frame_step(request.frame_step)
                     .with_codec(request.codec.video_codec().expect("video codec validated"))

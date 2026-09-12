@@ -35,6 +35,7 @@ fn request(output: &Path, codec: RenderCodec) -> RenderRequest {
         frame_start: 7,
         frame_end: None,
         frame_step: 1,
+        concurrency: None,
         timeout_seconds: None,
         crf: 18,
         preset: "fast".into(),

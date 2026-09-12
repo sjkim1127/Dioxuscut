@@ -144,6 +144,7 @@ fn render_native(
         frame_start,
         frame_end,
         frame_step: 1,
+        concurrency: None,
         timeout_seconds: None,
         crf,
         preset: preset.to_string(),
