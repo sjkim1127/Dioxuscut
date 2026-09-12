@@ -16,6 +16,7 @@ use std::sync::Mutex;
 
 struct BrowserWorker {
     child: Mutex<Child>,
+    compositions: Vec<String>,
     /// A worker processes one request at a time; protect the full
     /// write/read transaction so concurrent host threads cannot steal replies.
     request: Mutex<()>,
@@ -101,10 +102,12 @@ impl BrowserWorker {
         );
         let mut line = String::new();
         stdout.read_line(&mut line)?;
-        match serde_json::from_str::<WebWorkerMessage>(&line) {
-            Ok(WebWorkerMessage::Ready { protocol }) if protocol == WEB_WORKER_PROTOCOL_VERSION => {
-            }
-            Ok(WebWorkerMessage::Ready { protocol }) => {
+        let compositions = match serde_json::from_str::<WebWorkerMessage>(&line) {
+            Ok(WebWorkerMessage::Ready {
+                protocol,
+                compositions,
+            }) if protocol == WEB_WORKER_PROTOCOL_VERSION => compositions,
+            Ok(WebWorkerMessage::Ready { protocol, .. }) => {
                 return Err(RasterError::Init(format!(
                     "unsupported browser worker protocol {protocol}"
                 )))
@@ -119,9 +122,10 @@ impl BrowserWorker {
                     "invalid browser worker handshake: {error}"
                 )))
             }
-        }
+        };
         Ok(Self {
             child: Mutex::new(child),
+            compositions,
             request: Mutex::new(()),
             stdin: Mutex::new(stdin),
             stdout: Mutex::new(stdout),
@@ -130,6 +134,14 @@ impl BrowserWorker {
 }
 
 impl BrowserFrameBackend {
+    /// Return composition IDs advertised by the first browser worker.
+    pub fn compositions(&self) -> Vec<String> {
+        self.workers
+            .first()
+            .map(|worker| worker.compositions.clone())
+            .unwrap_or_default()
+    }
+
     /// Configure assets that browser compositions should preload before frames.
     pub fn set_assets(&self, assets: Vec<String>) -> Result<(), RasterError> {
         *self

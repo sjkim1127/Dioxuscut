@@ -36,10 +36,17 @@ pub struct WebFrameResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WebWorkerMessage {
-    Ready { protocol: u32 },
+    Ready {
+        protocol: u32,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        compositions: Vec<String>,
+    },
     Render(WebFrameRequest),
     Frame(WebFrameResponse),
-    Error { frame: Option<u32>, message: String },
+    Error {
+        frame: Option<u32>,
+        message: String,
+    },
     Shutdown,
 }
 
@@ -71,6 +78,7 @@ mod tests {
     fn protocol_ready_message_is_stable() {
         let json = serde_json::to_string(&WebWorkerMessage::Ready {
             protocol: WEB_WORKER_PROTOCOL_VERSION,
+            compositions: vec![],
         })
         .unwrap();
         assert_eq!(json, r#"{"type":"ready","protocol":1}"#);

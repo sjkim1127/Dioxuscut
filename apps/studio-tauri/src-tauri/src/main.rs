@@ -407,6 +407,7 @@ fn web_worker_protocol() -> serde_json::Value {
         "messages": ["ready", "render", "frame", "error", "shutdown"],
         "example": serde_json::to_value(WebWorkerMessage::Ready {
             protocol: WEB_WORKER_PROTOCOL_VERSION,
+            compositions: vec![],
         }).expect("protocol message is serializable"),
     })
 }
