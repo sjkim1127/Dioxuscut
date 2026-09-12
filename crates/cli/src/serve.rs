@@ -37,6 +37,7 @@ use dioxuscut_rasterizer::{MediaSecurityPolicy, TinySkiaBackend};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Deserialize;
 use std::{
+    collections::VecDeque,
     net::SocketAddr,
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -84,7 +85,7 @@ struct AppState {
     /// Sender side of the broadcast channel.  Receivers get new PNG frames.
     tx: broadcast::Sender<Arc<FrameMsg>>,
     config: Arc<ServeConfig>,
-    frame_cache: Arc<Mutex<Option<CachedFrame>>>,
+    frame_cache: Arc<Mutex<VecDeque<CachedFrame>>>,
 }
 
 #[derive(Clone)]
@@ -110,7 +111,7 @@ struct FrameMsg {
 /// Run the serve loop.  Never returns under normal operation.
 pub async fn run(config: ServeConfig) -> anyhow::Result<()> {
     let config = Arc::new(config);
-    let frame_cache = Arc::new(Mutex::new(None));
+    let frame_cache = Arc::new(Mutex::new(VecDeque::new()));
     let (tx, _) = broadcast::channel::<Arc<FrameMsg>>(CHANNEL_CAPACITY);
 
     // Render the initial frame immediately so the page is never blank.
@@ -235,23 +236,28 @@ fn source_stamp(config: &ServeConfig) -> u128 {
 fn cached_frame(
     config: &ServeConfig,
     frame: u32,
-    cache: &Mutex<Option<CachedFrame>>,
+    cache: &Mutex<VecDeque<CachedFrame>>,
 ) -> anyhow::Result<Arc<Vec<u8>>> {
     let stamp = source_stamp(config);
-    if let Ok(guard) = cache.lock() {
-        if let Some(cached) = guard.as_ref() {
-            if cached.frame == frame && cached.source_stamp == stamp {
-                return Ok(cached.png.clone());
-            }
+    if let Ok(mut guard) = cache.lock() {
+        if let Some(index) = guard
+            .iter()
+            .position(|cached| cached.frame == frame && cached.source_stamp == stamp)
+        {
+            let cached = guard.remove(index).expect("cache index was found");
+            let png = cached.png.clone();
+            guard.push_front(cached);
+            return Ok(png);
         }
     }
     let png = Arc::new(render_frame(config, frame)?);
     if let Ok(mut guard) = cache.lock() {
-        *guard = Some(CachedFrame {
+        guard.push_front(CachedFrame {
             frame,
             source_stamp: stamp,
             png: png.clone(),
         });
+        guard.truncate(8);
     }
     Ok(png)
 }
@@ -434,7 +440,7 @@ async fn handle_socket(
     tx: broadcast::Sender<Arc<FrameMsg>>,
     config: Arc<ServeConfig>,
     requested_frame: u32,
-    frame_cache: Arc<Mutex<Option<CachedFrame>>>,
+    frame_cache: Arc<Mutex<VecDeque<CachedFrame>>>,
 ) {
     let mut rx = tx.subscribe();
 
