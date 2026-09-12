@@ -108,6 +108,7 @@ pub enum AssetKind {
     Video,
     Audio,
     Font,
+    Lottie,
     Model,
     Shader,
 }

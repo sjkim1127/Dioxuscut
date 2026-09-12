@@ -102,6 +102,9 @@ retry policy. Active clips receive their local frame and clip props.
 Assets with `kind: "audio"` are also forwarded as encoder inputs by
 `render-project` and the Tauri job host, so an AI-generated project can declare
 audio in the shared project file without a host-specific CLI flag.
+Use `kind: "lottie"` for JSON animation assets; Browser hosts preload and
+reuse the parsed animation data, while Native hosts rasterize the same asset
+through the shared Scene contract.
 Props may refer to a declared local asset with `asset://<id>`; CLI and Tauri
 resolve that URI through the manifest before rendering and restore portable
 relative paths when saving the project.
