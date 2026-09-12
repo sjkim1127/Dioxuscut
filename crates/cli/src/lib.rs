@@ -239,6 +239,15 @@ pub enum Commands {
         input: PathBuf,
     },
 
+    /// Render a versioned `.dioxuscut.json` project file.
+    RenderProject {
+        /// Path to the project file.
+        input: PathBuf,
+        /// Output media file path.
+        #[arg(long, short, default_value = "out.mp4")]
+        output: PathBuf,
+    },
+
     /// (Experimental) Scaffold a Dioxuscut component from a Remotion (.tsx) file.
     Migrate {
         /// Path to the Remotion .tsx file.

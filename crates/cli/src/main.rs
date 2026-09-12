@@ -124,6 +124,45 @@ async fn main() -> anyhow::Result<()> {
                 .map_err(|error| anyhow::anyhow!("Project validation failed: {error}"))?;
             println!("{}", serde_json::to_string_pretty(&project)?);
         }
+        Commands::RenderProject { input, output } => {
+            let project = dioxuscut_project::Project::load(input)
+                .map_err(|error| anyhow::anyhow!("Project validation failed: {error}"))?;
+            let props_path = std::env::temp_dir().join(format!(
+                "dioxuscut-project-props-{}.json",
+                std::process::id()
+            ));
+            std::fs::write(&props_path, serde_json::to_vec(&project.props)?)?;
+            let request = RenderRequest {
+                composition: Some(project.composition),
+                script: None,
+                props: Some(props_path.clone()),
+                output: output.clone(),
+                audio: vec![],
+                width: project.settings.width,
+                height: project.settings.height,
+                fps: project.settings.fps,
+                duration: project.settings.duration,
+                backend: match project.settings.backend {
+                    dioxuscut_project::BackendKind::Native => dioxuscut_cli::RenderBackend::Native,
+                    dioxuscut_project::BackendKind::Browser => {
+                        dioxuscut_cli::RenderBackend::Browser
+                    }
+                    dioxuscut_project::BackendKind::Gpu => dioxuscut_cli::RenderBackend::Gpu,
+                },
+                codec: dioxuscut_cli::RenderCodec::H264,
+                frame_start: 0,
+                frame_end: None,
+                timeout_seconds: None,
+                crf: 18,
+                preset: "fast".into(),
+                hw_accel: dioxuscut_rasterizer::HwAccel::Auto,
+                sandbox_roots: vec![],
+                permissive: true,
+            };
+            let result = dioxuscut_cli::execute_render_command(&request).await;
+            let _ = std::fs::remove_file(props_path);
+            result?;
+        }
         Commands::Probe { path } => {
             match dioxuscut_cli::get_video_metadata(path) {
                 Ok(meta) => {
