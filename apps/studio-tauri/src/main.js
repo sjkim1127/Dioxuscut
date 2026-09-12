@@ -83,6 +83,10 @@ export function registerComposition(id, render) {
   compositions.set(id, render);
 }
 
+export function listCompositions() {
+  return [...new Set(['three_preview', ...compositions.keys()])];
+}
+
 // Explicit frame input keeps this scene deterministic for future exports.
 export async function renderFrame({ composition = 'three_preview', frame: nextFrame, fps = 30, props: inputProps = {}, assets = [] }) {
   const props = inputProps && typeof inputProps === 'object' ? inputProps : {};
@@ -97,7 +101,7 @@ export async function renderFrame({ composition = 'three_preview', frame: nextFr
   document.querySelector('#frame').textContent = `frame ${nextFrame}`;
   document.querySelector('#protocol').textContent = `composition ${composition}`;
 }
-window.dioxuscut = { renderFrame, registerComposition };
+window.dioxuscut = { renderFrame, registerComposition, listCompositions };
 
 function resize() {
   const { width, height } = canvas.parentElement.getBoundingClientRect();

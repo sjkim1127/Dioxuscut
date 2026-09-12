@@ -80,7 +80,8 @@ export DIOXUSCUT_BROWSER_FRAME_TIMEOUT_MS=30000
 export DIOXUSCUT_BROWSER_FRAME_RETRIES=1
 ```
 
-The browser host exposes `window.dioxuscut.registerComposition(id, render)`;
+The browser host exposes `window.dioxuscut.registerComposition(id, render)` and
+`window.dioxuscut.listCompositions()`;
 Three.js or React Three Fiber adapters can register composition-specific frame
 functions without changing the Rust protocol. The function receives
 `{frame, fps, props}` and may return a Promise for asynchronous asset loading.

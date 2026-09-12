@@ -42,7 +42,8 @@ await page.goto(url, { waitUntil: 'networkidle' });
 await page.waitForFunction(() => typeof window.dioxuscut?.renderFrame === 'function', {
   timeout: frameTimeoutMs,
 });
-write({ type: 'ready', protocol: 1 });
+const compositions = await page.evaluate(() => window.dioxuscut.listCompositions?.() ?? []);
+write({ type: 'ready', protocol: 1, compositions });
 
 const rl = createInterface({ input: process.stdin, terminal: false });
 let queue = Promise.resolve();
