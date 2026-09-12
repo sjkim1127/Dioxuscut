@@ -50,7 +50,8 @@ export function registerComposition(id, render) {
 }
 
 // Explicit frame input keeps this scene deterministic for future exports.
-export function renderFrame({ composition = 'three_preview', frame: nextFrame, fps = 30, props = {} }) {
+export function renderFrame({ composition = 'three_preview', frame: nextFrame, fps = 30, props: inputProps = {} }) {
+  const props = inputProps && typeof inputProps === 'object' ? inputProps : {};
   const customRender = compositions.get(composition);
   if (customRender) return customRender({ frame: nextFrame, fps, props });
   frame = nextFrame;

@@ -60,7 +60,7 @@ impl BrowserFrameBackend {
             workers,
             next_worker: AtomicUsize::new(0),
             composition: Mutex::new(None),
-            props: Mutex::new(serde_json::Value::Null),
+            props: Mutex::new(serde_json::json!({})),
             cache: FrameCacheManager::default(),
         })
     }
