@@ -47,6 +47,7 @@ pub mod text_layout;
 pub mod tiny_skia_backend;
 mod video_cache;
 pub mod web;
+pub mod web_backend;
 #[cfg(feature = "gpu")]
 pub mod wgpu_backend;
 
@@ -80,6 +81,7 @@ pub use render::{
     RenderControl, RenderProgress, StillImageFormat, VideoCodec,
 };
 pub use web::{WebFrameRequest, WebFrameResponse, WebWorkerMessage, WEB_WORKER_PROTOCOL_VERSION};
+pub use web_backend::BrowserFrameBackend;
 
 pub use gif_cache::{GifFrame, GifFrameCache, LoopBehavior};
 pub use scene::{
