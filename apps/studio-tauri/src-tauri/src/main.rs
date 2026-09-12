@@ -62,6 +62,9 @@ fn start_render_job(
         store
             .try_update(&id, JobStatus::Preparing, 0)
             .map_err(|error| error.to_string())?;
+        store
+            .set_output(&id, &output)
+            .map_err(|error| error.to_string())?;
     }
     let state_jobs = Arc::clone(&state.jobs);
     let state_cancellations = Arc::clone(&state.cancellations);

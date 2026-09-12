@@ -98,6 +98,8 @@ pub struct RenderJob {
     pub status: JobStatus,
     pub completed_frames: u32,
     pub error: Option<String>,
+    #[serde(default)]
+    pub output: Option<String>,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -181,6 +183,7 @@ impl JobStore {
                 status: JobStatus::Queued,
                 completed_frames: 0,
                 error: None,
+                output: None,
             },
         );
         Ok(id)
@@ -190,6 +193,14 @@ impl JobStore {
     }
     pub fn list(&self) -> Vec<RenderJob> {
         self.jobs.values().cloned().collect()
+    }
+    pub fn set_output(&mut self, id: &str, output: impl Into<String>) -> Result<(), ProjectError> {
+        let job = self
+            .jobs
+            .get_mut(id)
+            .ok_or_else(|| ProjectError::JobNotFound(id.to_string()))?;
+        job.output = Some(output.into());
+        Ok(())
     }
     pub fn update(&mut self, id: &str, status: JobStatus, completed_frames: u32) -> bool {
         self.try_update(id, status, completed_frames).is_ok()
