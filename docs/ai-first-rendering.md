@@ -28,6 +28,15 @@ Schema is available at `schemas/dioxuscut-project-v1.schema.json`.
 
 The same `Project` model is shared by Dioxus, Tauri, and CLI integrations.
 
+Validate a project before submitting it:
+
+```sh
+dioxuscut validate-project project.dioxuscut.json
+```
+
+This performs the same strict Rust validation used by Tauri, including schema
+version, dimensions, timing, backend, and unknown-field checks.
+
 ## Job lifecycle
 
 1. Submit the project with `submit_project` and retain the returned job id.
@@ -55,3 +64,7 @@ Use concurrency greater than one only after measuring the target composition;
 Chromium startup and WebGL resource contention can make a larger pool slower.
 
 For a headless readiness check, `dioxuscut serve` exposes `GET /health` as JSON.
+
+For render automation, set `DIOXUSCUT_JSON=1`. Successful and failed `render`
+commands then emit one machine-readable result line on stdout. Human tracing
+remains on stderr, so an agent can parse stdout without log filtering.
