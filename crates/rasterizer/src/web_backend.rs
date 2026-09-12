@@ -168,6 +168,11 @@ impl BrowserFrameBackend {
         Ok(())
     }
 
+    /// Number of persistent browser workers available for frame rendering.
+    pub fn worker_count(&self) -> usize {
+        self.workers.len()
+    }
+
     /// Select the browser-side composition for subsequent frame requests.
     pub fn set_composition(&self, composition: impl Into<String>) -> Result<(), RasterError> {
         *self

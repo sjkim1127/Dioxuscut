@@ -1186,12 +1186,12 @@ pub fn render_web_to_ffmpeg_pipe_fallible(
     props: serde_json::Value,
 ) -> Result<(), RasterError> {
     backend.set_props(props)?;
-    // BrowserFrameBackend owns one ordered request/response worker. Rayon
-    // threads cannot increase throughput until a browser worker pool exists;
-    // avoid creating idle render threads and preserve request ordering.
+    // Match the shared streaming window to the persistent browser worker pool.
+    // Each worker serializes its own protocol requests, while distinct workers
+    // can render different frames concurrently like Remotion's pages.
     let serial_config;
     let config = if config.concurrency.is_none() {
-        serial_config = config.clone().with_concurrency(1);
+        serial_config = config.clone().with_concurrency(backend.worker_count());
         &serial_config
     } else {
         config
