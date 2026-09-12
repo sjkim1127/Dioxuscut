@@ -14,6 +14,36 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+fn project_render_codec(path: &std::path::Path) -> RenderCodec {
+    match path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "webm" => RenderCodec::Vp9,
+        "mov" => RenderCodec::ProRes,
+        "gif" => RenderCodec::Gif,
+        _ => RenderCodec::H264,
+    }
+}
+
+fn project_video_codec(path: &std::path::Path) -> VideoCodec {
+    match path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "webm" => VideoCodec::Vp9,
+        "mov" => VideoCodec::ProRes,
+        "gif" => VideoCodec::Gif,
+        _ => VideoCodec::H264,
+    }
+}
+
 struct AppState {
     jobs: Arc<Mutex<JobStore>>,
     cancellations: Arc<Mutex<HashMap<String, RenderCancellationToken>>>,
@@ -63,18 +93,19 @@ fn start_render_job(
                     serde_json::to_vec(&project.props).map_err(|e| e.to_string())?,
                 )
                 .map_err(|e| e.to_string())?;
+                let output_path = PathBuf::from(&output);
                 let request = RenderRequest {
                     composition: Some(project.composition.clone()),
                     script: None,
                     props: Some(props_path.clone()),
-                    output: PathBuf::from(output),
+                    output: output_path.clone(),
                     audio: vec![],
                     width: project.settings.width,
                     height: project.settings.height,
                     fps: project.settings.fps,
                     duration: project.settings.duration,
                     backend: RenderBackend::Native,
-                    codec: RenderCodec::H264,
+                    codec: project_render_codec(&output_path),
                     frame_start: 0,
                     frame_end: None,
                     timeout_seconds: None,
@@ -180,14 +211,15 @@ fn start_render_job(
                         );
                     }
                 });
+            let output_path = PathBuf::from(&output);
             let config = PipeConfig::new(
                 project.settings.width,
                 project.settings.height,
                 project.settings.fps,
                 project.settings.duration,
-                PathBuf::from(output),
+                output_path.clone(),
             )
-            .with_codec(VideoCodec::H264)
+            .with_codec(project_video_codec(&output_path))
             .with_control(control);
             render_web_to_ffmpeg_pipe_fallible(&backend, &config, project.props.clone())
                 .map_err(|error| error.to_string())?;
