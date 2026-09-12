@@ -754,10 +754,12 @@ fn parse_transform(value: &str) -> Option<Transform2D> {
                 translate = Some((x, y));
             }
             "translatex" => {
-                translate = Some((parse_px(args.first().copied()?)?, 0.0));
+                let x = parse_px(args.first().copied()?)?;
+                translate = Some((x, translate.map_or(0.0, |(_, y)| y)));
             }
             "translatey" => {
-                translate = Some((0.0, parse_px(args.first().copied()?)?));
+                let y = parse_px(args.first().copied()?)?;
+                translate = Some((translate.map_or(0.0, |(x, _)| x), y));
             }
             "scale" => {
                 let x = args.first()?.parse().ok()?;
@@ -765,10 +767,12 @@ fn parse_transform(value: &str) -> Option<Transform2D> {
                 scale = Some((x, y));
             }
             "scalex" => {
-                scale = Some((args.first()?.parse().ok()?, 1.0));
+                let x = args.first()?.parse().ok()?;
+                scale = Some((x, scale.map_or(1.0, |(_, y)| y)));
             }
             "scaley" => {
-                scale = Some((1.0, args.first()?.parse().ok()?));
+                let y = args.first()?.parse().ok()?;
+                scale = Some((scale.map_or(1.0, |(x, _)| x), y));
             }
             "rotate" => rotate = Some(args.first()?.strip_suffix("deg")?.parse().ok()?),
             _ => {}
@@ -928,8 +932,10 @@ mod tests {
 
     #[test]
     fn parses_axis_transform_functions() {
-        let stylesheet =
-            Stylesheet::parse(".hero { transform: translateX(12px) scaleY(0.5); }").unwrap();
+        let stylesheet = Stylesheet::parse(
+            ".hero { transform: translateX(12px) translateY(8px) scaleX(2) scaleY(0.5); }",
+        )
+        .unwrap();
         let mut element = NativeElement {
             tag: "div".into(),
             ..Default::default()
@@ -937,8 +943,8 @@ mod tests {
         element.attributes.insert("class".into(), "hero".into());
         let style = stylesheet.resolve(&element, None);
         assert_eq!(style.transform.tx, 12.0);
-        assert_eq!(style.transform.ty, 0.0);
-        assert_eq!(style.transform.scale_x, 1.0);
+        assert_eq!(style.transform.ty, 8.0);
+        assert_eq!(style.transform.scale_x, 2.0);
         assert_eq!(style.transform.scale_y, 0.5);
     }
 }
