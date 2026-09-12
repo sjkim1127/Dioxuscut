@@ -18,8 +18,8 @@ pub use scene_emitter::{
 };
 
 use dioxuscut_rasterizer::{
-    BlendMode, Color, GradientStop, MaskMode, Scene, SceneFilter, SceneNode, SceneShadow,
-    Transform2D,
+    AudioTrack, BlendMode, Color, GradientStop, MaskMode, Scene, SceneFilter, SceneNode,
+    SceneShadow, Transform2D,
 };
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -67,6 +67,17 @@ impl CompositionError {
 /// frames.
 pub trait PreparedComposition: Send + Sync {
     fn render(&self, frame: u32) -> Result<Scene, CompositionError>;
+
+    /// Return audio tracks for the complete render, when the composition has
+    /// an explicit timeline-level audio contract.
+    ///
+    /// `None` preserves the legacy behavior where the host derives tracks
+    /// from the first rendered scene. Implementations that can describe audio
+    /// independently of a frame may return `Some`, including tracks whose
+    /// timing is dynamic across the composition timeline.
+    fn audio_tracks(&self) -> Result<Option<Vec<AudioTrack>>, CompositionError> {
+        Ok(None)
+    }
 }
 
 /// General composition contract used by the registry.

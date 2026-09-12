@@ -1049,7 +1049,9 @@ pub async fn execute_render_command_with_registry_and_control(
     // Validate the first frame before starting FFmpeg. Dynamic compositions
     // therefore report syntax, type, and API errors without creating an output.
     let first_scene = prepared.render(0)?;
-    let mut audio_tracks = first_scene.audio_tracks();
+    let mut audio_tracks = prepared
+        .audio_tracks()?
+        .unwrap_or_else(|| first_scene.audio_tracks());
     audio_tracks.extend(
         request
             .audio
