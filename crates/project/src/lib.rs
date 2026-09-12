@@ -188,6 +188,9 @@ impl JobStore {
     pub fn get(&self, id: &str) -> Option<&RenderJob> {
         self.jobs.get(id)
     }
+    pub fn list(&self) -> Vec<RenderJob> {
+        self.jobs.values().cloned().collect()
+    }
     pub fn update(&mut self, id: &str, status: JobStatus, completed_frames: u32) -> bool {
         self.try_update(id, status, completed_frames).is_ok()
     }
@@ -360,5 +363,17 @@ mod tests {
         let job = store.get(&id).unwrap();
         assert_eq!(job.status, JobStatus::Cancelled);
         assert_eq!(job.completed_frames, 12);
+    }
+
+    #[test]
+    fn list_returns_jobs_in_submission_order() {
+        let mut store = JobStore::default();
+        let first = store.submit(project()).unwrap();
+        let second = store.submit(project()).unwrap();
+        let jobs = store.list();
+        assert_eq!(
+            jobs.iter().map(|job| job.id.as_str()).collect::<Vec<_>>(),
+            vec![first.as_str(), second.as_str()]
+        );
     }
 }

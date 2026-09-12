@@ -42,6 +42,15 @@ fn get_render_job(
 }
 
 #[tauri::command]
+fn list_render_jobs(state: tauri::State<'_, AppState>) -> Result<Vec<RenderJob>, String> {
+    Ok(state
+        .0
+        .lock()
+        .map_err(|_| "job store lock poisoned".to_string())?
+        .list())
+}
+
+#[tauri::command]
 fn update_render_job(
     state: tauri::State<'_, AppState>,
     id: String,
@@ -124,6 +133,7 @@ fn main() {
             load_project,
             save_project,
             get_render_job,
+            list_render_jobs,
             update_render_job,
             fail_render_job,
             cancel_render_job
