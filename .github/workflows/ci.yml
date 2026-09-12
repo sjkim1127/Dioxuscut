@@ -120,11 +120,15 @@ jobs:
         run: cargo test --locked --workspace --exclude dioxuscut-python
 
       # FFmpeg-backed tests share process-level environment and temporary
-      # resources on Windows. Run the same suite serially there so one test
-      # cannot strand a sibling process while preserving parallelism on Unix.
-      - name: Run All Workspace Tests (Windows, serial)
+      # resources on Windows. Keep the same coverage serial, but split the
+      # targets so a stalled integration test cannot hide unit-test progress.
+      - name: Run Workspace Unit Tests (Windows, serial)
         if: runner.os == 'Windows'
-        run: cargo test --locked --workspace --exclude dioxuscut-python -- --test-threads=1
+        run: cargo test --locked --workspace --exclude dioxuscut-python --lib --bins -- --test-threads=1
+
+      - name: Run Workspace Integration Tests (Windows, serial)
+        if: runner.os == 'Windows'
+        run: cargo test --locked --workspace --exclude dioxuscut-python --tests -- --test-threads=1
 
       - name: Test GPU scene compilation without device initialization
         run: 'cargo test --locked -p dioxuscut-rasterizer --features gpu support_tests::'
