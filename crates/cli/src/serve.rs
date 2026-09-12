@@ -30,7 +30,7 @@ use axum::{
     },
     response::{Html, IntoResponse},
     routing::get,
-    Router,
+    Json, Router,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use dioxuscut_rasterizer::{MediaSecurityPolicy, TinySkiaBackend};
@@ -112,6 +112,7 @@ pub async fn run(config: ServeConfig) -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/", get(index_handler))
+        .route("/health", get(health_handler))
         .route("/ws", get(ws_handler))
         .with_state(state);
 
@@ -126,6 +127,19 @@ pub async fn run(config: ServeConfig) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+async fn health_handler(State(state): State<AppState>) -> impl IntoResponse {
+    Json(serde_json::json!({
+        "ok": true,
+        "service": "dioxuscut-serve",
+        "protocol": 1,
+        "composition": state.config.script.display().to_string(),
+        "frame": state.config.default_frame,
+        "width": state.config.width,
+        "height": state.config.height,
+        "fps": state.config.fps,
+    }))
 }
 
 // ──────────────────────────────────────────────────────────────
