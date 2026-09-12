@@ -253,6 +253,15 @@ impl BrowserFrameBackend {
             .unwrap_or_default()
     }
 
+    /// Configure alpha-preserving PNG screenshots for this browser backend.
+    ///
+    /// This is equivalent to setting `DIOXUSCUT_BROWSER_TRANSPARENT=1`, but is
+    /// preferable for embedders that do not use process-wide environment state.
+    pub fn with_transparent(mut self, transparent: bool) -> Self {
+        self.transparent = transparent;
+        self
+    }
+
     /// Configure assets that browser compositions should preload before frames.
     pub fn set_assets(&self, assets: Vec<String>) -> Result<(), RasterError> {
         *self
