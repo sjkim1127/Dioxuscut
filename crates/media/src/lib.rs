@@ -28,5 +28,5 @@ pub use metadata::{
     get_audio_metadata, get_video_metadata, static_file, AudioMetadata, MediaMetadataError,
     VideoMetadata,
 };
-pub use scene::{SceneAudio, SceneImage, SceneVideo};
+pub use scene::{SceneAudio, SceneGif, SceneImage, SceneVideo};
 pub use video::{Video, VideoProps};

@@ -2,7 +2,9 @@
 
 use crate::img::ImageFit;
 use dioxuscut_composition::{CompositionError, SceneEmitter, SceneFrameContext};
-use dioxuscut_rasterizer::{AudioTrack, ImageFit as SceneImageFit, Scene, SceneNode};
+use dioxuscut_rasterizer::{
+    gif_cache::LoopBehavior, AudioTrack, ImageFit as SceneImageFit, Scene, SceneNode,
+};
 use serde_json::Value;
 
 impl From<ImageFit> for SceneImageFit {
@@ -56,6 +58,73 @@ impl SceneEmitter for SceneImage {
             y: self.y,
             w: self.width.max(0.0),
             h: self.height.max(0.0),
+            fit: self.fit.into(),
+            opacity: self.opacity.clamp(0.0, 1.0),
+        });
+        Ok(())
+    }
+}
+
+/// Native counterpart of [`crate::Gif`] / Remotion's `AnimatedImage`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SceneGif {
+    pub src: String,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub fit: ImageFit,
+    pub opacity: f32,
+    pub timeline_start: f64,
+    pub duration: Option<f64>,
+    pub playback_rate: f32,
+    pub loop_behavior: LoopBehavior,
+}
+
+impl SceneGif {
+    pub fn new(src: impl Into<String>, width: f32, height: f32) -> Self {
+        Self {
+            src: src.into(),
+            x: 0.0,
+            y: 0.0,
+            width,
+            height,
+            fit: ImageFit::Cover,
+            opacity: 1.0,
+            timeline_start: 0.0,
+            duration: None,
+            playback_rate: 1.0,
+            loop_behavior: LoopBehavior::Loop,
+        }
+    }
+}
+
+impl SceneEmitter for SceneGif {
+    fn emit(
+        &self,
+        context: SceneFrameContext,
+        _props: &Value,
+        scene: &mut Scene,
+    ) -> Result<(), CompositionError> {
+        let elapsed = context.time_secs() - self.timeline_start;
+        if elapsed < 0.0 || self.duration.is_some_and(|duration| elapsed >= duration) {
+            return Ok(());
+        }
+        if !self.playback_rate.is_finite() || self.playback_rate <= 0.0 {
+            return Err(CompositionError::render(
+                context.global_frame,
+                "GIF playback rate must be finite and greater than zero",
+            ));
+        }
+        scene.push(SceneNode::Gif {
+            src: self.src.clone(),
+            time: elapsed,
+            x: self.x,
+            y: self.y,
+            w: self.width.max(0.0),
+            h: self.height.max(0.0),
+            playback_rate: self.playback_rate,
+            loop_behavior: self.loop_behavior,
             fit: self.fit.into(),
             opacity: self.opacity.clamp(0.0, 1.0),
         });
@@ -224,5 +293,30 @@ mod tests {
             )
             .unwrap();
         assert_eq!(audio_scene.audio_tracks()[0].src, "voice.wav");
+    }
+
+    #[test]
+    fn gif_emitter_applies_timeline_and_playback_contract() {
+        let mut gif = SceneGif::new("clip.gif", 100.0, 50.0);
+        gif.timeline_start = 1.0;
+        gif.duration = Some(2.0);
+        gif.playback_rate = 1.5;
+        let composition = SceneEmitterComposition::new("gif", gif);
+        let active = composition.render(20, &Value::Null, context()).unwrap();
+        assert!(matches!(
+            &active.nodes[0],
+            SceneNode::Gif { time, playback_rate, .. }
+                if (*time - 1.0).abs() < f64::EPSILON && (*playback_rate - 1.5).abs() < f32::EPSILON
+        ));
+        assert!(composition
+            .render(5, &Value::Null, context())
+            .unwrap()
+            .nodes
+            .is_empty());
+        assert!(composition
+            .render(30, &Value::Null, context())
+            .unwrap()
+            .nodes
+            .is_empty());
     }
 }
