@@ -6,9 +6,9 @@ use image::RgbaImage;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
-#[derive(Default)]
 pub(crate) struct ImageCache {
     decoded: Mutex<ImageCacheState>,
+    max_bytes: usize,
 }
 
 const MAX_DATA_URI_BYTES: usize = 32 * 1024 * 1024;
@@ -29,7 +29,7 @@ impl ImageCacheState {
         Some(image)
     }
 
-    fn insert(&mut self, key: String, image: Arc<RgbaImage>) -> Arc<RgbaImage> {
+    fn insert(&mut self, key: String, image: Arc<RgbaImage>, max_bytes: usize) -> Arc<RgbaImage> {
         if let Some(existing) = self.get(&key) {
             return existing;
         }
@@ -37,7 +37,7 @@ impl ImageCacheState {
         self.images.insert(key.clone(), Arc::clone(&image));
         self.lru.push_back(key);
         self.bytes = self.bytes.saturating_add(size);
-        while self.bytes > MAX_CACHE_BYTES {
+        while self.bytes > max_bytes {
             let Some(oldest) = self.lru.pop_front() else {
                 break;
             };
@@ -49,7 +49,20 @@ impl ImageCacheState {
     }
 }
 
+impl Default for ImageCache {
+    fn default() -> Self {
+        Self::with_max_bytes(MAX_CACHE_BYTES)
+    }
+}
+
 impl ImageCache {
+    pub(crate) fn with_max_bytes(max_bytes: usize) -> Self {
+        Self {
+            decoded: Mutex::new(ImageCacheState::default()),
+            max_bytes: max_bytes.max(1),
+        }
+    }
+
     #[allow(dead_code)]
     pub(crate) fn load(&self, src: &str) -> Result<Arc<RgbaImage>, RasterError> {
         self.load_with_policy(src, &crate::security::MediaSecurityPolicy::default())
@@ -91,7 +104,7 @@ impl ImageCache {
             .to_rgba8();
         let decoded = Arc::new(decoded);
         let mut cache = self.decoded.lock().expect("image cache lock poisoned");
-        Ok(cache.insert(key, decoded))
+        Ok(cache.insert(key, decoded, self.max_bytes))
     }
 
     fn load_data_uri(&self, src: &str, data: &str) -> Result<Arc<RgbaImage>, RasterError> {
@@ -156,7 +169,7 @@ impl ImageCache {
         .to_rgba8();
         let decoded = Arc::new(decoded);
         let mut cache = self.decoded.lock().expect("image cache lock poisoned");
-        Ok(cache.insert(src.to_string(), decoded))
+        Ok(cache.insert(src.to_string(), decoded, self.max_bytes))
     }
 
     #[cfg(test)]
