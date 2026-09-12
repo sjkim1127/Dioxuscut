@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::io::Read;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -416,7 +417,12 @@ impl Project {
                     reason: format!("remote asset exceeds the {max_bytes} byte limit"),
                 });
             }
-            let bytes = response.bytes().map_err(|error| ProjectError::AssetRead {
+            let mut bytes = Vec::with_capacity(max_bytes.min(1024 * 1024));
+            std::io::Read::read_to_end(
+                &mut response.take((max_bytes as u64).saturating_add(1)),
+                &mut bytes,
+            )
+            .map_err(|error| ProjectError::AssetRead {
                 asset: asset.id.clone(),
                 reason: error.to_string(),
             })?;
