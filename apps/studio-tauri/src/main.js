@@ -134,6 +134,41 @@ function renderDefaultFrame({ composition, frame: nextFrame, fps, props }) {
   document.querySelector('#protocol').textContent = `composition ${composition}`;
 }
 
+async function syncMediaElements({ frame: nextFrame, fps }) {
+  const timelineTime = nextFrame / Math.max(fps, 1);
+  const pendingSeeks = [];
+  for (const media of document.querySelectorAll('video, audio')) {
+    const start = Number(media.dataset.timelineStart ?? 0);
+    const duration = media.dataset.duration === undefined
+      ? undefined
+      : Number(media.dataset.duration);
+    const end = duration === undefined ? undefined : start + duration;
+    const active = timelineTime >= start && (end === undefined || timelineTime < end);
+    media.style.visibility = active ? '' : 'hidden';
+    if (!active) continue;
+
+    const explicitTime = media.dataset.time ?? media.dataset.remotionSeek;
+    const time = explicitTime === undefined
+      ? undefined
+      : Number(explicitTime);
+    if (Number.isFinite(time) && Math.abs(media.currentTime - time) > 1e-4) {
+      media.currentTime = Math.max(0, time);
+      pendingSeeks.push(new Promise((resolve) => {
+        const done = () => { media.removeEventListener('seeked', done); resolve(); };
+        media.addEventListener('seeked', done, { once: true });
+        setTimeout(done, 1000);
+      }));
+    }
+    const volume = Number(media.dataset.volume ?? media.dataset.remotionVolume);
+    if (Number.isFinite(volume)) media.volume = Math.max(0, Math.min(1, volume));
+    const rate = Number(media.dataset.playbackRate ?? media.dataset.remotionPlaybackRate);
+    if (Number.isFinite(rate) && rate > 0) media.playbackRate = rate;
+    media.loop = media.hasAttribute('loop');
+    media.pause();
+  }
+  await Promise.all(pendingSeeks);
+}
+
 export async function renderFrame({ composition = 'three_preview', frame: nextFrame, fps = 30, props: inputProps = {}, assets = [], timeline = [] }) {
   const props = inputProps && typeof inputProps === 'object' ? inputProps : {};
   await preloadAssets(assets);
@@ -154,16 +189,19 @@ export async function renderFrame({ composition = 'three_preview', frame: nextFr
         assets,
       });
     }
+    await syncMediaElements({ frame: nextFrame, fps });
     await waitForRenderGates();
     return;
   }
   const customRender = compositions.get(composition);
   if (customRender) {
     const result = await customRender({ frame: nextFrame, fps, props, assets });
+    await syncMediaElements({ frame: nextFrame, fps });
     await waitForRenderGates();
     return result;
   }
   const result = renderDefaultFrame({ composition, frame: nextFrame, fps, props });
+  await syncMediaElements({ frame: nextFrame, fps });
   await waitForRenderGates();
   return result;
 }
