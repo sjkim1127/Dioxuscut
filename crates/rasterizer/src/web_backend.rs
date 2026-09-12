@@ -46,6 +46,7 @@ pub struct BrowserFrameBackend {
     image_format: Option<String>,
     jpeg_quality: Option<u8>,
     transparent: bool,
+    transport_retries: usize,
     props: Mutex<serde_json::Value>,
     cache: FrameCacheManager,
 }
@@ -109,6 +110,7 @@ impl BrowserFrameBackend {
                         "1" | "true" | "yes"
                     )
                 }),
+            transport_retries: 1,
             props: Mutex::new(serde_json::json!({})),
             cache: FrameCacheManager::default(),
         })
@@ -283,6 +285,23 @@ impl BrowserFrameBackend {
         self
     }
 
+    /// Configure how many times a failed browser transport request is retried.
+    /// A retry restarts the affected worker before resending the frame.
+    pub fn with_transport_retries(mut self, retries: usize) -> Self {
+        self.transport_retries = retries;
+        self
+    }
+
+    /// Configure the per-frame browser worker response timeout.
+    pub fn with_frame_timeout(mut self, timeout: Duration) -> Self {
+        if !timeout.is_zero() {
+            for worker in &mut self.workers {
+                worker.timeout = timeout;
+            }
+        }
+        self
+    }
+
     /// Configure the decoded browser-frame cache budget in bytes.
     ///
     /// The default is 512 MiB. Embedders can lower it when the browser worker
@@ -375,24 +394,39 @@ impl BrowserFrameBackend {
             .request
             .lock()
             .map_err(|_| RasterError::Init("browser worker request lock poisoned".into()))?;
-        let line = match worker.request_line(&encoded) {
-            Ok(line) => line,
-            Err(first_error) => {
-                tracing::warn!(frame = request.frame, error = %first_error, "browser worker transport failed; restarting");
-                worker
-                    .restart()
-                    .map_err(|restart_error| RasterError::Frame {
-                        frame: request.frame,
-                        reason: format!("{first_error}; worker restart failed: {restart_error}"),
-                    })?;
-                worker
-                    .request_line(&encoded)
-                    .map_err(|retry_error| RasterError::Frame {
-                        frame: request.frame,
-                        reason: format!("browser worker retry failed: {retry_error}"),
-                    })?
+        let mut line = None;
+        let mut last_error = None;
+        for attempt in 0..=self.transport_retries {
+            match worker.request_line(&encoded) {
+                Ok(response) => {
+                    line = Some(response);
+                    break;
+                }
+                Err(error) if attempt < self.transport_retries => {
+                    tracing::warn!(
+                        frame = request.frame,
+                        attempt = attempt + 1,
+                        error = %error,
+                        "browser worker transport failed; restarting"
+                    );
+                    worker
+                        .restart()
+                        .map_err(|restart_error| RasterError::Frame {
+                            frame: request.frame,
+                            reason: format!("{error}; worker restart failed: {restart_error}"),
+                        })?;
+                    last_error = Some(error);
+                }
+                Err(error) => last_error = Some(error),
             }
-        };
+        }
+        let line = line.ok_or_else(|| RasterError::Frame {
+            frame: request.frame,
+            reason: format!(
+                "browser worker transport failed: {}",
+                last_error.expect("retry loop records an error")
+            ),
+        })?;
         tracing::debug!(frame = request.frame, "browser frame request sent");
         tracing::debug!(
             frame = request.frame,
@@ -584,9 +618,13 @@ mod tests {
             .unwrap()
             .with_image_format("JPEG")
             .with_jpeg_quality(80)
+            .with_transport_retries(2)
+            .with_frame_timeout(Duration::from_millis(500))
             .with_transparent(true);
         assert_eq!(backend.image_format.as_deref(), Some("jpeg"));
         assert_eq!(backend.jpeg_quality, Some(80));
+        assert_eq!(backend.transport_retries, 2);
+        assert_eq!(backend.workers[0].timeout, Duration::from_millis(500));
         assert!(backend.transparent);
         let image = backend
             .render_web_frame(&WebFrameRequest {
