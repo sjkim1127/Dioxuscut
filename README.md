@@ -156,9 +156,11 @@ output.video(x, y, width, height, "clip.mp4", source_time, "cover", 1.0, true); 
 output.audio("clip.mp4", source_offset, timeline_offset, duration, volume, playback_rate, looped);
 ```
 
-An audio `duration` of `0.0` means the remainder of the composition. Audio nodes
-are collected from frame zero, so their configuration must remain static during
-a render. See [`examples/hello.rhai`](examples/hello.rhai) for the basic scene API.
+An audio `duration` of `0.0` means the remainder of the composition. For a
+native render, explicit render-level audio should be returned through
+`PreparedComposition::audio_tracks()`; otherwise the runtime uses the first
+rendered scene as a legacy fallback. See [`examples/hello.rhai`](examples/hello.rhai)
+for the basic scene API.
 
 The runtime disables module imports and limits operations, call depth,
 expression depth, variables, functions, strings, arrays, and maps. It does not

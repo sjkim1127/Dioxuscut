@@ -23,7 +23,11 @@ Schema is available at `schemas/dioxuscut-project-v1.schema.json`.
     "preset": "fast",
     "concurrency": 4,
     "frame_step": 1,
-    "backend": "browser"
+    "backend": "browser",
+    "browser_image_format": "jpeg",
+    "browser_jpeg_quality": 90,
+    "browser_frame_timeout_ms": 30000,
+    "browser_transport_retries": 1
   },
   "props": { "color": "#6c63ff" },
   "assets": [
@@ -39,6 +43,10 @@ honors the project backend (`native`, `gpu`, or `browser`) instead of replacing
 it with a host-specific default.
 Set `settings.concurrency` to a positive worker count when a project needs
 reproducible parallelism; omit it for host-selected defaults.
+Browser projects may also set `browser_image_format` to `png` or `jpeg`,
+optionally configure JPEG quality from 1 to 100, and set a positive worker
+response timeout and transport retry count. These settings are applied by
+Tauri's embedded Chromium backend and validated before submission.
 
 Discover Native composition IDs without starting a UI:
 
