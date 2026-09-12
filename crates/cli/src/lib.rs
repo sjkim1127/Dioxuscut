@@ -28,6 +28,40 @@ struct BrowserComposition {
     id: String,
 }
 
+#[cfg(test)]
+mod project_timeline_tests {
+    use super::*;
+
+    #[test]
+    fn clips_use_local_frames_only_when_active() {
+        let timeline = ProjectTimelineComposition {
+            id: "timeline".into(),
+            clips: vec![Clip {
+                id: "clip".into(),
+                composition: "HelloWorld".into(),
+                start: 2,
+                duration: 2,
+                props: serde_json::json!({}),
+            }],
+        };
+        let prepared = timeline
+            .prepare(
+                &serde_json::json!({}),
+                NativeCompositionContext {
+                    width: 320,
+                    height: 240,
+                    fps: 30.0,
+                    duration_in_frames: 5,
+                },
+            )
+            .expect("timeline prepares");
+        assert!(prepared.render(1).expect("inactive frame").nodes.is_empty());
+        assert!(!prepared.render(2).expect("active frame").nodes.is_empty());
+        assert!(!prepared.render(3).expect("active frame").nodes.is_empty());
+        assert!(prepared.render(4).expect("after clip").nodes.is_empty());
+    }
+}
+
 struct BrowserPreparedComposition;
 
 struct ProjectTimelineComposition {
