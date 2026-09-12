@@ -73,11 +73,12 @@ all product features, browser startup, or compile/bundle time.
 
 ## Interpretation
 
-The measurements were taken on an Apple M4 Pro. The first lossless PNG render
-batch measured a 2.192s Dioxuscut median versus 11.041s for Remotion (5.04x).
-See the JSON reports for all repetitions and later batches; host load and warm
-system caches can materially change absolute timings. Use fresh measurements on
-the target machine when setting a production latency budget.
+The currently recorded lossless PNG batch (`render-png.json`) was taken on an
+Apple M4 Pro and measured a 0.543s Dioxuscut median versus 10.125s for Remotion
+(18.66x). This file contains one measured sample per engine, so it is a
+directional snapshot rather than a production latency budget. Earlier batches
+in this repository report different absolute timings; always use a fresh run
+on the target machine when making a performance claim.
 
 This scene does not exercise text shaping, media decoding, audio, masks, or
 complex filters. Extend the paired scenes and output gates before making speed
