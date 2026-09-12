@@ -243,6 +243,37 @@ async function syncLottieElements({ frame: nextFrame, fps }) {
   }));
 }
 
+async function syncCanvasImages(nextFrame) {
+  const elements = document.querySelectorAll('[data-dioxuscut-canvas-image]');
+  await Promise.all([...elements].map(async (element) => {
+    const source = element.dataset.src;
+    if (!source) return;
+    const asset = await (preloadedAssets.get(source) ?? preloadAssets([source]).then(() => preloadedAssets.get(source)));
+    const drawable = await asset;
+    const width = Number(element.getAttribute('width')) || element.clientWidth || drawable.videoWidth || drawable.naturalWidth || 1;
+    const height = Number(element.getAttribute('height')) || element.clientHeight || drawable.videoHeight || drawable.naturalHeight || 1;
+    if (element.width !== width) element.width = width;
+    if (element.height !== height) element.height = height;
+    const context = element.getContext('2d');
+    if (!context) return;
+    context.clearRect(0, 0, width, height);
+    const sourceWidth = drawable.videoWidth || drawable.naturalWidth || drawable.width || width;
+    const sourceHeight = drawable.videoHeight || drawable.naturalHeight || drawable.height || height;
+    const fit = element.dataset.fit ?? 'cover';
+    const scale = fit === 'fill'
+      ? { x: width / sourceWidth, y: height / sourceHeight }
+      : fit === 'contain' || fit === 'scale-down'
+        ? { x: Math.min(width / sourceWidth, height / sourceHeight), y: Math.min(width / sourceWidth, height / sourceHeight) }
+        : fit === 'none'
+          ? { x: 1, y: 1 }
+          : { x: Math.max(width / sourceWidth, height / sourceHeight), y: Math.max(width / sourceWidth, height / sourceHeight) };
+    const drawWidth = sourceWidth * scale.x;
+    const drawHeight = sourceHeight * scale.y;
+    context.drawImage(drawable, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
+    element.dataset.frame = String(nextFrame);
+  }));
+}
+
 export async function renderFrame({ composition = 'three_preview', frame: nextFrame, fps = 30, props: inputProps = {}, assets = [], timeline = [] }) {
   const props = inputProps && typeof inputProps === 'object' ? inputProps : {};
   // A cancelled gate belongs to the current frame only. Reset it before the
@@ -269,6 +300,7 @@ export async function renderFrame({ composition = 'three_preview', frame: nextFr
     }
     await syncMediaElements({ frame: nextFrame, fps });
     await syncLottieElements({ frame: nextFrame, fps });
+    await syncCanvasImages(nextFrame);
     await waitForRenderGates();
     return;
   }
@@ -277,12 +309,14 @@ export async function renderFrame({ composition = 'three_preview', frame: nextFr
     const result = await customRender({ frame: nextFrame, fps, props, assets });
     await syncMediaElements({ frame: nextFrame, fps });
     await syncLottieElements({ frame: nextFrame, fps });
+    await syncCanvasImages(nextFrame);
     await waitForRenderGates();
     return result;
   }
   const result = renderDefaultFrame({ composition, frame: nextFrame, fps, props });
   await syncMediaElements({ frame: nextFrame, fps });
   await syncLottieElements({ frame: nextFrame, fps });
+  await syncCanvasImages(nextFrame);
   await waitForRenderGates();
   return result;
 }
