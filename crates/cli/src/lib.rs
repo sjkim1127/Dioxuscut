@@ -1055,6 +1055,7 @@ pub async fn execute_render_command_with_registry_and_control(
             .iter()
             .map(|path| dioxuscut_rasterizer::AudioTrack::new(path.to_string_lossy().into_owned())),
     );
+    let first_scene_cache = std::sync::Arc::new(std::sync::Mutex::new(Some(first_scene)));
 
     tracing::info!(
         composition = composition.id(),
@@ -1081,6 +1082,7 @@ pub async fn execute_render_command_with_registry_and_control(
                 )
                 .with_security_policy(security_policy.clone());
             if let Some(format) = request.codec.still_format() {
+                let first_scene = std::sync::Arc::clone(&first_scene_cache);
                 render_still_fallible_scaled(
                     &rasterizer,
                     request.width,
@@ -1091,9 +1093,20 @@ pub async fn execute_render_command_with_registry_and_control(
                     format,
                     &control,
                     request.scale,
-                    |frame| prepared.render(frame),
+                    |frame| {
+                        if frame == 0 {
+                            let mut cached = first_scene
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                            if let Some(scene) = cached.take() {
+                                return Ok(scene);
+                            }
+                        }
+                        prepared.render(frame)
+                    },
                 )?;
             } else {
+                let first_scene = std::sync::Arc::clone(&first_scene_cache);
                 let pipe_config = PipeConfig::new(
                     request.width,
                     request.height,
@@ -1115,7 +1128,15 @@ pub async fn execute_render_command_with_registry_and_control(
                 .with_audio_tracks(audio_tracks.clone())
                 .with_control(control.clone())
                 .with_security_policy(security_policy.clone());
-                render_to_ffmpeg_pipe_fallible(&rasterizer, &pipe_config, |frame| {
+                render_to_ffmpeg_pipe_fallible(&rasterizer, &pipe_config, move |frame| {
+                    if frame == 0 {
+                        let mut cached = first_scene
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        if let Some(scene) = cached.take() {
+                            return Ok(scene);
+                        }
+                    }
                     prepared.render(frame)
                 })?;
             }
@@ -1212,6 +1233,7 @@ pub async fn execute_render_command_with_registry_and_control(
                             .unwrap_or(dioxuscut_rasterizer::DEFAULT_IMAGE_CACHE_BYTES),
                     );
                 if let Some(format) = request.codec.still_format() {
+                    let first_scene = std::sync::Arc::clone(&first_scene_cache);
                     render_still_fallible_scaled(
                         &rasterizer,
                         request.width,
@@ -1222,9 +1244,20 @@ pub async fn execute_render_command_with_registry_and_control(
                         format,
                         &control,
                         request.scale,
-                        |frame| prepared.render(frame),
+                        |frame| {
+                            if frame == 0 {
+                                let mut cached = first_scene
+                                    .lock()
+                                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                                if let Some(scene) = cached.take() {
+                                    return Ok(scene);
+                                }
+                            }
+                            prepared.render(frame)
+                        },
                     )?;
                 } else {
+                    let first_scene = std::sync::Arc::clone(&first_scene_cache);
                     let pipe_config = PipeConfig::new(
                         request.width,
                         request.height,
@@ -1246,7 +1279,15 @@ pub async fn execute_render_command_with_registry_and_control(
                     .with_audio_tracks(audio_tracks.clone())
                     .with_control(control.clone())
                     .with_security_policy(security_policy.clone());
-                    render_to_ffmpeg_pipe_fallible(&rasterizer, &pipe_config, |frame| {
+                    render_to_ffmpeg_pipe_fallible(&rasterizer, &pipe_config, move |frame| {
+                        if frame == 0 {
+                            let mut cached = first_scene
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                            if let Some(scene) = cached.take() {
+                                return Ok(scene);
+                            }
+                        }
                         prepared.render(frame)
                     })?;
                 }
