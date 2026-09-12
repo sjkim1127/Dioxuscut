@@ -43,11 +43,11 @@ struct ProjectTimelinePrepared<'a> {
 impl dioxuscut_composition::PreparedComposition for ProjectTimelinePrepared<'_> {
     fn render(&self, frame: u32) -> Result<dioxuscut_rasterizer::Scene, CompositionError> {
         let mut scene = dioxuscut_rasterizer::Scene::new();
+        let registry = built_in_registry();
         for clip in &self.composition.clips {
             if frame < clip.start || frame >= clip.start.saturating_add(clip.duration) {
                 continue;
             }
-            let registry = built_in_registry();
             let composition = registry
                 .get(&clip.composition)
                 .map_err(|error| CompositionError::render(frame, error.to_string()))?;
