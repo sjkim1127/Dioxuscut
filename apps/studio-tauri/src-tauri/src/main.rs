@@ -93,6 +93,14 @@ fn start_render_job(
             .project
     };
     let backend_kind = project.settings.backend;
+    let render_frame_start = project.settings.frame_start.unwrap_or(0);
+    let render_frame_end = project
+        .settings
+        .frame_end
+        .unwrap_or(project.settings.duration.saturating_sub(1));
+    let render_frame_count = render_frame_end
+        .saturating_sub(render_frame_start)
+        .saturating_add(1);
     if backend_kind == dioxuscut_project::BackendKind::Native {
         let state_jobs = Arc::clone(&state.jobs);
         let state_cancellations = Arc::clone(&state.cancellations);
@@ -165,7 +173,7 @@ fn start_render_job(
                     }
                 }
             } else if let Ok(mut store) = state_jobs.lock() {
-                let frames = project.settings.duration;
+                let frames = render_frame_count;
                 let _ = store.try_update(&id, JobStatus::Rendering, frames);
                 let _ = store.try_update(&id, JobStatus::Encoding, frames);
                 let _ = store.try_update(&id, JobStatus::Completed, frames);
@@ -252,7 +260,7 @@ fn start_render_job(
                     project.settings.width,
                     project.settings.height,
                     project.settings.fps,
-                    0,
+                    render_frame_start,
                     &output_path,
                     format,
                     &control,
@@ -264,10 +272,11 @@ fn start_render_job(
                     project.settings.width,
                     project.settings.height,
                     project.settings.fps,
-                    project.settings.duration,
+                    render_frame_count,
                     output_path.clone(),
                 )
                 .with_codec(project_video_codec(&output_path))
+                .with_frame_start(render_frame_start)
                 .with_control(control);
                 render_web_to_ffmpeg_pipe_fallible(&backend, &config, project.props.clone())
                     .map_err(|error| error.to_string())?;
@@ -276,10 +285,10 @@ fn start_render_job(
                 .lock()
                 .map_err(|_| "job store lock poisoned".to_string())?;
             store
-                .try_update(&id, JobStatus::Encoding, project.settings.duration)
+                .try_update(&id, JobStatus::Encoding, render_frame_count)
                 .map_err(|error| error.to_string())?;
             store
-                .try_update(&id, JobStatus::Completed, project.settings.duration)
+                .try_update(&id, JobStatus::Completed, render_frame_count)
                 .map_err(|error| error.to_string())
         })();
         if let Ok(mut cancellations) = state_cancellations.lock() {
