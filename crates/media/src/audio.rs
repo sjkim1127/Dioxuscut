@@ -23,6 +23,9 @@ pub struct AudioProps {
     /// Mute the audio (useful during preview).
     #[props(default = false)]
     pub muted: bool,
+    /// Repeat the source when it reaches its end.
+    #[props(default = false)]
+    pub looped: bool,
 }
 
 /// An audio element synchronized to the composition timeline.
@@ -38,6 +41,7 @@ pub fn Audio(props: AudioProps) -> Element {
         audio {
             src: "{props.src}",
             muted: props.muted,
+            r#loop: props.looped,
             // Native VDOM emission consumes these canonical timeline fields.
             "data-start-from": "{props.start_from}",
             "data-timeline-start": "0",

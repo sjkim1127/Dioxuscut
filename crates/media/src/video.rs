@@ -26,6 +26,9 @@ pub struct VideoProps {
     /// Mute the video.
     #[props(default = false)]
     pub muted: bool,
+    /// Repeat the source when it reaches its end.
+    #[props(default = false)]
+    pub looped: bool,
 }
 
 /// A video element synchronized to the composition timeline.
@@ -52,6 +55,7 @@ pub fn Video(props: VideoProps) -> Element {
             src: "{props.src}",
             style: "{style}",
             muted: props.muted,
+            r#loop: props.looped,
             // `data-time` is the native Scene contract; retain Remotion's
             // metadata for browser-side consumers as well.
             "data-time": "{time_in_seconds}",
