@@ -135,7 +135,10 @@ export function registerComposition(id, render) {
 export async function getVideoTexture(source, options = {}) {
   if (typeof source !== 'string' || !source) throw new TypeError('getVideoTexture expects a source URL');
   const cached = videoTextureCache.get(source);
-  if (cached) return cached.texture;
+  if (cached) {
+    seekVideoTexture(cached.video, options);
+    return cached.texture;
+  }
   const video = document.createElement('video');
   video.preload = 'auto';
   video.muted = options.muted ?? true;
@@ -150,7 +153,17 @@ export async function getVideoTexture(source, options = {}) {
   const texture = new THREE.VideoTexture(video);
   texture.colorSpace = THREE.SRGBColorSpace;
   videoTextureCache.set(source, { video, texture });
+  seekVideoTexture(video, options);
   return texture;
+}
+
+function seekVideoTexture(video, options) {
+  const frame = Number(options.frame);
+  const fps = Number(options.fps ?? 30);
+  if (Number.isFinite(frame) && Number.isFinite(fps) && fps > 0) {
+    const time = Math.max(0, frame / fps);
+    if (Math.abs(video.currentTime - time) > 1e-4) video.currentTime = time;
+  }
 }
 
 export function releaseVideoTexture(source) {
