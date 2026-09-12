@@ -13,12 +13,16 @@ pub struct Project {
     pub version: u32,
     pub composition: String,
     pub settings: ProjectSettings,
-    #[serde(default)]
+    #[serde(default = "default_props")]
     pub props: serde_json::Value,
     #[serde(default)]
     pub assets: Vec<AssetRef>,
     #[serde(default)]
     pub tracks: Vec<Track>,
+}
+
+fn default_props() -> serde_json::Value {
+    serde_json::json!({})
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
