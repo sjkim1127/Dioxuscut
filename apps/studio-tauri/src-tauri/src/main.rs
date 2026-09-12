@@ -19,6 +19,16 @@ fn submit_project(state: tauri::State<'_, AppState>, project: Project) -> Result
 }
 
 #[tauri::command]
+fn load_project(path: String) -> Result<Project, String> {
+    Project::load(path).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn save_project(path: String, project: Project) -> Result<(), String> {
+    project.save(path).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn get_render_job(
     state: tauri::State<'_, AppState>,
     id: String,
@@ -100,6 +110,8 @@ fn main() {
             web_worker_protocol,
             validate_frame_request,
             submit_project,
+            load_project,
+            save_project,
             get_render_job,
             update_render_job,
             fail_render_job
