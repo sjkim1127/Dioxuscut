@@ -6,6 +6,13 @@ const app = document.querySelector('#app');
 app.innerHTML = `
   <main class="studio">
     <header><h1>Dioxuscut Studio</h1><span id="backend">connecting…</span></header>
+    <section class="toolbar">
+      <input id="project-path" value="/tmp/dioxuscut-project.json" aria-label="project path" />
+      <button id="load-project">Open project</button>
+      <button id="save-project">Save project</button>
+      <button id="submit-render">Queue render</button>
+      <span id="message"></span>
+    </section>
     <section class="preview"><canvas id="preview-canvas"></canvas></section>
     <footer><span id="frame">frame 0</span><span id="protocol">worker protocol…</span><span id="job">job store…</span></footer>
   </main>`;
@@ -45,6 +52,42 @@ window.addEventListener('resize', resize);
 resize();
 
 let frame = 0;
+let project = {
+  version: 1,
+  composition: 'three_preview',
+  settings: { width: 1280, height: 720, fps: 30, duration: 150, backend: 'browser' },
+  props: { color: '#6c63ff' }, assets: [], tracks: [],
+};
+
+function showMessage(message) {
+  document.querySelector('#message').textContent = message;
+}
+
+document.querySelector('#load-project').addEventListener('click', async () => {
+  try {
+    project = await invoke('load_project', { path: document.querySelector('#project-path').value });
+    showMessage(`loaded ${project.composition}`);
+    renderFrame({ frame, fps: project.settings.fps, props: project.props });
+  } catch (error) { showMessage(`load error: ${error}`); }
+});
+
+document.querySelector('#save-project').addEventListener('click', async () => {
+  try {
+    project.props = { color: cube.material.color.getStyle() };
+    await invoke('save_project', { path: document.querySelector('#project-path').value, project });
+    showMessage('project saved');
+  } catch (error) { showMessage(`save error: ${error}`); }
+});
+
+document.querySelector('#submit-render').addEventListener('click', async () => {
+  try {
+    const id = await invoke('submit_project', { project });
+    showMessage(`${id} queued`);
+    const job = await invoke('get_render_job', { id });
+    if (job) document.querySelector('#job').textContent = `${job.id} · ${job.status}`;
+  } catch (error) { showMessage(`queue error: ${error}`); }
+});
+
 function renderPreview() {
   renderFrame({ frame, fps: 30 });
   frame++;
@@ -65,14 +108,3 @@ Promise.all([invoke('backend_capabilities'), invoke('web_worker_protocol')])
 invoke('validate_frame_request', {
   request: { frame: 0, fps: 30, width: 1280, height: 720, props: {} },
 }).catch((error) => { document.querySelector('#protocol').textContent = `protocol error: ${error}`; });
-
-invoke('submit_project', { project: {
-  version: 1, composition: 'three_preview',
-  settings: { width: 1280, height: 720, fps: 30, duration: 150, backend: 'browser' },
-  props: { color: '#6c63ff' }, assets: [], tracks: [],
-}}).then((id) => {
-  document.querySelector('#job').textContent = `${id} · queued`;
-  return invoke('get_render_job', { id });
-}).then((job) => {
-  if (job) document.querySelector('#job').textContent = `${job.id} · ${job.status}`;
-}).catch((error) => { document.querySelector('#job').textContent = `job error: ${error}`; });
