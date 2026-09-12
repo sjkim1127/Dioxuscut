@@ -4,6 +4,7 @@
 //! instead of depending on one another's UI state.
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use thiserror::Error;
@@ -165,6 +166,14 @@ pub enum ProjectError {
     EmptyAssetPath(String),
     #[error("project asset id '{0}' is duplicated")]
     DuplicateAssetId(String),
+    #[error("project asset '{asset}' could not be read: {reason}")]
+    AssetRead { asset: String, reason: String },
+    #[error("project asset '{asset}' SHA-256 mismatch: expected {expected}, got {actual}")]
+    AssetHashMismatch {
+        asset: String,
+        expected: String,
+        actual: String,
+    },
     #[error("project scale must be finite and greater than zero")]
     InvalidScale,
     #[error("invalid render job transition from {from:?} to {to:?}")]
@@ -252,6 +261,35 @@ impl Project {
             serde_json::from_str(source).map_err(|error| ProjectError::Json(error.to_string()))?;
         project.validate()?;
         Ok(project)
+    }
+
+    /// Validate local manifest assets relative to the project file directory.
+    /// Remote URLs are intentionally left to the browser backend.
+    pub fn validate_asset_files(
+        &self,
+        base_dir: impl AsRef<std::path::Path>,
+    ) -> Result<(), ProjectError> {
+        for asset in &self.assets {
+            if asset.path.contains("://") || asset.path.starts_with("data:") {
+                continue;
+            }
+            let path = base_dir.as_ref().join(&asset.path);
+            let bytes = std::fs::read(&path).map_err(|error| ProjectError::AssetRead {
+                asset: asset.id.clone(),
+                reason: format!("{} ({})", error, path.display()),
+            })?;
+            if let Some(expected) = &asset.sha256 {
+                let actual = format!("{:x}", Sha256::digest(bytes));
+                if !expected.eq_ignore_ascii_case(&actual) {
+                    return Err(ProjectError::AssetHashMismatch {
+                        asset: asset.id.clone(),
+                        expected: expected.clone(),
+                        actual,
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn load(path: impl AsRef<std::path::Path>) -> Result<Self, ProjectError> {
@@ -475,6 +513,30 @@ mod tests {
             p.validate(),
             Err(ProjectError::EmptyAssetPath("other".into()))
         );
+    }
+
+    #[test]
+    fn project_asset_files_verify_sha256_relative_to_base_dir() {
+        let base =
+            std::env::temp_dir().join(format!("dioxuscut-project-assets-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let asset_path = base.join("logo.bin");
+        std::fs::write(&asset_path, b"dioxuscut asset").unwrap();
+        let digest = format!("{:x}", Sha256::digest(b"dioxuscut asset"));
+        let mut p = project();
+        p.assets = vec![AssetRef {
+            id: "logo".into(),
+            path: "logo.bin".into(),
+            kind: AssetKind::Image,
+            sha256: Some(digest.clone()),
+        }];
+        assert!(p.validate_asset_files(&base).is_ok());
+        p.assets[0].sha256 = Some("00".repeat(32));
+        assert!(matches!(
+            p.validate_asset_files(&base),
+            Err(ProjectError::AssetHashMismatch { .. })
+        ));
+        std::fs::remove_dir_all(base).unwrap();
     }
     #[test]
     fn project_json_loader_validates_schema() {

@@ -75,6 +75,7 @@ symphonia         = { version = "0.5.4", default-features = false, features = ["
 # Error handling
 anyhow            = "1"
 thiserror         = "1"
+sha2              = "0.10"
 
 # Parallelism
 rayon             = "1"
