@@ -1,0 +1,199 @@
+{
+  "spring_source_sha256": "3db6ae1e69ad45eb6eab41aa285e499e4c29304f5cf33294d15ffa6bedc88185",
+  "scope": "spring kernel only; excludes process startup/import/build",
+  "platform": "macOS-26.5.1-arm64-arm-64bit",
+  "node": "v24.11.1",
+  "rust": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+  "repeats": 5,
+  "results": [
+    {
+      "scenario": "cold",
+      "calls": 300,
+      "warmup_calls": 0,
+      "samples_ns": {
+        "dioxuscut": [
+          106.11,
+          26.94333333333333,
+          21.803333333333335,
+          18.613333333333333,
+          20.14
+        ],
+        "remotion": [
+          66408.75,
+          64464.723333333335,
+          64979.30333333334,
+          64518.75,
+          64005.833333333336
+        ]
+      },
+      "median_ns": {
+        "dioxuscut": 21.803333333333335,
+        "remotion": 64518.75
+      },
+      "speedup": 2959.123222748815,
+      "checksum_max_difference": 0.0
+    },
+    {
+      "scenario": "repeat",
+      "calls": 100000,
+      "warmup_calls": 10000,
+      "samples_ns": {
+        "dioxuscut": [
+          11.52208,
+          12.14041,
+          11.4325,
+          11.87792,
+          11.62834
+        ],
+        "remotion": [
+          121.11958,
+          119.0025,
+          120.48333,
+          125.355,
+          122.61375
+        ]
+      },
+      "median_ns": {
+        "dioxuscut": 11.62834,
+        "remotion": 121.11958
+      },
+      "speedup": 10.415895992033256,
+      "checksum_max_difference": 0.0
+    },
+    {
+      "scenario": "sequential",
+      "calls": 100000,
+      "warmup_calls": 10000,
+      "samples_ns": {
+        "dioxuscut": [
+          16.17875,
+          16.14792,
+          16.34834,
+          16.13917,
+          14.66625
+        ],
+        "remotion": [
+          178.42459,
+          179.55833,
+          180.27042,
+          177.66708,
+          180.72834
+        ]
+      },
+      "median_ns": {
+        "dioxuscut": 16.14792,
+        "remotion": 179.55833
+      },
+      "speedup": 11.11959496950691,
+      "checksum_max_difference": 0.0
+    },
+    {
+      "scenario": "duration",
+      "calls": 100000,
+      "warmup_calls": 10000,
+      "samples_ns": {
+        "dioxuscut": [
+          12.335,
+          12.48459,
+          11.8175,
+          12.49917,
+          11.87042
+        ],
+        "remotion": [
+          205.37209,
+          202.77541,
+          201.91333,
+          203.38125,
+          207.09333
+        ]
+      },
+      "median_ns": {
+        "dioxuscut": 12.335,
+        "remotion": 203.38125
+      },
+      "speedup": 16.488143494122415,
+      "checksum_max_difference": 0.0
+    },
+    {
+      "scenario": "seek",
+      "calls": 100000,
+      "warmup_calls": 10000,
+      "samples_ns": {
+        "dioxuscut": [
+          14.96625,
+          15.18084,
+          15.11709,
+          14.94042,
+          15.66208
+        ],
+        "remotion": [
+          228.02625,
+          234.62792,
+          230.48583,
+          231.82417,
+          242.41625
+        ]
+      },
+      "median_ns": {
+        "dioxuscut": 15.11709,
+        "remotion": 231.82417
+      },
+      "speedup": 15.33523780039677,
+      "checksum_max_difference": 0.0
+    },
+    {
+      "scenario": "measure",
+      "calls": 100000,
+      "warmup_calls": 10000,
+      "samples_ns": {
+        "dioxuscut": [
+          7.41708,
+          7.75791,
+          8.01958,
+          8.85875,
+          8.38584
+        ],
+        "remotion": [
+          125.58916,
+          127.01083,
+          126.20584,
+          124.99834,
+          126.975
+        ]
+      },
+      "median_ns": {
+        "dioxuscut": 8.01958,
+        "remotion": 126.20584
+      },
+      "speedup": 15.737213170764553,
+      "checksum_max_difference": 0
+    },
+    {
+      "scenario": "varied",
+      "calls": 100000,
+      "warmup_calls": 10000,
+      "samples_ns": {
+        "dioxuscut": [
+          34.47291,
+          34.54541,
+          34.44458,
+          34.17791,
+          34.97458
+        ],
+        "remotion": [
+          473.0125,
+          472.90166,
+          469.98042,
+          472.90708,
+          479.79333
+        ]
+      },
+      "median_ns": {
+        "dioxuscut": 34.47291,
+        "remotion": 472.90708
+      },
+      "speedup": 13.71822338178007,
+      "checksum_max_difference": 0.0
+    }
+  ]
+}
