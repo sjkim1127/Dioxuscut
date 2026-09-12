@@ -84,6 +84,19 @@ complex filters. Extend the paired scenes and output gates before making speed
 claims about those workloads. A kernel speedup must not be presented as the
 same speedup for a whole video export.
 
+To measure the persistent Three.js/Chromium transport under the same 1280x720,
+180-frame workload, start the Studio Vite app and run:
+
+```sh
+node benchmarks/browser/three-worker-bench.mjs
+```
+
+The measured M4 Pro batch produced a 10.951s median (16.44 fps equivalent),
+compared with 11.041s for the paired Remotion export. This is approximately
+1.01x, or parity; it is not comparable to the native 5.04x result because the
+Browser backend intentionally pays the Chromium/WebGL cost for ecosystem
+compatibility.
+
 ## The 3-Axis Battle Benchmark Suite
 
 Run the full end-to-end battle benchmark against Remotion measuring memory footprint, 1080p complex VFX/typography, and cloud serverless costs:
