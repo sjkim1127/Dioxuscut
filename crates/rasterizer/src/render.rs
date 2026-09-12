@@ -308,20 +308,28 @@ impl PipeConfig {
     }
 
     fn output_dimensions(&self) -> Result<(u32, u32), RasterError> {
-        if !self.scale.is_finite() || self.scale <= 0.0 {
-            return Err(RasterError::Init(
-                "render scale must be finite and positive".into(),
-            ));
-        }
-        let width = (self.width as f64 * self.scale).round();
-        let height = (self.height as f64 * self.scale).round();
-        if width < 1.0 || height < 1.0 || width > u32::MAX as f64 || height > u32::MAX as f64 {
-            return Err(RasterError::Init(
-                "render scale produces dimensions outside the supported range".into(),
-            ));
-        }
-        Ok((width as u32, height as u32))
+        scaled_dimensions(self.width, self.height, self.scale)
     }
+}
+
+fn scaled_dimensions(width: u32, height: u32, scale: f64) -> Result<(u32, u32), RasterError> {
+    if !scale.is_finite() || scale <= 0.0 {
+        return Err(RasterError::Init(
+            "render scale must be finite and positive".into(),
+        ));
+    }
+    let scaled_width = (width as f64 * scale).round();
+    let scaled_height = (height as f64 * scale).round();
+    if scaled_width < 1.0
+        || scaled_height < 1.0
+        || scaled_width > u32::MAX as f64
+        || scaled_height > u32::MAX as f64
+    {
+        return Err(RasterError::Init(
+            "render scale produces dimensions outside the supported range".into(),
+        ));
+    }
+    Ok((scaled_width as u32, scaled_height as u32))
 }
 
 /// Render one composition frame directly to PNG, JPEG, or WebP.
@@ -342,6 +350,30 @@ where
     F: FnOnce(u32) -> Result<Scene, E>,
     E: std::fmt::Display,
 {
+    render_still_fallible_scaled(
+        backend, width, height, fps, frame, output, format, control, 1.0, scene_fn,
+    )
+}
+
+/// Render one composition frame with a post-rasterization output scale.
+#[allow(clippy::too_many_arguments)]
+pub fn render_still_fallible_scaled<F, B, E>(
+    backend: &B,
+    width: u32,
+    height: u32,
+    fps: f64,
+    frame: u32,
+    output: &Path,
+    format: StillImageFormat,
+    control: &RenderControl,
+    scale: f64,
+    scene_fn: F,
+) -> Result<(), RasterError>
+where
+    B: RasterizerBackend + Send + Sync,
+    F: FnOnce(u32) -> Result<Scene, E>,
+    E: std::fmt::Display,
+{
     let started = Instant::now();
     control.check(started)?;
     let scene = scene_fn(frame).map_err(|error| RasterError::Frame {
@@ -349,6 +381,17 @@ where
         reason: error.to_string(),
     })?;
     let image = backend.render_frame(&scene, &FrameConfig::new(width, height, frame, fps))?;
+    let (output_width, output_height) = scaled_dimensions(width, height, scale)?;
+    let image = if (output_width, output_height) == (width, height) {
+        image
+    } else {
+        image::imageops::resize(
+            &image,
+            output_width,
+            output_height,
+            image::imageops::FilterType::Lanczos3,
+        )
+    };
     control.check(started)?;
     match format {
         StillImageFormat::Png => image
@@ -1705,6 +1748,30 @@ mod tests {
                 }]
             );
         }
+        std::fs::remove_dir_all(temp).unwrap();
+    }
+
+    #[test]
+    fn scaled_still_writes_scaled_dimensions() {
+        let backend = TinySkiaBackend::headless();
+        let temp = unique_temp_dir("scaled_still");
+        std::fs::create_dir_all(&temp).unwrap();
+        let output = temp.join("frame.png");
+        render_still_fallible_scaled(
+            &backend,
+            32,
+            24,
+            30.0,
+            0,
+            &output,
+            StillImageFormat::Png,
+            &RenderControl::new(),
+            1.5,
+            |frame| Ok::<_, std::convert::Infallible>(solid_scene(Color::rgb(255, 0, 0))(frame)),
+        )
+        .unwrap();
+        let decoded = image::open(&output).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (48, 36));
         std::fs::remove_dir_all(temp).unwrap();
     }
 

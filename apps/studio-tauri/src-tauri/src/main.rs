@@ -5,7 +5,7 @@ use dioxuscut_cli::{
 };
 use dioxuscut_project::{JobStatus, JobStore, Project, RenderJob};
 use dioxuscut_rasterizer::{
-    make_cancel_signal, render_still_fallible, render_web_to_ffmpeg_pipe_fallible,
+    make_cancel_signal, render_still_fallible_scaled, render_web_to_ffmpeg_pipe_fallible,
     BackendCapabilities, BrowserFrameBackend, PipeConfig, RenderCancellationToken, RenderControl,
     StillImageFormat, VideoCodec, WebFrameRequest, WebTimelineClip, WebWorkerMessage,
     WEB_WORKER_PROTOCOL_VERSION,
@@ -281,7 +281,7 @@ fn start_render_job(
                 });
             let output_path = PathBuf::from(&output);
             if let Some(format) = project_still_format(&output_path) {
-                render_still_fallible(
+                render_still_fallible_scaled(
                     &backend,
                     project.settings.width,
                     project.settings.height,
@@ -290,6 +290,7 @@ fn start_render_job(
                     &output_path,
                     format,
                     &control,
+                    project.settings.scale,
                     |_| Ok::<_, std::convert::Infallible>(dioxuscut_rasterizer::Scene::new()),
                 )
                 .map_err(|error| error.to_string())?;

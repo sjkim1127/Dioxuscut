@@ -76,10 +76,10 @@ pub use frame_cache::{
 };
 pub use render::{
     build_pipe_ffmpeg_args, make_cancel_signal, render_all_frames, render_frame_timed,
-    render_parallel, render_still_fallible, render_to_ffmpeg_pipe, render_to_ffmpeg_pipe_fallible,
-    render_web_to_ffmpeg_pipe_fallible, save_frame, CancelSignal, HwAccel, NativeRenderConfig,
-    PipeConfig, RenderCancellationToken, RenderControl, RenderProgress, StillImageFormat,
-    VideoCodec,
+    render_parallel, render_still_fallible, render_still_fallible_scaled, render_to_ffmpeg_pipe,
+    render_to_ffmpeg_pipe_fallible, render_web_to_ffmpeg_pipe_fallible, save_frame, CancelSignal,
+    HwAccel, NativeRenderConfig, PipeConfig, RenderCancellationToken, RenderControl,
+    RenderProgress, StillImageFormat, VideoCodec,
 };
 pub use web::{
     WebFrameRequest, WebFrameResponse, WebTimelineClip, WebWorkerMessage,

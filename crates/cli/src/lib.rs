@@ -250,8 +250,6 @@ pub enum ValidationError {
     InvalidTimeout,
     #[error("Invalid scale: {0}; expected a finite value greater than 0")]
     InvalidScale(String),
-    #[error("Scale is currently supported for video output only")]
-    ScaleNotSupportedForStill,
     #[error("Invalid CRF {value} for {codec}; expected {range}")]
     InvalidCrf {
         codec: String,
@@ -685,9 +683,6 @@ fn validate_render_options(request: &RenderRequest) -> Result<(u32, u32), Valida
     if !request.scale.is_finite() || request.scale <= 0.0 {
         return Err(ValidationError::InvalidScale(request.scale.to_string()));
     }
-    if request.scale != 1.0 && request.codec.still_format().is_some() {
-        return Err(ValidationError::ScaleNotSupportedForStill);
-    }
     if request.frame_step == 0 {
         return Err(ValidationError::InvalidFrameStep(request.frame_step));
     }
@@ -992,12 +987,13 @@ pub async fn execute_render_command_with_registry_and_control(
     match request.backend {
         RenderBackend::Native => {
             use dioxuscut_rasterizer::{
-                render_still_fallible, render_to_ffmpeg_pipe_fallible, PipeConfig, TinySkiaBackend,
+                render_still_fallible_scaled, render_to_ffmpeg_pipe_fallible, PipeConfig,
+                TinySkiaBackend,
             };
 
             let rasterizer = TinySkiaBackend::new().with_security_policy(security_policy.clone());
             if let Some(format) = request.codec.still_format() {
-                render_still_fallible(
+                render_still_fallible_scaled(
                     &rasterizer,
                     request.width,
                     request.height,
@@ -1006,6 +1002,7 @@ pub async fn execute_render_command_with_registry_and_control(
                     &request.output,
                     format,
                     &control,
+                    request.scale,
                     |frame| prepared.render(frame),
                 )?;
             } else {
@@ -1037,8 +1034,8 @@ pub async fn execute_render_command_with_registry_and_control(
         }
         RenderBackend::Browser => {
             use dioxuscut_rasterizer::{
-                render_still_fallible, render_web_to_ffmpeg_pipe_fallible, BrowserFrameBackend,
-                PipeConfig,
+                render_still_fallible_scaled, render_web_to_ffmpeg_pipe_fallible,
+                BrowserFrameBackend, PipeConfig,
             };
             let worker = std::env::var_os("DIOXUSCUT_BROWSER_WORKER").ok_or_else(|| {
                 anyhow::anyhow!("Browser backend requires DIOXUSCUT_BROWSER_WORKER")
@@ -1064,7 +1061,7 @@ pub async fn execute_render_command_with_registry_and_control(
             )?;
             rasterizer.set_props(props.clone())?;
             if let Some(format) = request.codec.still_format() {
-                render_still_fallible(
+                render_still_fallible_scaled(
                     &rasterizer,
                     request.width,
                     request.height,
@@ -1073,6 +1070,7 @@ pub async fn execute_render_command_with_registry_and_control(
                     &request.output,
                     format,
                     &control,
+                    request.scale,
                     // BrowserFrameBackend owns the browser request; the Scene
                     // value is intentionally empty for this backend.
                     |_| Ok::<_, std::convert::Infallible>(dioxuscut_rasterizer::Scene::new()),
@@ -1108,13 +1106,14 @@ pub async fn execute_render_command_with_registry_and_control(
             #[cfg(feature = "gpu")]
             {
                 use dioxuscut_rasterizer::{
-                    render_still_fallible, render_to_ffmpeg_pipe_fallible, PipeConfig, WgpuBackend,
+                    render_still_fallible_scaled, render_to_ffmpeg_pipe_fallible, PipeConfig,
+                    WgpuBackend,
                 };
 
                 let rasterizer = WgpuBackend::new()
                     .map_err(|error| anyhow::anyhow!("GPU backend init failed: {error}"))?;
                 if let Some(format) = request.codec.still_format() {
-                    render_still_fallible(
+                    render_still_fallible_scaled(
                         &rasterizer,
                         request.width,
                         request.height,
@@ -1123,6 +1122,7 @@ pub async fn execute_render_command_with_registry_and_control(
                         &request.output,
                         format,
                         &control,
+                        request.scale,
                         |frame| prepared.render(frame),
                     )?;
                 } else {
