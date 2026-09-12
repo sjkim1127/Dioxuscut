@@ -347,6 +347,7 @@ document.querySelector('#cancel-render').addEventListener('click', async (event)
 });
 
 function renderPreview() {
+  if (window.__DIOXUSCUT_HEADLESS_RENDER__) return;
   if (playing) {
     setFrame(frame);
     frame = (frame + 1) % project.settings.duration;
