@@ -4,6 +4,19 @@ use dioxuscut_cli::{
     RenderRequest,
 };
 
+fn project_codec(output: &std::path::Path) -> anyhow::Result<dioxuscut_cli::RenderCodec> {
+    match output.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
+        "png" => Ok(dioxuscut_cli::RenderCodec::Png),
+        "jpg" | "jpeg" => Ok(dioxuscut_cli::RenderCodec::Jpeg),
+        "webp" => Ok(dioxuscut_cli::RenderCodec::Webp),
+        "mp4" => Ok(dioxuscut_cli::RenderCodec::H264),
+        "webm" => Ok(dioxuscut_cli::RenderCodec::Vp9),
+        "mov" => Ok(dioxuscut_cli::RenderCodec::ProRes),
+        "gif" => Ok(dioxuscut_cli::RenderCodec::Gif),
+        _ => anyhow::bail!("Cannot infer project codec from output extension; use .mp4, .webm, .mov, .gif, .png, .jpg, or .webp"),
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -149,7 +162,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                     dioxuscut_project::BackendKind::Gpu => dioxuscut_cli::RenderBackend::Gpu,
                 },
-                codec: dioxuscut_cli::RenderCodec::H264,
+                codec: project_codec(output)?,
                 frame_start: 0,
                 frame_end: None,
                 timeout_seconds: None,
