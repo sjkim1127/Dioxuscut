@@ -15,6 +15,11 @@ app.innerHTML = `
       <button id="cancel-render" disabled>Cancel</button>
       <span id="message"></span>
     </section>
+    <section class="timeline">
+      <button id="play-toggle">Pause</button>
+      <input id="timeline-slider" type="range" min="0" max="149" value="0" aria-label="timeline frame" />
+      <span id="timeline-frame">0 / 149</span>
+    </section>
     <section class="preview"><canvas id="preview-canvas"></canvas></section>
     <footer><span id="frame">frame 0</span><span id="protocol">worker protocol…</span><span id="job">job store…</span></footer>
   </main>`;
@@ -54,6 +59,7 @@ window.addEventListener('resize', resize);
 resize();
 
 let frame = 0;
+let playing = true;
 let currentJobId = null;
 let project = {
   version: 1,
@@ -65,6 +71,24 @@ let project = {
 function showMessage(message) {
   document.querySelector('#message').textContent = message;
 }
+
+function setFrame(nextFrame) {
+  frame = Math.max(0, Math.min(nextFrame, project.settings.duration - 1));
+  document.querySelector('#timeline-slider').max = project.settings.duration - 1;
+  document.querySelector('#timeline-slider').value = frame;
+  document.querySelector('#timeline-frame').textContent = `${frame} / ${project.settings.duration - 1}`;
+  renderFrame({ frame, fps: project.settings.fps, props: project.props });
+}
+
+document.querySelector('#play-toggle').addEventListener('click', (event) => {
+  playing = !playing;
+  event.currentTarget.textContent = playing ? 'Pause' : 'Play';
+});
+document.querySelector('#timeline-slider').addEventListener('input', (event) => {
+  playing = false;
+  document.querySelector('#play-toggle').textContent = 'Play';
+  setFrame(Number(event.currentTarget.value));
+});
 
 async function refreshJob(id) {
   const job = await invoke('get_render_job', { id });
@@ -87,7 +111,7 @@ document.querySelector('#load-project').addEventListener('click', async () => {
     document.querySelector('#project-path').value = selected;
     project = await invoke('load_project', { path: selected });
     showMessage(`loaded ${project.composition}`);
-    renderFrame({ frame, fps: project.settings.fps, props: project.props });
+    setFrame(frame);
   } catch (error) { showMessage(`load error: ${error}`); }
 });
 
@@ -127,8 +151,10 @@ document.querySelector('#cancel-render').addEventListener('click', async (event)
 });
 
 function renderPreview() {
-  renderFrame({ frame, fps: 30 });
-  frame++;
+  if (playing) {
+    setFrame(frame);
+    frame = (frame + 1) % project.settings.duration;
+  }
   requestAnimationFrame(renderPreview);
 }
 renderPreview();
