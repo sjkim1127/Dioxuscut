@@ -58,7 +58,18 @@ function spawnWorker() {
       if (failed) throw failed;
       resolve({
         request,
-        close: () => child.stdin.end(JSON.stringify({type: 'shutdown'}) + '\n'),
+        close: () => new Promise((resolveClose) => {
+          if (child.exitCode !== null) return resolveClose();
+          const timer = setTimeout(() => {
+            child.kill('SIGTERM');
+            resolveClose();
+          }, 2000);
+          child.once('exit', () => {
+            clearTimeout(timer);
+            resolveClose();
+          });
+          child.stdin.end(JSON.stringify({type: 'shutdown'}) + '\n');
+        }),
       });
     })().catch((error) => { child.kill(); reject(error); });
   });
@@ -80,7 +91,7 @@ const samples = [];
 try {
   for (let i = 0; i < repeats; i++) samples.push(await measure());
 } finally {
-  for (const worker of workers) worker.close();
+  await Promise.all(workers.map((worker) => worker.close()));
 }
 const sorted = [...samples].sort((a, b) => a - b);
 const report = {backend: 'chromium-three-worker', url, frames, width: 1280, height: 720, repeats, workers: concurrency, image_format: imageFormat ?? 'png', jpeg_quality: imageFormat === 'jpeg' ? jpegQuality : null, transparent, samples_ms: samples, median_ms: sorted[Math.floor(sorted.length / 2)], fps_equivalent: frames / (sorted[Math.floor(sorted.length / 2)] / 1000), node: process.version, platform: process.platform, arch: process.arch};
