@@ -170,7 +170,11 @@ The browser host exposes `window.dioxuscut.registerComposition(id, render)` and
 `window.dioxuscut.listCompositions()`;
 Three.js or React Three Fiber adapters can register composition-specific frame
 functions without changing the Rust protocol. The function receives
-`{frame, fps, props}` and may return a Promise for asynchronous asset loading.
+`{composition, frame, fps, props, assets, width, height, durationInFrames}` and
+may return a Promise for asynchronous asset loading. `frame` is the local frame
+when the composition is used inside a timeline clip; `width`, `height`, and
+`durationInFrames` let Three.js/R3F code configure its camera and responsive
+scene deterministically for both Studio preview and headless export.
 For Remotion-style asynchronous readiness, a composition may call
 `window.dioxuscut.delayRender(reason)` and later
 `window.dioxuscut.continueRender(handle)`. Calling
