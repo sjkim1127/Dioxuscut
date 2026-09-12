@@ -218,7 +218,7 @@ impl SceneLayout<'_> {
                 if record.style.overflow_hidden {
                     Ok(vec![SceneNode::Layer {
                         opacity: record.style.opacity,
-                        blend_mode: BlendMode::Normal,
+                        blend_mode: record.style.blend_mode,
                         clip: Some(ClipRegion::Rect {
                             x,
                             y,
@@ -235,7 +235,7 @@ impl SceneLayout<'_> {
                 } else if let Some(shadow) = record.style.box_shadow.clone() {
                     Ok(vec![SceneNode::Layer {
                         opacity: record.style.opacity,
-                        blend_mode: BlendMode::Normal,
+                        blend_mode: record.style.blend_mode,
                         clip: None,
                         mask: None,
                         mask_mode: MaskMode::Alpha,
@@ -243,10 +243,12 @@ impl SceneLayout<'_> {
                         shadow: Some(shadow),
                         children: nodes,
                     }])
-                } else if !record.style.filters.is_empty() {
+                } else if !record.style.filters.is_empty()
+                    || record.style.blend_mode != BlendMode::Normal
+                {
                     Ok(vec![SceneNode::Layer {
                         opacity: record.style.opacity,
-                        blend_mode: BlendMode::Normal,
+                        blend_mode: record.style.blend_mode,
                         clip: None,
                         mask: None,
                         mask_mode: MaskMode::Alpha,

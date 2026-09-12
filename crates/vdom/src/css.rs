@@ -1,5 +1,5 @@
 use crate::dom::NativeElement;
-use dioxuscut_rasterizer::{Color, GradientStop, ImageFit, SceneFilter, Transform2D};
+use dioxuscut_rasterizer::{BlendMode, Color, GradientStop, ImageFit, SceneFilter, Transform2D};
 use std::collections::HashMap;
 use taffy::geometry::{Line, Point, Rect, Size};
 use taffy::prelude::{
@@ -54,6 +54,7 @@ pub struct ResolvedStyle {
     pub border_radius: f32,
     pub box_shadow: Option<dioxuscut_rasterizer::SceneShadow>,
     pub filters: Vec<SceneFilter>,
+    pub blend_mode: BlendMode,
     pub font_size: f32,
     pub font_weight: u16,
     pub font_sources: Vec<String>,
@@ -81,6 +82,7 @@ impl Default for ResolvedStyle {
             border_radius: 0.0,
             box_shadow: None,
             filters: Vec::new(),
+            blend_mode: BlendMode::Normal,
             font_size: 16.0,
             font_weight: 400,
             font_sources: Vec::new(),
@@ -505,6 +507,7 @@ pub(crate) fn apply_declarations(style: &mut ResolvedStyle, declarations: &[(Str
             "border-radius" => style.border_radius = parse_px(value).unwrap_or(0.0).max(0.0),
             "box-shadow" => style.box_shadow = parse_box_shadow(value),
             "filter" => style.filters = parse_filters(value),
+            "mix-blend-mode" => style.blend_mode = parse_blend_mode(value),
             "font-size" => style.font_size = parse_px(value).unwrap_or(style.font_size).max(1.0),
             "font-weight" => {
                 style.font_weight = match value.as_str() {
@@ -632,6 +635,23 @@ fn parse_filters(value: &str) -> Vec<SceneFilter> {
         }
     }
     filters
+}
+
+fn parse_blend_mode(value: &str) -> BlendMode {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "multiply" => BlendMode::Multiply,
+        "screen" => BlendMode::Screen,
+        "overlay" => BlendMode::Overlay,
+        "darken" => BlendMode::Darken,
+        "lighten" => BlendMode::Lighten,
+        "color-dodge" => BlendMode::ColorDodge,
+        "color-burn" => BlendMode::ColorBurn,
+        "hard-light" => BlendMode::HardLight,
+        "soft-light" => BlendMode::SoftLight,
+        "difference" => BlendMode::Difference,
+        "exclusion" => BlendMode::Exclusion,
+        _ => BlendMode::Normal,
+    }
 }
 
 fn css_values(value: &str) -> Vec<&str> {
@@ -1209,5 +1229,19 @@ mod tests {
         assert!(matches!(style.filters[1], SceneFilter::Grayscale { amount } if amount == 0.5));
         assert!(matches!(style.filters[2], SceneFilter::HueRotate { degrees } if degrees == 15.0));
         assert!(matches!(style.filters[3], SceneFilter::Opacity { amount } if amount == 0.8));
+    }
+
+    #[test]
+    fn parses_mix_blend_mode() {
+        let stylesheet = Stylesheet::parse(".hero { mix-blend-mode: screen; }").unwrap();
+        let mut element = NativeElement {
+            tag: "div".into(),
+            ..Default::default()
+        };
+        element.attributes.insert("class".into(), "hero".into());
+        assert_eq!(
+            stylesheet.resolve(&element, None).blend_mode,
+            BlendMode::Screen
+        );
     }
 }
