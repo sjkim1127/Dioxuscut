@@ -155,6 +155,18 @@ fn start_render_job(
         let result = (|| -> Result<(), String> {
             let backend = BrowserFrameBackend::with_concurrency("node", worker, url, concurrency)
                 .map_err(|error| error.to_string())?;
+            backend
+                .set_composition(&project.composition)
+                .map_err(|error| error.to_string())?;
+            backend
+                .set_assets(
+                    project
+                        .assets
+                        .iter()
+                        .map(|asset| asset.path.clone())
+                        .collect(),
+                )
+                .map_err(|error| error.to_string())?;
             let state_for_progress = Arc::clone(&state_jobs);
             let progress_id = id.clone();
             let control = RenderControl::new()

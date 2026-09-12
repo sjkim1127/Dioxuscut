@@ -172,7 +172,24 @@ async fn main() -> anyhow::Result<()> {
                 sandbox_roots: vec![],
                 permissive: true,
             };
+            let previous_browser_assets = std::env::var_os("DIOXUSCUT_BROWSER_ASSETS");
+            if request.backend == dioxuscut_cli::RenderBackend::Browser {
+                let asset_separator = if cfg!(windows) { ';' } else { ':' };
+                std::env::set_var(
+                    "DIOXUSCUT_BROWSER_ASSETS",
+                    project
+                        .assets
+                        .iter()
+                        .map(|asset| asset.path.as_str())
+                        .collect::<Vec<_>>()
+                        .join(&asset_separator.to_string()),
+                );
+            }
             let result = dioxuscut_cli::execute_render_command(&request).await;
+            match previous_browser_assets {
+                Some(value) => std::env::set_var("DIOXUSCUT_BROWSER_ASSETS", value),
+                None => std::env::remove_var("DIOXUSCUT_BROWSER_ASSETS"),
+            }
             let _ = std::fs::remove_file(props_path);
             result?;
         }

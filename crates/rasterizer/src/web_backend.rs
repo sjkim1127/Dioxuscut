@@ -61,7 +61,15 @@ impl BrowserFrameBackend {
             workers,
             next_worker: AtomicUsize::new(0),
             composition: Mutex::new(None),
-            assets: Mutex::new(vec![]),
+            assets: Mutex::new(
+                std::env::var_os("DIOXUSCUT_BROWSER_ASSETS")
+                    .map(|value| {
+                        std::env::split_paths(&value)
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            ),
             props: Mutex::new(serde_json::json!({})),
             cache: FrameCacheManager::default(),
         })
