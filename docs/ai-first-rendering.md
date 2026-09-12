@@ -27,7 +27,7 @@ Schema is available at `schemas/dioxuscut-project-v1.schema.json`.
   },
   "props": { "color": "#6c63ff" },
   "assets": [
-    { "id": "logo", "path": "assets/logo.png", "kind": "image" },
+    { "id": "logo", "path": "assets/logo.png", "kind": "image", "sha256": "..." },
     { "id": "font", "path": "assets/Inter-Regular.woff2", "kind": "font" }
   ],
   "tracks": []
@@ -54,6 +54,12 @@ dioxuscut validate-project project.dioxuscut.json
 
 This performs the same strict Rust validation used by Tauri, including schema
 version, dimensions, timing, backend, and unknown-field checks.
+
+Asset paths are resolved relative to the project file, not the process working
+directory. Native and GPU validation also checks that local assets exist; when
+`sha256` is provided, the file digest must match before rendering starts.
+Remote URLs and data URIs are passed through for the Browser backend and are not
+treated as local Native/GPU files.
 
 Render the validated project directly:
 
