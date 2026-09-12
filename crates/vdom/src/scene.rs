@@ -200,6 +200,13 @@ impl SceneLayout<'_> {
                 for child in &native.children {
                     nodes.extend(self.emit(*child, x, y)?);
                 }
+                if record.style.transform != Transform2D::default() {
+                    nodes = vec![SceneNode::Group {
+                        transform: record.style.transform,
+                        opacity: 1.0,
+                        children: nodes,
+                    }];
+                }
 
                 if record.style.overflow_hidden {
                     Ok(vec![SceneNode::Layer {

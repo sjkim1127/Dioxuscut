@@ -1,5 +1,5 @@
 use crate::dom::NativeElement;
-use dioxuscut_rasterizer::{Color, GradientStop, ImageFit};
+use dioxuscut_rasterizer::{Color, GradientStop, ImageFit, Transform2D};
 use std::collections::HashMap;
 use taffy::geometry::{Line, Point, Rect, Size};
 use taffy::prelude::{
@@ -45,6 +45,8 @@ pub struct ResolvedStyle {
     pub background: Option<Color>,
     /// A supported CSS linear-gradient background: angle and color stops.
     pub background_gradient: Option<(f32, Vec<GradientStop>)>,
+    /// Supported CSS transform subset: translate, scale, and rotate.
+    pub transform: Transform2D,
     pub border_color: Option<Color>,
     pub border_width: f32,
     pub border_radius: f32,
@@ -68,6 +70,7 @@ impl Default for ResolvedStyle {
             color: Color::BLACK,
             background: None,
             background_gradient: None,
+            transform: Transform2D::default(),
             border_color: None,
             border_width: 0.0,
             border_radius: 0.0,
@@ -455,6 +458,11 @@ pub(crate) fn apply_declarations(style: &mut ResolvedStyle, declarations: &[(Str
             "background-image" => {
                 style.background_gradient = parse_linear_gradient(value);
             }
+            "transform" => {
+                if let Some(transform) = parse_transform(value) {
+                    style.transform = transform;
+                }
+            }
             "color" => {
                 if let Some(color) = Color::from_css(value) {
                     style.color = color;
@@ -728,6 +736,32 @@ fn parse_linear_gradient(value: &str) -> Option<(f32, Vec<GradientStop>)> {
     ))
 }
 
+fn parse_transform(value: &str) -> Option<Transform2D> {
+    let mut translate = None;
+    let mut scale = None;
+    let mut rotate = None;
+    for function in value.split(')').filter_map(|part| part.split_once('(')) {
+        let name = function.0.trim();
+        let args = split_css_arguments(function.1);
+        match name {
+            "translate" => {
+                let x = parse_px(args.first().copied()?)?;
+                let y = args.get(1).and_then(|v| parse_px(v)).unwrap_or(0.0);
+                translate = Some((x, y));
+            }
+            "scale" => {
+                let x = args.first()?.parse().ok()?;
+                let y = args.get(1).and_then(|v| v.parse().ok()).unwrap_or(x);
+                scale = Some((x, y));
+            }
+            "rotate" => rotate = Some(args.first()?.strip_suffix("deg")?.parse().ok()?),
+            _ => {}
+        }
+    }
+    (translate.is_some() || scale.is_some() || rotate.is_some())
+        .then(|| Transform2D::make_transform(translate, scale, rotate))
+}
+
 fn split_css_arguments(value: &str) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut start = 0;
@@ -842,5 +876,23 @@ mod tests {
         let (_, stops) = style.background_gradient.expect("gradient");
         assert_eq!(stops[0].color, Color::rgba(255, 0, 0, 128));
         assert_eq!(stops[1].color, Color::rgb(0, 0, 255));
+    }
+
+    #[test]
+    fn parses_basic_transform_functions() {
+        let stylesheet =
+            Stylesheet::parse(".hero { transform: translate(12px, 8px) scale(2) rotate(15deg); }")
+                .unwrap();
+        let mut element = NativeElement {
+            tag: "div".into(),
+            ..Default::default()
+        };
+        element.attributes.insert("class".into(), "hero".into());
+        let style = stylesheet.resolve(&element, None);
+        assert_eq!(style.transform.tx, 12.0);
+        assert_eq!(style.transform.ty, 8.0);
+        assert_eq!(style.transform.scale_x, 2.0);
+        assert_eq!(style.transform.scale_y, 2.0);
+        assert_eq!(style.transform.rotate_deg, 15.0);
     }
 }
