@@ -195,6 +195,12 @@ browser host draws the preloaded drawable onto the canvas for each requested
 frame. Native VDOM converts the marker to a cached `SceneNode::Image` fallback;
 it does not emulate arbitrary Canvas or WebGL APIs.
 
+Native hosts also expose `dioxuscut_media::get_image_dimensions()`, a bounded
+header-only image inspection helper corresponding to Remotion's
+`getImageDimensions()`. It returns width and height without allocating the full
+decoded pixel buffer, so AI-generated compositions can validate image layout
+before scheduling a render.
+
 Each worker owns one Chromium page and serializes its own requests; the shared
 streaming pipeline schedules different frames across the pool while preserving
 output order. Use concurrency greater than one only after measuring the target

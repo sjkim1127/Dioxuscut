@@ -15,6 +15,29 @@ pub enum MediaMetadataError {
     FfprobeParse(String),
     #[error("Audio decode error: {0}")]
     AudioDecode(String),
+    #[error("Image decode error: {0}")]
+    ImageDecode(String),
+}
+
+/// Pixel dimensions for a still image, matching Remotion's
+/// `getImageDimensions()` contract for native hosts.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ImageDimensions {
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Reads image dimensions without decoding the full pixel buffer.
+pub fn get_image_dimensions(path: impl AsRef<Path>) -> Result<ImageDimensions, MediaMetadataError> {
+    let path_ref = path.as_ref();
+    if !path_ref.exists() {
+        return Err(MediaMetadataError::FileNotFound(
+            path_ref.display().to_string(),
+        ));
+    }
+    let (width, height) = image::image_dimensions(path_ref)
+        .map_err(|error| MediaMetadataError::ImageDecode(error.to_string()))?;
+    Ok(ImageDimensions { width, height })
 }
 
 /// Video stream and container metadata matching Remotion's `getVideoMetadata()`.
@@ -275,5 +298,14 @@ mod tests {
     fn test_static_file_resolution() {
         let res = static_file("Cargo.toml");
         assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_image_dimensions() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/logo.png");
+        let dimensions = get_image_dimensions(path).unwrap();
+        assert!(dimensions.width > 0);
+        assert!(dimensions.height > 0);
     }
 }
