@@ -119,6 +119,11 @@ async fn main() -> anyhow::Result<()> {
                 stats.loops_converted
             );
         }
+        Commands::ValidateProject { input } => {
+            let project = dioxuscut_project::Project::load(input)
+                .map_err(|error| anyhow::anyhow!("Project validation failed: {error}"))?;
+            println!("{}", serde_json::to_string_pretty(&project)?);
+        }
         Commands::Probe { path } => {
             match dioxuscut_cli::get_video_metadata(path) {
                 Ok(meta) => {

@@ -24,6 +24,7 @@ dioxuscut-paths       = { workspace = true }
 dioxuscut-rasterizer  = { workspace = true }
 dioxuscut-shapes      = { workspace = true }
 dioxuscut-charts      = { workspace = true }
+dioxuscut-project     = { workspace = true }
 clap               = { version = "4.4", features = ["derive"] }
 tokio              = { workspace = true }
 tracing            = { workspace = true }

@@ -233,6 +233,12 @@ pub enum Commands {
         permissive: bool,
     },
 
+    /// Validate a versioned Dioxuscut project file without rendering.
+    ValidateProject {
+        /// Path to the `.dioxuscut.json` project file.
+        input: PathBuf,
+    },
+
     /// (Experimental) Scaffold a Dioxuscut component from a Remotion (.tsx) file.
     Migrate {
         /// Path to the Remotion .tsx file.
