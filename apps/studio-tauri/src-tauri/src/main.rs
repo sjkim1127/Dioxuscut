@@ -114,6 +114,7 @@ fn web_worker_protocol() -> serde_json::Value {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState(Mutex::new(JobStore::default())))
         .invoke_handler(tauri::generate_handler![
             backend_capabilities,

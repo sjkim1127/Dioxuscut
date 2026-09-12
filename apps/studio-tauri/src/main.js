@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { invoke } from '@tauri-apps/api/core';
+import { open, save } from '@tauri-apps/plugin-dialog';
 import './style.css';
 
 const app = document.querySelector('#app');
@@ -81,7 +82,10 @@ setInterval(() => {
 
 document.querySelector('#load-project').addEventListener('click', async () => {
   try {
-    project = await invoke('load_project', { path: document.querySelector('#project-path').value });
+    const selected = await open({ filters: [{ name: 'Dioxuscut project', extensions: ['json'] }] });
+    if (!selected || Array.isArray(selected)) return;
+    document.querySelector('#project-path').value = selected;
+    project = await invoke('load_project', { path: selected });
     showMessage(`loaded ${project.composition}`);
     renderFrame({ frame, fps: project.settings.fps, props: project.props });
   } catch (error) { showMessage(`load error: ${error}`); }
@@ -90,7 +94,13 @@ document.querySelector('#load-project').addEventListener('click', async () => {
 document.querySelector('#save-project').addEventListener('click', async () => {
   try {
     project.props = { color: cube.material.color.getStyle() };
-    await invoke('save_project', { path: document.querySelector('#project-path').value, project });
+    const selected = await save({
+      defaultPath: document.querySelector('#project-path').value,
+      filters: [{ name: 'Dioxuscut project', extensions: ['json'] }],
+    });
+    if (!selected) return;
+    document.querySelector('#project-path').value = selected;
+    await invoke('save_project', { path: selected, project });
     showMessage('project saved');
   } catch (error) { showMessage(`save error: ${error}`); }
 });
