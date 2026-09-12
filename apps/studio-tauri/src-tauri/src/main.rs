@@ -410,7 +410,18 @@ fn start_render_job(
 
 #[tauri::command]
 fn load_project(path: String) -> Result<Project, String> {
-    Project::load(path).map_err(|error| error.to_string())
+    let path = std::path::PathBuf::from(path);
+    let mut project = Project::load(&path).map_err(|error| error.to_string())?;
+    let base_dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    project
+        .validate_asset_files(base_dir)
+        .map_err(|error| error.to_string())?;
+    for asset in &mut project.assets {
+        if !asset.path.contains("://") && !asset.path.starts_with("data:") {
+            asset.path = base_dir.join(&asset.path).to_string_lossy().into_owned();
+        }
+    }
+    Ok(project)
 }
 
 #[tauri::command]

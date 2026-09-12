@@ -181,7 +181,10 @@ async fn main() -> anyhow::Result<()> {
                 script: None,
                 props: Some(props_path.clone()),
                 output: output.clone(),
-                audio: dioxuscut_cli::project_audio_assets(&project),
+                audio: dioxuscut_cli::project_audio_assets_from_dir(
+                    &project,
+                    input.parent().unwrap_or_else(|| std::path::Path::new(".")),
+                ),
                 width: project.settings.width,
                 height: project.settings.height,
                 scale: project.settings.scale,

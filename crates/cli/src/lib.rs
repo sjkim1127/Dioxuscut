@@ -32,6 +32,27 @@ pub fn project_audio_assets(project: &Project) -> Vec<std::path::PathBuf> {
         .collect()
 }
 
+/// Resolve project audio assets relative to the project file directory.
+/// URL assets remain unchanged for browser-side resolution.
+pub fn project_audio_assets_from_dir(
+    project: &Project,
+    base_dir: impl AsRef<std::path::Path>,
+) -> Vec<std::path::PathBuf> {
+    let base_dir = base_dir.as_ref();
+    project
+        .assets
+        .iter()
+        .filter(|asset| asset.kind == dioxuscut_project::AssetKind::Audio)
+        .map(|asset| {
+            if asset.path.contains("://") || asset.path.starts_with("data:") {
+                std::path::PathBuf::from(&asset.path)
+            } else {
+                base_dir.join(&asset.path)
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod project_asset_tests {
     use super::*;
