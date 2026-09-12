@@ -115,10 +115,10 @@ pub async fn run(config: ServeConfig) -> anyhow::Result<()> {
     let (tx, _) = broadcast::channel::<Arc<FrameMsg>>(CHANNEL_CAPACITY);
 
     // Render the initial frame immediately so the page is never blank.
-    render_and_broadcast(&tx, &config, config.default_frame);
+    render_and_broadcast(&tx, &config, config.default_frame, &frame_cache);
 
     // Spawn the file-watcher task.
-    spawn_watcher(tx.clone(), config.clone());
+    spawn_watcher(tx.clone(), config.clone(), frame_cache.clone());
 
     let state = AppState {
         tx,
@@ -208,10 +208,15 @@ async fn frame_handler(
 // ──────────────────────────────────────────────────────────────
 
 /// Render a single frame and broadcast the PNG to all connected clients.
-fn render_and_broadcast(tx: &broadcast::Sender<Arc<FrameMsg>>, config: &ServeConfig, frame: u32) {
-    match render_frame(config, frame) {
+fn render_and_broadcast(
+    tx: &broadcast::Sender<Arc<FrameMsg>>,
+    config: &ServeConfig,
+    frame: u32,
+    cache: &Mutex<VecDeque<CachedFrame>>,
+) {
+    match cached_frame(config, frame, cache) {
         Ok(png_bytes) => {
-            let png_b64 = BASE64.encode(&png_bytes);
+            let png_b64 = BASE64.encode(&*png_bytes);
             let msg = Arc::new(FrameMsg { png_b64, frame });
             // It's OK if there are no receivers yet.
             let _ = tx.send(msg);
@@ -330,9 +335,13 @@ fn load_props(config: &ServeConfig) -> anyhow::Result<serde_json::Value> {
 // File watcher
 // ──────────────────────────────────────────────────────────────
 
-fn spawn_watcher(tx: broadcast::Sender<Arc<FrameMsg>>, config: Arc<ServeConfig>) {
+fn spawn_watcher(
+    tx: broadcast::Sender<Arc<FrameMsg>>,
+    config: Arc<ServeConfig>,
+    cache: Arc<Mutex<VecDeque<CachedFrame>>>,
+) {
     std::thread::spawn(move || {
-        if let Err(e) = watch_loop(tx, config) {
+        if let Err(e) = watch_loop(tx, config, cache) {
             error!(error = %e, "File watcher terminated with error");
         }
     });
@@ -341,6 +350,7 @@ fn spawn_watcher(tx: broadcast::Sender<Arc<FrameMsg>>, config: Arc<ServeConfig>)
 fn watch_loop(
     tx: broadcast::Sender<Arc<FrameMsg>>,
     config: Arc<ServeConfig>,
+    cache: Arc<Mutex<VecDeque<CachedFrame>>>,
 ) -> anyhow::Result<()> {
     let (notify_tx, notify_rx) = std::sync::mpsc::channel::<notify::Result<Event>>();
 
@@ -387,7 +397,7 @@ fn watch_loop(
             "Source changed — re-rendering frame {}",
             config.default_frame
         );
-        render_and_broadcast(&tx, &config, config.default_frame);
+        render_and_broadcast(&tx, &config, config.default_frame, &cache);
     }
 
     Ok(())
@@ -493,7 +503,7 @@ async fn handle_socket(
                         // Client may request a specific frame: {"seek": 42}
                         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
                             if let Some(frame) = v.get("seek").and_then(|f| f.as_u64()) {
-                                render_and_broadcast(&tx, &config, frame as u32);
+                                render_and_broadcast(&tx, &config, frame as u32, &frame_cache);
                             }
                         }
                     }
