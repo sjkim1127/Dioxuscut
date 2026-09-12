@@ -1,6 +1,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use dioxuscut_rasterizer::{BackendCapabilities, WebWorkerMessage, WEB_WORKER_PROTOCOL_VERSION};
+use dioxuscut_rasterizer::{
+    BackendCapabilities, WebFrameRequest, WebWorkerMessage, WEB_WORKER_PROTOCOL_VERSION,
+};
+
+#[tauri::command]
+fn validate_frame_request(request: WebFrameRequest) -> Result<WebFrameRequest, String> {
+    if request.width == 0 || request.height == 0 {
+        return Err("preview dimensions must be greater than zero".into());
+    }
+    if !request.fps.is_finite() || request.fps <= 0.0 {
+        return Err("preview fps must be finite and greater than zero".into());
+    }
+    Ok(request)
+}
 
 #[tauri::command]
 fn backend_capabilities() -> BackendCapabilities {
@@ -27,7 +40,8 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             backend_capabilities,
-            web_worker_protocol
+            web_worker_protocol,
+            validate_frame_request
         ])
         .run(tauri::generate_context!())
         .expect("error while running Dioxuscut Studio");
