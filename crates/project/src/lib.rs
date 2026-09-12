@@ -962,11 +962,12 @@ mod tests {
         p.props =
             serde_json::json!({"layers": [{"src": "asset://poster"}, {"src": "asset://remote"}]});
         p.resolve_local_asset_paths("/tmp/project");
-        assert_eq!(p.assets[0].path, "/tmp/project/assets/poster.png");
+        let expected_poster = std::path::Path::new("/tmp/project").join("assets/poster.png");
+        assert_eq!(std::path::Path::new(&p.assets[0].path), expected_poster);
         assert_eq!(p.assets[1].path, "https://cdn.example/poster.png");
         assert_eq!(
-            p.props["layers"][0]["src"],
-            "/tmp/project/assets/poster.png"
+            std::path::Path::new(p.props["layers"][0]["src"].as_str().unwrap()),
+            expected_poster
         );
         assert_eq!(
             p.props["layers"][1]["src"],
