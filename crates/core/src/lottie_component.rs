@@ -2,6 +2,7 @@
 //!
 //! Matches Remotion's `@remotion/lottie` `<Lottie>` component.
 
+use crate::hooks::{use_current_frame, use_video_config};
 use dioxus::prelude::*;
 use dioxuscut_rasterizer::LoopBehavior;
 
@@ -33,6 +34,9 @@ pub struct LottieProps {
 /// Renders a Lottie vector animation on the timeline.
 #[component]
 pub fn Lottie(props: LottieProps) -> Element {
+    let frame = use_current_frame();
+    let config = use_video_config();
+    let time_secs = frame as f64 / config.fps * props.playback_rate;
     let combined_style = format!(
         "width: {}px; height: {}px; display: inline-block; overflow: hidden; {}",
         props.width, props.height, props.style
@@ -43,7 +47,10 @@ pub fn Lottie(props: LottieProps) -> Element {
             class: "{props.class}",
             style: "{combined_style}",
             "data-dioxuscut-lottie": "{props.src}",
+            "data-frame": "{frame}",
+            "data-time": "{time_secs:.4}",
             "data-playback-rate": "{props.playback_rate}",
+            "data-loop": "{props.loop_behavior:?}",
         }
     }
 }
