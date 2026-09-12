@@ -115,6 +115,13 @@ For browser compositions that intentionally render transparency, set
 behavior to Playwright for PNG frames; JPEG transport remains opaque by
 definition.
 
+Both native and browser backends expose bounded frame-resource caches. Set
+`DIOXUSCUT_IMAGE_CACHE_BYTES` for decoded native images (default 256 MiB) and
+`DIOXUSCUT_FRAME_CACHE_BYTES` for browser-rendered RGBA frames (default 512
+MiB). These limits are useful when a Tauri window, Dioxus preview, and export
+job share one process or machine; invalid and non-positive values use the
+default.
+
 Set `OUTPUT=benchmarks/browser-result.json` to persist the raw Chromium worker
 sample report. The worker marks headless pages so the Studio preview loop cannot
 race an explicit frame request. Validate browser media seeking and timeline
