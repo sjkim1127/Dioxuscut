@@ -84,7 +84,7 @@ Native compositions share one `Scene` contract between preview and export. `Vdom
 | `dioxuscut-renderer` | Static server and PNG-sequence encoding utilities |
 | `dioxuscut-cli` | Render command and Rhai composition runtime |
 | `apps/example` | Dioxus web composition preview |
-| `apps/studio` | Desktop preview shell; editing and render queue are planned |
+| `apps/studio` | Dioxus desktop preview shell |
 
 ## Prerequisites
 
@@ -430,7 +430,7 @@ written into workflow files.
 - `SceneLayer` supports rectangular or SVG-path clips, alpha or luminance masks, twelve blend modes, ordered blur/brightness/grayscale/opacity filters, and drop shadows. These effects use CPU offscreen surfaces for export and SVG/CSS equivalents for Player preview.
 - GPU acceleration covers rectangles, circles, tessellated path fills and strokes, nested group transforms and opacity, and gradients with up to 16 stops. Text, image, video, composited layers, and gradients beyond the stop limit use whole-frame CPU fallback.
 - Text nodes accept ordered local TTF/OTF `font_sources`; native rendering caches those files, shapes glyph runs with Rustybuzz, and falls through per grapheme. `SceneTextBlock` and Rhai `text_box` add Unicode line breaking, fitting, alignment, line limits, and ellipsis. Text without explicit sources still uses platform font discovery and is not pixel-identical across platforms; full mixed-direction paragraph layout remains incomplete.
-- Studio is a preview shell, not yet a full editor.
+- Studio project loading and Tauri render-queue controls are available; timeline editing and media management are not yet a full editor.
 
 ## Roadmap
 
@@ -438,7 +438,7 @@ written into workflow files.
 2. Full bidirectional paragraph layout, variable-font axes, and advanced typography controls.
 3. Complete GPU parity for text, media, composited layers, masks, blend modes, and filters.
 4. Additional color, distortion, and convolution filter primitives.
-5. Studio project loading, media editing, and render queue integration.
+5. Studio timeline editing and media management on top of the shared project/job contract.
 
 ## License
 
