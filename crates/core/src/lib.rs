@@ -64,8 +64,8 @@ pub use dioxuscut_animation::{
 
 // Composition primitives & emitters
 pub use dioxuscut_composition::{
-    CompositionError, NativeComposition, NativeCompositionContext, SceneEmitter, SceneFrameContext,
-    Mesh3DPrimitive, SceneLoop, SceneMesh3D, SceneSequence, SceneSeries, SceneSeriesEntry,
+    CompositionError, Mesh3DPrimitive, NativeComposition, NativeCompositionContext, SceneEmitter,
+    SceneFrameContext, SceneLoop, SceneMesh3D, SceneSequence, SceneSeries, SceneSeriesEntry,
     SceneStack, SceneTransitionSeries,
 };
 

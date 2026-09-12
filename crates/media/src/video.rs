@@ -51,8 +51,8 @@ pub fn Video(props: VideoProps) -> Element {
     if timeline_time < props.start_at || props.end_at.is_some_and(|end| timeline_time >= end) {
         return rsx! {};
     }
-    let time_in_seconds = props.start_from
-        + (timeline_time - props.start_at).max(0.0) * props.playback_rate.max(0.0);
+    let time_in_seconds =
+        props.start_from + (timeline_time - props.start_at).max(0.0) * props.playback_rate.max(0.0);
     let duration_attr = props
         .end_at
         .map(|end| (end - props.start_at).max(0.0).to_string())

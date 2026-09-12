@@ -79,7 +79,10 @@ impl Default for ResolvedStyle {
             background_gradient: None,
             background_radial_gradient: None,
             transform: Transform2D::default(),
-            transform_origin: (TransformOriginValue::percent(0.5), TransformOriginValue::percent(0.5)),
+            transform_origin: (
+                TransformOriginValue::percent(0.5),
+                TransformOriginValue::percent(0.5),
+            ),
             border_color: None,
             border_width: 0.0,
             border_radius: 0.0,
@@ -105,11 +108,17 @@ pub struct TransformOriginValue {
 
 impl TransformOriginValue {
     const fn percent(fraction: f32) -> Self {
-        Self { fraction, pixels: 0.0 }
+        Self {
+            fraction,
+            pixels: 0.0,
+        }
     }
 
     const fn pixels(pixels: f32) -> Self {
-        Self { fraction: 0.0, pixels }
+        Self {
+            fraction: 0.0,
+            pixels,
+        }
     }
 
     pub(crate) fn resolve(self, size: f32) -> f32 {

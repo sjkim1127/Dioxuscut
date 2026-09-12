@@ -97,12 +97,9 @@ impl SceneEmitter for SceneMesh3D {
         let mut mesh = match self.primitive {
             Mesh3DPrimitive::Cube => Mesh3D::cube(self.size.max(0.0)),
             Mesh3DPrimitive::Sphere => Mesh3D::sphere(self.size.max(0.0), 12, 16),
-            Mesh3DPrimitive::Torus => Mesh3D::torus(
-                self.size.max(0.0),
-                (self.size * 0.3).max(0.0),
-                16,
-                12,
-            ),
+            Mesh3DPrimitive::Torus => {
+                Mesh3D::torus(self.size.max(0.0), (self.size * 0.3).max(0.0), 16, 12)
+            }
         };
         let frame = context.frame as f32;
         let rotation = Vec3::new(
@@ -141,7 +138,11 @@ mod tests {
         };
         let mut scene = Scene::new();
         emitter
-            .emit(SceneFrameContext::new(10, context), &Value::Null, &mut scene)
+            .emit(
+                SceneFrameContext::new(10, context),
+                &Value::Null,
+                &mut scene,
+            )
             .unwrap();
         assert!(!scene.nodes.is_empty());
     }

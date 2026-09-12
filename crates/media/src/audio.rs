@@ -41,11 +41,9 @@ pub fn Audio(props: AudioProps) -> Element {
     let config = use_video_config();
 
     let timeline_time = frame as f64 / config.fps;
-    let time_in_seconds = props.start_from
-        + (timeline_time - props.start_at).max(0.0) * props.playback_rate.max(0.0);
-    let duration = props
-        .end_at
-        .map(|end| (end - props.start_at).max(0.0));
+    let time_in_seconds =
+        props.start_from + (timeline_time - props.start_at).max(0.0) * props.playback_rate.max(0.0);
+    let duration = props.end_at.map(|end| (end - props.start_at).max(0.0));
     let duration_attr = duration.map(|value| value.to_string()).unwrap_or_default();
 
     rsx! {
