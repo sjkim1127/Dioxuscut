@@ -53,6 +53,13 @@ pub fn project_audio_assets_from_dir(
         .collect()
 }
 
+fn native_image_cache_bytes() -> Option<usize> {
+    std::env::var("DIOXUSCUT_IMAGE_CACHE_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+}
+
 #[cfg(test)]
 mod project_asset_tests {
     use super::*;
@@ -1067,7 +1074,9 @@ pub async fn execute_render_command_with_registry_and_control(
                 TinySkiaBackend,
             };
 
-            let rasterizer = TinySkiaBackend::new().with_security_policy(security_policy.clone());
+            let rasterizer = TinySkiaBackend::new()
+                .with_image_cache_bytes(native_image_cache_bytes().unwrap_or(256 * 1024 * 1024))
+                .with_security_policy(security_policy.clone());
             if let Some(format) = request.codec.still_format() {
                 render_still_fallible_scaled(
                     &rasterizer,
