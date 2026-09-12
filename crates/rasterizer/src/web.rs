@@ -92,7 +92,7 @@ mod tests {
             timeline: vec![],
             image_format: None,
             jpeg_quality: None,
-            transparent: false,
+            transparent: true,
         });
         let json = serde_json::to_string(&message).unwrap();
         assert_eq!(
