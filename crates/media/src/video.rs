@@ -38,7 +38,8 @@ pub fn Video(props: VideoProps) -> Element {
     let config = use_video_config();
 
     // Compute the source video timestamp for this frame
-    let time_in_seconds = props.start_from + (frame as f64 / config.fps);
+    let time_in_seconds = props.start_from
+        + (frame as f64 / config.fps) * props.playback_rate.max(0.0);
 
     let base_style = "width: 100%; height: 100%; object-fit: cover;";
     let style = match &props.style {
@@ -51,6 +52,9 @@ pub fn Video(props: VideoProps) -> Element {
             src: "{props.src}",
             style: "{style}",
             muted: props.muted,
+            // `data-time` is the native Scene contract; retain Remotion's
+            // metadata for browser-side consumers as well.
+            "data-time": "{time_in_seconds}",
             // Data attributes carry rendering metadata
             "data-remotion-seek": "{time_in_seconds}",
             "data-remotion-volume": "{props.volume}",

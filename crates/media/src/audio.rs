@@ -31,13 +31,19 @@ pub fn Audio(props: AudioProps) -> Element {
     let frame = use_current_frame();
     let config = use_video_config();
 
-    let time_in_seconds = props.start_from + (frame as f64 / config.fps);
+    let time_in_seconds = props.start_from
+        + (frame as f64 / config.fps) * props.playback_rate.max(0.0);
 
     rsx! {
         audio {
             src: "{props.src}",
             muted: props.muted,
+            // Native VDOM emission consumes these canonical timeline fields.
+            "data-start-from": "{props.start_from}",
+            "data-timeline-start": "0",
             "data-remotion-seek": "{time_in_seconds}",
+            volume: "{props.muted.then_some(0.0).unwrap_or(props.volume)}",
+            "playback-rate": "{props.playback_rate}",
             "data-remotion-volume": "{props.volume}",
             "data-remotion-playback-rate": "{props.playback_rate}",
         }
