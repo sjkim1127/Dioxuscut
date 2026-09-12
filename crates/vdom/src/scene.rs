@@ -411,6 +411,19 @@ fn emit_element_media(
         .as_deref()
         .is_some_and(|namespace| namespace.contains("svg"));
     match element.tag.to_ascii_lowercase().as_str() {
+        "canvas" => {
+            if let Some(src) = attr("data-src").or_else(|| attr("src")) {
+                nodes.push(SceneNode::Image {
+                    src: src.to_string(),
+                    x,
+                    y,
+                    w: width,
+                    h: height,
+                    fit: style.object_fit,
+                    opacity: 1.0,
+                });
+            }
+        }
         "img" => {
             if let Some(src) = attr("src") {
                 nodes.push(SceneNode::Image {

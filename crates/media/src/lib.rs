@@ -7,6 +7,7 @@
 
 pub mod audio;
 pub mod audio_viz;
+pub mod canvas_image;
 pub mod ducking;
 pub mod gif;
 pub mod img;
@@ -19,6 +20,7 @@ pub use audio_viz::{
     create_smooth_svg_path, get_waveform_portion, get_waveform_portion_channel, load_audio_data,
     visualize_audio, AudioData, AudioVizError, VisualizeFor,
 };
+pub use canvas_image::{CanvasImage, CanvasImageProps};
 pub use ducking::{
     calculate_ducking_envelope, merge_speech_intervals, DuckingOptions, SpeechInterval,
 };

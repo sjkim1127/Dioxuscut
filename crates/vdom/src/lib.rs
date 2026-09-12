@@ -101,6 +101,12 @@ mod tests {
                 "data-time": "4.25",
                 r#loop: true,
             }
+            canvas {
+                "data-src": "assets/animated.png",
+                width: "64",
+                height: "32",
+                style: "object-fit: contain",
+            }
         }
     }
 
@@ -138,6 +144,11 @@ mod tests {
                 if src == "assets/clip.mp4"
                     && (*time - 4.25).abs() < 0.01
                     && *looped
+        ));
+        assert!(matches!(
+            &scene.nodes[3],
+            SceneNode::Image { src, w, h, fit: ImageFit::Contain, .. }
+                if src == "assets/animated.png" && (*w - 64.0).abs() < 0.01 && (*h - 32.0).abs() < 0.01
         ));
     }
 
