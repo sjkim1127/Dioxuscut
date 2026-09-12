@@ -115,6 +115,12 @@ The browser host exposes `window.dioxuscut.registerComposition(id, render)` and
 Three.js or React Three Fiber adapters can register composition-specific frame
 functions without changing the Rust protocol. The function receives
 `{frame, fps, props}` and may return a Promise for asynchronous asset loading.
+For Remotion-style asynchronous readiness, a composition may call
+`window.dioxuscut.delayRender(reason)` and later
+`window.dioxuscut.continueRender(handle)`. Calling
+`window.dioxuscut.cancelRender(handle, reason)` fails the current frame and
+propagates the reason to the CLI/Tauri job. A cancelled render is not captured
+as a partially prepared frame.
 
 Each worker owns one Chromium page and serializes its own requests; the shared
 streaming pipeline schedules different frames across the pool while preserving
