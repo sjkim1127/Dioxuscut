@@ -1,11 +1,54 @@
+import * as THREE from 'three';
 import { invoke } from '@tauri-apps/api/core';
+import './style.css';
 
 const app = document.querySelector('#app');
-app.innerHTML = `<main><h1>Dioxuscut Studio</h1><p>Native and Three.js preview host</p><pre id="status">Loading backend contract…</pre></main>`;
+app.innerHTML = `
+  <main class="studio">
+    <header><h1>Dioxuscut Studio</h1><span id="backend">connecting…</span></header>
+    <section class="preview"><canvas id="preview-canvas"></canvas></section>
+    <footer><span id="frame">frame 0</span><span id="protocol">worker protocol…</span></footer>
+  </main>`;
 
-const status = document.querySelector('#status');
+const canvas = document.querySelector('#preview-canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setClearColor(0x0b1020);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+camera.position.z = 3;
+scene.add(new THREE.HemisphereLight(0x9bbcff, 0x182033, 2));
+const cube = new THREE.Mesh(
+  new THREE.BoxGeometry(1, 1, 1),
+  new THREE.MeshStandardMaterial({ color: 0x6c63ff, roughness: 0.28, metalness: 0.35 }),
+);
+scene.add(cube);
+
+function resize() {
+  const { width, height } = canvas.parentElement.getBoundingClientRect();
+  renderer.setSize(width, height, false);
+  camera.aspect = width / Math.max(height, 1);
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+let frame = 0;
+function renderPreview() {
+  cube.rotation.x = frame * 0.012;
+  cube.rotation.y = frame * 0.018;
+  renderer.render(scene, camera);
+  document.querySelector('#frame').textContent = `frame ${frame++}`;
+  requestAnimationFrame(renderPreview);
+}
+renderPreview();
+
 Promise.all([invoke('backend_capabilities'), invoke('web_worker_protocol')])
   .then(([capabilities, protocol]) => {
-    status.textContent = JSON.stringify({ capabilities, protocol }, null, 2);
+    document.querySelector('#backend').textContent = capabilities.browser_runtime
+      ? 'Tauri · Three.js preview' : 'native preview';
+    document.querySelector('#protocol').textContent = `worker protocol v${protocol.version}`;
   })
-  .catch((error) => { status.textContent = `Studio bridge error: ${error}`; });
+  .catch((error) => {
+    document.querySelector('#backend').textContent = `bridge error: ${error}`;
+  });
