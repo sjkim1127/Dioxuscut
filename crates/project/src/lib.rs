@@ -882,6 +882,39 @@ mod tests {
         std::fs::remove_dir_all(cache).unwrap();
     }
 
+    #[test]
+    fn materializer_rejects_unknown_length_response_over_limit() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 256];
+            let _ = stream.read(&mut request);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n")
+                .unwrap();
+            stream.write_all(&[7; 2048]).unwrap();
+        });
+        let mut p = project();
+        p.assets = vec![AssetRef {
+            id: "large".into(),
+            path: format!("http://{address}/large.bin"),
+            kind: AssetKind::Other,
+            sha256: None,
+        }];
+        let cache =
+            std::env::temp_dir().join(format!("dioxuscut-remote-limit-{}", std::process::id()));
+        assert!(matches!(
+            p.materialize_remote_assets(&cache, 1024),
+            Err(ProjectError::AssetRead { reason, .. }) if reason.contains("exceeds")
+        ));
+        server.join().unwrap();
+        let _ = std::fs::remove_dir_all(cache);
+    }
+
     #[cfg(unix)]
     #[test]
     fn project_asset_files_reject_symlink_escape() {
