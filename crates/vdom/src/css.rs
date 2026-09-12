@@ -1,5 +1,5 @@
 use crate::dom::NativeElement;
-use dioxuscut_rasterizer::{Color, GradientStop, ImageFit, Transform2D};
+use dioxuscut_rasterizer::{Color, GradientStop, ImageFit, SceneFilter, Transform2D};
 use std::collections::HashMap;
 use taffy::geometry::{Line, Point, Rect, Size};
 use taffy::prelude::{
@@ -51,6 +51,7 @@ pub struct ResolvedStyle {
     pub border_width: f32,
     pub border_radius: f32,
     pub box_shadow: Option<dioxuscut_rasterizer::SceneShadow>,
+    pub filters: Vec<SceneFilter>,
     pub font_size: f32,
     pub font_weight: u16,
     pub font_sources: Vec<String>,
@@ -76,6 +77,7 @@ impl Default for ResolvedStyle {
             border_width: 0.0,
             border_radius: 0.0,
             box_shadow: None,
+            filters: Vec::new(),
             font_size: 16.0,
             font_weight: 400,
             font_sources: Vec::new(),
@@ -497,6 +499,7 @@ pub(crate) fn apply_declarations(style: &mut ResolvedStyle, declarations: &[(Str
             }
             "border-radius" => style.border_radius = parse_px(value).unwrap_or(0.0).max(0.0),
             "box-shadow" => style.box_shadow = parse_box_shadow(value),
+            "filter" => style.filters = parse_filters(value),
             "font-size" => style.font_size = parse_px(value).unwrap_or(style.font_size).max(1.0),
             "font-weight" => {
                 style.font_weight = match value.as_str() {
@@ -588,6 +591,42 @@ fn parse_box_shadow(value: &str) -> Option<dioxuscut_rasterizer::SceneShadow> {
         blur_sigma: lengths.get(2).copied().unwrap_or(0.0).max(0.0),
         color,
     })
+}
+
+fn parse_filters(value: &str) -> Vec<SceneFilter> {
+    let mut filters = Vec::new();
+    for token in value.split(')').filter_map(|part| part.split_once('(')) {
+        let name = token.0.trim().to_ascii_lowercase();
+        let argument = token.1.trim();
+        let parsed = argument
+            .trim_end_matches('%')
+            .trim_end_matches("px")
+            .trim_end_matches("deg")
+            .parse::<f32>()
+            .ok();
+        let normalized = parsed.map(|value| {
+            if argument.ends_with('%') {
+                value / 100.0
+            } else {
+                value
+            }
+        });
+        let filter = match name.as_str() {
+            "blur" => parsed.map(|sigma| SceneFilter::Blur { sigma }),
+            "brightness" => normalized.map(|amount| SceneFilter::Brightness { amount }),
+            "grayscale" => normalized.map(|amount| SceneFilter::Grayscale { amount }),
+            "opacity" => normalized.map(|amount| SceneFilter::Opacity { amount }),
+            "contrast" => normalized.map(|factor| SceneFilter::Contrast { factor }),
+            "saturate" => normalized.map(|factor| SceneFilter::Saturation { factor }),
+            "hue-rotate" => parsed.map(|degrees| SceneFilter::HueRotate { degrees }),
+            "invert" => normalized.map(|amount| SceneFilter::Invert { amount }),
+            _ => None,
+        };
+        if let Some(filter) = filter {
+            filters.push(filter);
+        }
+    }
+    filters
 }
 
 fn css_values(value: &str) -> Vec<&str> {
@@ -1073,5 +1112,23 @@ mod tests {
             (4.0, 6.0, 8.0)
         );
         assert_eq!(shadow.color, Color::rgba(10, 20, 30, 128));
+    }
+
+    #[test]
+    fn parses_css_filter_chain_for_native_layer() {
+        let stylesheet = Stylesheet::parse(
+            ".hero { filter: blur(4px) grayscale(50%) hue-rotate(15deg) opacity(80%); }",
+        )
+        .unwrap();
+        let mut element = NativeElement {
+            tag: "div".into(),
+            ..Default::default()
+        };
+        element.attributes.insert("class".into(), "hero".into());
+        let style = stylesheet.resolve(&element, None);
+        assert!(matches!(style.filters[0], SceneFilter::Blur { sigma } if sigma == 4.0));
+        assert!(matches!(style.filters[1], SceneFilter::Grayscale { amount } if amount == 0.5));
+        assert!(matches!(style.filters[2], SceneFilter::HueRotate { degrees } if degrees == 15.0));
+        assert!(matches!(style.filters[3], SceneFilter::Opacity { amount } if amount == 0.8));
     }
 }

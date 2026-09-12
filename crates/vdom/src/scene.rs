@@ -221,7 +221,7 @@ impl SceneLayout<'_> {
                         }),
                         mask: None,
                         mask_mode: MaskMode::Alpha,
-                        filters: Vec::new(),
+                        filters: record.style.filters.clone(),
                         shadow: record.style.box_shadow.clone(),
                         children: nodes,
                     }])
@@ -232,8 +232,19 @@ impl SceneLayout<'_> {
                         clip: None,
                         mask: None,
                         mask_mode: MaskMode::Alpha,
-                        filters: Vec::new(),
+                        filters: record.style.filters.clone(),
                         shadow: Some(shadow),
+                        children: nodes,
+                    }])
+                } else if !record.style.filters.is_empty() {
+                    Ok(vec![SceneNode::Layer {
+                        opacity: record.style.opacity,
+                        blend_mode: BlendMode::Normal,
+                        clip: None,
+                        mask: None,
+                        mask_mode: MaskMode::Alpha,
+                        filters: record.style.filters.clone(),
+                        shadow: None,
                         children: nodes,
                     }])
                 } else if record.style.opacity < 1.0 {
