@@ -328,11 +328,14 @@ impl Project {
         let replacements: Vec<(String, String)> = self
             .assets
             .iter_mut()
-            .filter(|asset| !asset.path.contains("://") && !asset.path.starts_with("data:"))
             .flat_map(|asset| {
                 let reference = format!("asset://{}", asset.id);
                 let original = asset.path.clone();
-                let resolved = base_dir.join(&original).to_string_lossy().into_owned();
+                let resolved = if original.contains("://") || original.starts_with("data:") {
+                    original.clone()
+                } else {
+                    base_dir.join(&original).to_string_lossy().into_owned()
+                };
                 asset.path = resolved.clone();
                 vec![(original, resolved.clone()), (reference, resolved)]
             })
@@ -367,19 +370,18 @@ impl Project {
         let replacements: Vec<(String, String)> = self
             .assets
             .iter_mut()
-            .filter_map(|asset| {
+            .flat_map(|asset| {
                 if asset.path.contains("://") || asset.path.starts_with("data:") {
-                    return None;
+                    return vec![(asset.path.clone(), format!("asset://{}", asset.id))];
                 }
                 let path = std::path::Path::new(&asset.path);
-                let relative = path
-                    .strip_prefix(base_dir)
-                    .ok()?
-                    .to_string_lossy()
-                    .into_owned();
+                let Some(relative) = path.strip_prefix(base_dir).ok() else {
+                    return Vec::new();
+                };
+                let relative = relative.to_string_lossy().into_owned();
                 let resolved = asset.path.clone();
                 asset.path = relative.clone();
-                Some((resolved, relative))
+                vec![(resolved, relative)]
             })
             .collect();
 
@@ -730,18 +732,32 @@ mod tests {
     #[test]
     fn project_resolves_manifest_paths_inside_nested_props() {
         let mut p = project();
-        p.assets = vec![AssetRef {
-            id: "poster".into(),
-            path: "assets/poster.png".into(),
-            kind: AssetKind::Image,
-            sha256: None,
-        }];
-        p.props = serde_json::json!({"layers": [{"src": "asset://poster"}]});
+        p.assets = vec![
+            AssetRef {
+                id: "poster".into(),
+                path: "assets/poster.png".into(),
+                kind: AssetKind::Image,
+                sha256: None,
+            },
+            AssetRef {
+                id: "remote".into(),
+                path: "https://cdn.example/poster.png".into(),
+                kind: AssetKind::Image,
+                sha256: None,
+            },
+        ];
+        p.props =
+            serde_json::json!({"layers": [{"src": "asset://poster"}, {"src": "asset://remote"}]});
         p.resolve_local_asset_paths("/tmp/project");
         assert_eq!(p.assets[0].path, "/tmp/project/assets/poster.png");
+        assert_eq!(p.assets[1].path, "https://cdn.example/poster.png");
         assert_eq!(
             p.props["layers"][0]["src"],
             "/tmp/project/assets/poster.png"
+        );
+        assert_eq!(
+            p.props["layers"][1]["src"],
+            "https://cdn.example/poster.png"
         );
     }
     #[test]
