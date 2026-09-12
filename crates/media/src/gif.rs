@@ -2,6 +2,7 @@
 //!
 //! Renders an animated GIF synced to the composition timeline.
 
+use crate::img::ImageFit;
 use dioxus::prelude::*;
 use dioxuscut_core::hooks::{use_current_frame, use_video_config};
 use dioxuscut_rasterizer::gif_cache::LoopBehavior;
@@ -21,6 +22,9 @@ pub struct GifProps {
     /// What to do when the animation ends (default: loop).
     #[props(default = LoopBehavior::Loop)]
     pub loop_behavior: LoopBehavior,
+    /// How the animated image fits within its box (default: cover).
+    #[props(default)]
+    pub fit: ImageFit,
     /// Horizontal position in pixels (default `0.0`).
     #[props(default = 0.0)]
     pub x: f32,
@@ -56,7 +60,7 @@ pub fn Gif(props: GifProps) -> Element {
     rsx! {
         img {
             src: "{props.src}",
-            style: "position: absolute; left: {props.x}px; top: {props.y}px; width: {props.width}px; height: {props.height}px; object-fit: cover;",
+            style: "position: absolute; left: {props.x}px; top: {props.y}px; width: {props.width}px; height: {props.height}px; object-fit: {props.fit.as_css()};",
             "data-frame": "{frame}",
             "data-time": "{time_secs:.4}",
             "data-loop": "{props.loop_behavior:?}",
