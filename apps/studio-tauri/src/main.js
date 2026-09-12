@@ -91,6 +91,11 @@ async function preloadAssets(assets = []) {
     if (['ttf', 'otf', 'woff', 'woff2'].includes(extension)) {
       task = new FontFace(`dioxuscut-${preloadedAssets.size}`, `url(${source})`).load();
       task = task.then((font) => { document.fonts.add(font); return font; });
+    } else if (extension === 'json') {
+      task = fetch(source).then((response) => {
+        if (!response.ok) throw new Error(`failed to preload asset: ${source}`);
+        return response.json();
+      });
     } else if (['mp4', 'webm', 'mov', 'm4v'].includes(extension)) {
       task = new Promise((resolve, reject) => {
         const video = document.createElement('video');
