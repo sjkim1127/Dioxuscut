@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { invoke } from '@tauri-apps/api/core';
+import { join, tempDir } from '@tauri-apps/api/path';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import './style.css';
 
@@ -326,7 +327,7 @@ document.querySelector('#save-project').addEventListener('click', async () => {
 document.querySelector('#submit-render').addEventListener('click', async () => {
   try {
     const id = await invoke('submit_project', { project });
-    const output = `/tmp/dioxuscut-${id}.mp4`;
+    const output = await join(await tempDir(), `dioxuscut-${id}.mp4`);
     await invoke('start_render_job', { id, output });
     currentJobId = id;
     document.querySelector('#cancel-render').disabled = false;
