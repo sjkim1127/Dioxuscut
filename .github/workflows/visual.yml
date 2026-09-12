@@ -19,6 +19,7 @@ jobs:
   render_snapshots:
     name: Render Visual Snapshots (HelloWorld)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     # Needs write permission to post PR comments
     permissions:
