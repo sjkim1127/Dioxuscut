@@ -714,6 +714,10 @@ fn parse_linear_gradient(value: &str) -> Option<(f32, Vec<GradientStop>)> {
             "to left" => (270.0, parts.next()?),
             "to bottom" => (180.0, parts.next()?),
             "to top" => (0.0, parts.next()?),
+            "to bottom right" => (135.0, parts.next()?),
+            "to bottom left" => (225.0, parts.next()?),
+            "to top right" => (45.0, parts.next()?),
+            "to top left" => (315.0, parts.next()?),
             _ => (180.0, first),
         }
     };
@@ -888,6 +892,20 @@ mod tests {
         let (_, stops) = style.background_gradient.expect("gradient");
         assert_eq!(stops[0].color, Color::rgba(255, 0, 0, 128));
         assert_eq!(stops[1].color, Color::rgb(0, 0, 255));
+    }
+
+    #[test]
+    fn parses_diagonal_gradient_direction() {
+        let stylesheet =
+            Stylesheet::parse(".hero { background: linear-gradient(to bottom right, red, blue); }")
+                .unwrap();
+        let mut element = NativeElement {
+            tag: "div".into(),
+            ..Default::default()
+        };
+        element.attributes.insert("class".into(), "hero".into());
+        let style = stylesheet.resolve(&element, None);
+        assert_eq!(style.background_gradient.unwrap().0, 135.0);
     }
 
     #[test]
