@@ -306,11 +306,12 @@ impl Project {
             .assets
             .iter_mut()
             .filter(|asset| !asset.path.contains("://") && !asset.path.starts_with("data:"))
-            .map(|asset| {
+            .flat_map(|asset| {
+                let reference = format!("asset://{}", asset.id);
                 let original = asset.path.clone();
                 let resolved = base_dir.join(&original).to_string_lossy().into_owned();
                 asset.path = resolved.clone();
-                (original, resolved)
+                vec![(original, resolved.clone()), (reference, resolved)]
             })
             .collect();
 
@@ -644,7 +645,7 @@ mod tests {
             kind: AssetKind::Image,
             sha256: None,
         }];
-        p.props = serde_json::json!({"layers": [{"src": "assets/poster.png"}]});
+        p.props = serde_json::json!({"layers": [{"src": "asset://poster"}]});
         p.resolve_local_asset_paths("/tmp/project");
         assert_eq!(p.assets[0].path, "/tmp/project/assets/poster.png");
         assert_eq!(
