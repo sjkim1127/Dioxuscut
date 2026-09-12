@@ -227,12 +227,14 @@ impl BrowserFrameBackend {
         writeln!(stdin, "{encoded}")?;
         stdin.flush()?;
         drop(stdin);
+        tracing::debug!(frame = request.frame, "browser frame request sent");
         let mut stdout = worker
             .stdout
             .lock()
             .map_err(|_| RasterError::Init("browser worker stdout lock poisoned".into()))?;
         let mut line = String::new();
         stdout.read_line(&mut line)?;
+        tracing::debug!(frame = request.frame, bytes = line.len(), "browser frame response received");
         let result = match serde_json::from_str::<WebWorkerMessage>(&line) {
             Ok(WebWorkerMessage::Frame(WebFrameResponse {
                 frame,
@@ -299,6 +301,10 @@ impl Drop for BrowserFrameBackend {
                 let _ = stdin.flush();
             }
             if let Ok(mut child) = worker.child.lock() {
+                let _ = child.try_wait();
+                if child.try_wait().ok().flatten().is_none() {
+                    let _ = child.kill();
+                }
                 let _ = child.wait();
             }
         }

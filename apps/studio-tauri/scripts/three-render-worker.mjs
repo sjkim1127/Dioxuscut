@@ -40,7 +40,7 @@ const browser = await chromium.launch({ executablePath, headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
 // Dev servers keep HMR/websocket connections open, so networkidle can never
 // settle. The explicit renderFrame readiness check below is the real gate.
-await page.goto(url, { waitUntil: 'domcontentloaded' });
+await page.goto(url, { waitUntil: 'domcontentloaded', timeout: frameTimeoutMs });
 await page.waitForFunction(() => typeof window.dioxuscut?.renderFrame === 'function', {
   timeout: frameTimeoutMs,
 });
