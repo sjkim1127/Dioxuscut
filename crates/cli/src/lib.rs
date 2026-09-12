@@ -833,5 +833,19 @@ pub async fn execute_render_command_with_registry_and_control(
     }
 
     tracing::info!(output = %request.output.display(), "Render completed");
+    if std::env::var_os("DIOXUSCUT_JSON").is_some() {
+        println!(
+            "{}",
+            serde_json::json!({
+                "ok": true,
+                "output": request.output,
+                "backend": format!("{:?}", request.backend).to_ascii_lowercase(),
+                "codec": format!("{:?}", request.codec).to_ascii_lowercase(),
+                "frame_start": frame_start,
+                "frame_end": frame_end,
+                "frames": frame_count,
+            })
+        );
+    }
     Ok(())
 }
