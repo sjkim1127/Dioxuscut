@@ -35,7 +35,7 @@ mod tests {
     use super::*;
     use dioxus::prelude::*;
     use dioxuscut_composition::{NativeComposition, NativeCompositionContext};
-    use dioxuscut_rasterizer::{Color, ImageFit, SceneNode};
+    use dioxuscut_rasterizer::{BlendMode, Color, ImageFit, SceneFilter, SceneNode};
     use serde_json::json;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -105,6 +105,34 @@ mod tests {
                                 && (*h - 90.0).abs() < 0.01
                     )
         ));
+    }
+
+    fn styled_layer() -> Element {
+        rsx! {
+            div {
+                style: "width: 120px; height: 80px; background: red; filter: grayscale(50%); box-shadow: 2px 3px 4px black; mix-blend-mode: screen;",
+            }
+        }
+    }
+
+    #[test]
+    fn maps_css_effects_to_a_shared_native_layer() {
+        let mut virtual_dom = VirtualDom::new(styled_layer);
+        let scene = render_virtual_dom(&mut virtual_dom, 640, 360, &Stylesheet::new()).unwrap();
+        let SceneNode::Layer {
+            blend_mode,
+            filters,
+            shadow,
+            ..
+        } = &scene.nodes[0]
+        else {
+            panic!("expected CSS effects to emit a native layer: {scene:#?}");
+        };
+        assert_eq!(*blend_mode, BlendMode::Screen);
+        assert!(
+            matches!(filters.as_slice(), [SceneFilter::Grayscale { amount }] if (*amount - 0.5).abs() < f32::EPSILON)
+        );
+        assert!(shadow.is_some());
     }
 
     fn grid() -> Element {
