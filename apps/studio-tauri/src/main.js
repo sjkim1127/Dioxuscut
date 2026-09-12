@@ -331,7 +331,12 @@ document.querySelector('#load-project').addEventListener('click', async () => {
 
 document.querySelector('#save-project').addEventListener('click', async () => {
   try {
-    project.props = { color: cube.material.color.getStyle() };
+    project.props = {
+      ...(project.props && typeof project.props === 'object' && !Array.isArray(project.props)
+        ? project.props
+        : {}),
+      color: cube.material.color.getStyle(),
+    };
     const selected = await save({
       defaultPath: document.querySelector('#project-path').value,
       filters: [{ name: 'Dioxuscut project', extensions: ['json'] }],
