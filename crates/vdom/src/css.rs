@@ -696,7 +696,7 @@ fn parse_linear_gradient(value: &str) -> Option<(f32, Vec<GradientStop>)> {
         .trim()
         .strip_prefix("linear-gradient(")?
         .strip_suffix(')')?;
-    let mut parts = contents.split(',').map(str::trim);
+    let mut parts = split_css_arguments(contents).into_iter();
     let first = parts.next()?;
     let (angle_deg, first_stop) = if let Some(angle) = first.strip_suffix("deg") {
         (angle.trim().parse().ok()?, parts.next()?)
@@ -726,6 +726,25 @@ fn parse_linear_gradient(value: &str) -> Option<(f32, Vec<GradientStop>)> {
             })
             .collect(),
     ))
+}
+
+fn split_css_arguments(value: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut depth: usize = 0;
+    for (index, character) in value.char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                parts.push(value[start..index].trim());
+                start = index + character.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    parts.push(value[start..].trim());
+    parts
 }
 
 #[cfg(test)]
@@ -805,6 +824,23 @@ mod tests {
         assert_eq!(angle, 90.0);
         assert_eq!(stops.len(), 2);
         assert_eq!(stops[0].color, Color::rgb(255, 0, 0));
+        assert_eq!(stops[1].color, Color::rgb(0, 0, 255));
+    }
+
+    #[test]
+    fn parses_linear_gradient_with_rgba_stop() {
+        let stylesheet = Stylesheet::parse(
+            ".hero { background-image: linear-gradient(90deg, rgba(255, 0, 0, 0.5), blue); }",
+        )
+        .unwrap();
+        let mut element = NativeElement {
+            tag: "div".into(),
+            ..Default::default()
+        };
+        element.attributes.insert("class".into(), "hero".into());
+        let style = stylesheet.resolve(&element, None);
+        let (_, stops) = style.background_gradient.expect("gradient");
+        assert_eq!(stops[0].color, Color::rgba(255, 0, 0, 128));
         assert_eq!(stops[1].color, Color::rgb(0, 0, 255));
     }
 }
