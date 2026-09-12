@@ -88,6 +88,7 @@ pub use web::{
 pub use web_backend::BrowserFrameBackend;
 
 pub use gif_cache::{GifFrame, GifFrameCache, LoopBehavior};
+pub use image_cache::DEFAULT_IMAGE_CACHE_BYTES;
 pub use scene::{
     AudioTrack, BlendMode, ClipRegion, Color, GradientStop, ImageFit, MaskMode, Scene, SceneFilter,
     SceneNode, SceneShadow, Transform2D, VisualizerStyle,

@@ -12,7 +12,8 @@ pub(crate) struct ImageCache {
 }
 
 const MAX_DATA_URI_BYTES: usize = 32 * 1024 * 1024;
-const MAX_CACHE_BYTES: usize = 256 * 1024 * 1024;
+/// Default decoded image cache budget for the native backend.
+pub const DEFAULT_IMAGE_CACHE_BYTES: usize = 256 * 1024 * 1024;
 
 #[derive(Default)]
 struct ImageCacheState {
@@ -51,7 +52,7 @@ impl ImageCacheState {
 
 impl Default for ImageCache {
     fn default() -> Self {
-        Self::with_max_bytes(MAX_CACHE_BYTES)
+        Self::with_max_bytes(DEFAULT_IMAGE_CACHE_BYTES)
     }
 }
 

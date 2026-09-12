@@ -1075,7 +1075,10 @@ pub async fn execute_render_command_with_registry_and_control(
             };
 
             let rasterizer = TinySkiaBackend::new()
-                .with_image_cache_bytes(native_image_cache_bytes().unwrap_or(256 * 1024 * 1024))
+                .with_image_cache_bytes(
+                    native_image_cache_bytes()
+                        .unwrap_or(dioxuscut_rasterizer::DEFAULT_IMAGE_CACHE_BYTES),
+                )
                 .with_security_policy(security_policy.clone());
             if let Some(format) = request.codec.still_format() {
                 render_still_fallible_scaled(
@@ -1143,7 +1146,7 @@ pub async fn execute_render_command_with_registry_and_control(
                         .ok()
                         .and_then(|value| value.parse::<usize>().ok())
                         .filter(|value| *value > 0)
-                        .unwrap_or(512 * 1024 * 1024),
+                        .unwrap_or(dioxuscut_rasterizer::DEFAULT_MAX_CACHE_BYTES),
                 );
             rasterizer.set_composition(
                 request
