@@ -132,6 +132,7 @@ fn start_render_job(
                     codec: project_render_codec(&output_path),
                     frame_start: project.settings.frame_start.unwrap_or(0),
                     frame_end: project.settings.frame_end,
+                    frame_step: 1,
                     timeout_seconds: None,
                     crf: 18,
                     preset: "fast".into(),

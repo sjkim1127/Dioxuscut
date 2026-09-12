@@ -389,6 +389,7 @@ fn TopBar(mut props: TopBarProps) -> Element {
             codec: RenderCodec::H264,
             frame_start: 0,
             frame_end: None,
+            frame_step: 1,
             timeout_seconds: Some(300),
             crf: 18,
             preset: "fast".into(),

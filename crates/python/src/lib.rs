@@ -143,6 +143,7 @@ fn render_native(
         codec: parsed_codec,
         frame_start,
         frame_end,
+        frame_step: 1,
         timeout_seconds: None,
         crf,
         preset: preset.to_string(),

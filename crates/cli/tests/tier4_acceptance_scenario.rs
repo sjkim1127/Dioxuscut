@@ -45,6 +45,7 @@ async fn test_tier4_real_world_acceptance_scenario() {
         codec: dioxuscut_cli::RenderCodec::H264,
         frame_start: 0,
         frame_end: None,
+        frame_step: 1,
         timeout_seconds: None,
         crf: 18,
         preset: "fast".into(),

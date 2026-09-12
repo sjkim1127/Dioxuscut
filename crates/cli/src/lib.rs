@@ -329,6 +329,10 @@ pub enum Commands {
         #[arg(long)]
         frame_end: Option<u32>,
 
+        /// Render every nth source frame (GIF output only).
+        #[arg(long, default_value_t = 1)]
+        frame_step: u32,
+
         /// Abort the render after this many seconds.
         #[arg(long)]
         timeout_seconds: Option<u64>,
@@ -470,6 +474,7 @@ pub struct RenderRequest {
     pub codec: RenderCodec,
     pub frame_start: u32,
     pub frame_end: Option<u32>,
+    pub frame_step: u32,
     pub timeout_seconds: Option<u64>,
     pub crf: u32,
     pub preset: String,
@@ -913,6 +918,7 @@ pub async fn execute_render_command_with_registry_and_control(
                     &request.output,
                 )
                 .with_frame_start(frame_start)
+                .with_frame_step(request.frame_step)
                 .with_codec(request.codec.video_codec().expect("video codec validated"))
                 .with_hw_accel(request.hw_accel)
                 .with_quality(request.crf, &request.preset)
@@ -971,6 +977,7 @@ pub async fn execute_render_command_with_registry_and_control(
                     &request.output,
                 )
                 .with_frame_start(frame_start)
+                .with_frame_step(request.frame_step)
                 .with_codec(request.codec.video_codec().expect("video codec validated"))
                 .with_hw_accel(request.hw_accel)
                 .with_quality(request.crf, &request.preset)
@@ -1016,6 +1023,7 @@ pub async fn execute_render_command_with_registry_and_control(
                         &request.output,
                     )
                     .with_frame_start(frame_start)
+                    .with_frame_step(request.frame_step)
                     .with_codec(request.codec.video_codec().expect("video codec validated"))
                     .with_hw_accel(request.hw_accel)
                     .with_quality(request.crf, &request.preset)
