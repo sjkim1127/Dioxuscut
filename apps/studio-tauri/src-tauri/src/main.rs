@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use dioxuscut_cli::{
-    execute_render_command_with_control, RenderBackend, RenderCodec, RenderRequest,
+    execute_project_render_command_with_control, RenderBackend, RenderCodec, RenderRequest,
 };
 use dioxuscut_project::{JobStatus, JobStore, Project, RenderJob};
 use dioxuscut_rasterizer::{
@@ -145,7 +145,9 @@ fn start_render_job(
                     });
                 tokio::runtime::Runtime::new()
                     .map_err(|e| e.to_string())?
-                    .block_on(execute_render_command_with_control(&request, control))
+                    .block_on(execute_project_render_command_with_control(
+                        &request, &project, control,
+                    ))
                     .map_err(|e| e.to_string())
             })();
             let _ = std::fs::remove_file(&props_path);

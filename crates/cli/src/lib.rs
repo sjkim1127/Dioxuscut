@@ -16,6 +16,7 @@ pub use composition::{
 pub use dioxuscut_media::{
     get_audio_metadata, get_video_metadata, static_file, AudioMetadata, VideoMetadata,
 };
+use dioxuscut_project::{Clip, Project};
 pub use migrate::{transpile_remotion, MigrationStats, MigrationTarget};
 #[cfg(feature = "rhai")]
 pub use rhai_runtime::{RhaiComposition, SceneBuilder};
@@ -28,6 +29,60 @@ struct BrowserComposition {
 }
 
 struct BrowserPreparedComposition;
+
+struct ProjectTimelineComposition {
+    id: String,
+    clips: Vec<Clip>,
+}
+
+struct ProjectTimelinePrepared<'a> {
+    composition: &'a ProjectTimelineComposition,
+    context: NativeCompositionContext,
+}
+
+impl dioxuscut_composition::PreparedComposition for ProjectTimelinePrepared<'_> {
+    fn render(&self, frame: u32) -> Result<dioxuscut_rasterizer::Scene, CompositionError> {
+        let mut scene = dioxuscut_rasterizer::Scene::new();
+        for clip in &self.composition.clips {
+            if frame < clip.start || frame >= clip.start.saturating_add(clip.duration) {
+                continue;
+            }
+            let registry = built_in_registry();
+            let composition = registry
+                .get(&clip.composition)
+                .map_err(|error| CompositionError::render(frame, error.to_string()))?;
+            let clip_context = NativeCompositionContext {
+                duration_in_frames: clip.duration,
+                ..self.context
+            };
+            let prepared = composition
+                .prepare(&clip.props, clip_context)
+                .map_err(|error| CompositionError::render(frame, error.to_string()))?;
+            let clip_scene = prepared
+                .render(frame - clip.start)
+                .map_err(|error| CompositionError::render(frame, error.to_string()))?;
+            scene.nodes.extend(clip_scene.nodes);
+        }
+        Ok(scene)
+    }
+}
+
+impl Composition for ProjectTimelineComposition {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn prepare(
+        &self,
+        _props: &serde_json::Value,
+        context: NativeCompositionContext,
+    ) -> Result<Box<dyn dioxuscut_composition::PreparedComposition + '_>, CompositionError> {
+        Ok(Box::new(ProjectTimelinePrepared {
+            composition: self,
+            context,
+        }))
+    }
+}
 
 impl dioxuscut_composition::PreparedComposition for BrowserPreparedComposition {
     fn render(&self, _frame: u32) -> Result<dioxuscut_rasterizer::Scene, CompositionError> {
@@ -610,6 +665,33 @@ pub async fn execute_render_command_with_registry(
         default_render_control(request),
     )
     .await
+}
+
+/// Render a project timeline, resolving Native clip compositions through the
+/// built-in registry while preserving the shared render request contract.
+pub async fn execute_project_render_command_with_control(
+    request: &RenderRequest,
+    project: &Project,
+    control: dioxuscut_rasterizer::RenderControl,
+) -> anyhow::Result<()> {
+    if project.tracks.is_empty() || request.backend != RenderBackend::Native {
+        return execute_render_command_with_registry_and_control(
+            request,
+            &built_in_registry(),
+            control,
+        )
+        .await;
+    }
+    let mut registry = CompositionRegistry::new();
+    registry.register(ProjectTimelineComposition {
+        id: project.composition.clone(),
+        clips: project
+            .tracks
+            .iter()
+            .flat_map(|track| track.clips.iter().cloned())
+            .collect(),
+    })?;
+    execute_render_command_with_registry_and_control(request, &registry, control).await
 }
 
 /// Build the standard CLI progress and timeout controls for a render request.

@@ -163,7 +163,7 @@ async fn main() -> anyhow::Result<()> {
             ));
             std::fs::write(&props_path, serde_json::to_vec(&project.props)?)?;
             let request = RenderRequest {
-                composition: Some(project.composition),
+                composition: Some(project.composition.clone()),
                 script: None,
                 props: Some(props_path.clone()),
                 output: output.clone(),
@@ -202,7 +202,12 @@ async fn main() -> anyhow::Result<()> {
                         .join(&asset_separator.to_string()),
                 );
             }
-            let result = dioxuscut_cli::execute_render_command(&request).await;
+            let result = dioxuscut_cli::execute_project_render_command_with_control(
+                &request,
+                &project,
+                dioxuscut_cli::default_render_control(&request),
+            )
+            .await;
             match previous_browser_assets {
                 Some(value) => std::env::set_var("DIOXUSCUT_BROWSER_ASSETS", value),
                 None => std::env::remove_var("DIOXUSCUT_BROWSER_ASSETS"),
