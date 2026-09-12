@@ -53,6 +53,7 @@ window.addEventListener('resize', resize);
 resize();
 
 let frame = 0;
+let currentJobId = null;
 let project = {
   version: 1,
   composition: 'three_preview',
@@ -63,6 +64,20 @@ let project = {
 function showMessage(message) {
   document.querySelector('#message').textContent = message;
 }
+
+async function refreshJob(id) {
+  const job = await invoke('get_render_job', { id });
+  if (!job) return;
+  const progress = `${job.completed_frames}/${job.project.settings.duration}`;
+  document.querySelector('#job').textContent = `${job.id} · ${job.status} · ${progress}`;
+  const terminal = ['completed', 'failed', 'cancelled'].includes(job.status);
+  document.querySelector('#cancel-render').disabled = terminal;
+  if (terminal && job.error) showMessage(job.error);
+}
+
+setInterval(() => {
+  if (currentJobId) refreshJob(currentJobId).catch((error) => showMessage(`job error: ${error}`));
+}, 250);
 
 document.querySelector('#load-project').addEventListener('click', async () => {
   try {
@@ -83,11 +98,11 @@ document.querySelector('#save-project').addEventListener('click', async () => {
 document.querySelector('#submit-render').addEventListener('click', async () => {
   try {
     const id = await invoke('submit_project', { project });
+    currentJobId = id;
     document.querySelector('#cancel-render').disabled = false;
     document.querySelector('#cancel-render').dataset.jobId = id;
     showMessage(`${id} queued`);
-    const job = await invoke('get_render_job', { id });
-    if (job) document.querySelector('#job').textContent = `${job.id} · ${job.status}`;
+    await refreshJob(id);
   } catch (error) { showMessage(`queue error: ${error}`); }
 });
 
@@ -96,8 +111,7 @@ document.querySelector('#cancel-render').addEventListener('click', async (event)
   if (!id) return;
   try {
     await invoke('cancel_render_job', { id });
-    document.querySelector('#job').textContent = `${id} · cancelled`;
-    event.currentTarget.disabled = true;
+    await refreshJob(id);
     showMessage('render cancelled');
   } catch (error) { showMessage(`cancel error: ${error}`); }
 });
