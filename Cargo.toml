@@ -18,6 +18,7 @@ members = [
     "crates/charts",
     "crates/python",
     "apps/studio",
+    "apps/studio-tauri/src-tauri",
     "apps/example",
 ]
 

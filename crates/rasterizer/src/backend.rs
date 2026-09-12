@@ -2,6 +2,7 @@
 
 use crate::scene::Scene;
 use image::RgbaImage;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Error type for rasterization failures.
@@ -44,7 +45,7 @@ pub struct FrameConfig {
 ///
 /// A frontend (for example a Three.js/Chromium worker) can use this metadata
 /// to select an appropriate scene path without guessing from the backend name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackendCapabilities {
     pub native_scene: bool,
     pub browser_runtime: bool,
