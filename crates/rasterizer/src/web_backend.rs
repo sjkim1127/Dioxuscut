@@ -580,7 +580,14 @@ mod tests {
         )
         .unwrap();
 
-        let backend = BrowserFrameBackend::new("/bin/sh", &script, "http://unused").unwrap();
+        let backend = BrowserFrameBackend::new("/bin/sh", &script, "http://unused")
+            .unwrap()
+            .with_image_format("JPEG")
+            .with_jpeg_quality(80)
+            .with_transparent(true);
+        assert_eq!(backend.image_format.as_deref(), Some("jpeg"));
+        assert_eq!(backend.jpeg_quality, Some(80));
+        assert!(backend.transparent);
         let image = backend
             .render_web_frame(&WebFrameRequest {
                 composition: Some("test".into()),
