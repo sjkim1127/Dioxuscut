@@ -94,6 +94,11 @@ To measure the persistent Three.js/Chromium transport under the same 1280x720,
 node benchmarks/browser/three-worker-bench.mjs
 ```
 
+The current one-worker PNG snapshot is recorded in
+`browser-three-result.json`: 3.001s for 180 frames, or 59.99 FPS equivalent,
+on the local Apple Silicon host. This is a transport result for the bundled
+`three_preview` composition, not a Remotion speedup claim.
+
 Set `WORKERS=2` or `WORKERS=4` to measure persistent Chromium worker scaling;
 each worker owns an isolated page and receives a different frame in each batch.
 
