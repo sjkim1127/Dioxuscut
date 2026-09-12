@@ -65,6 +65,18 @@ pub struct ProjectSettings {
     pub frame_end: Option<u32>,
     #[serde(default)]
     pub backend: BackendKind,
+    /// Browser worker screenshot format (`png` or `jpeg`).
+    #[serde(default)]
+    pub browser_image_format: Option<String>,
+    /// JPEG quality used by the browser worker.
+    #[serde(default)]
+    pub browser_jpeg_quality: Option<u8>,
+    /// Browser worker response timeout in milliseconds.
+    #[serde(default)]
+    pub browser_frame_timeout_ms: Option<u64>,
+    /// Number of transport retries for browser worker failures.
+    #[serde(default)]
+    pub browser_transport_retries: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -743,6 +755,10 @@ mod tests {
                 frame_start: None,
                 frame_end: None,
                 backend: BackendKind::Native,
+                browser_image_format: None,
+                browser_jpeg_quality: None,
+                browser_frame_timeout_ms: None,
+                browser_transport_retries: None,
             },
             props: serde_json::json!({"title":"hello"}),
             assets: vec![],

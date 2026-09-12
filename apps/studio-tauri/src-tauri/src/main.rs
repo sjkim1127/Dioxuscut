@@ -319,9 +319,21 @@ fn start_render_job(
                 .or_else(|| local_server.as_ref().map(|server| server.url().to_string()))
                 .ok_or_else(|| "browser rendering URL is unavailable".to_string())?;
             let node = std::env::var_os("DIOXUSCUT_BROWSER_NODE").unwrap_or_else(|| "node".into());
-            let backend = BrowserFrameBackend::with_concurrency(node, worker, url, concurrency)
+            let mut backend = BrowserFrameBackend::with_concurrency(node, worker, url, concurrency)
                 .map_err(|error| error.to_string())?
                 .with_frame_cache_bytes(browser_frame_cache_bytes());
+            if let Some(format) = project.settings.browser_image_format.as_deref() {
+                backend = backend.with_image_format(format);
+            }
+            if let Some(quality) = project.settings.browser_jpeg_quality {
+                backend = backend.with_jpeg_quality(quality);
+            }
+            if let Some(timeout_ms) = project.settings.browser_frame_timeout_ms {
+                backend = backend.with_frame_timeout(std::time::Duration::from_millis(timeout_ms));
+            }
+            if let Some(retries) = project.settings.browser_transport_retries {
+                backend = backend.with_transport_retries(retries);
+            }
             backend
                 .set_composition(&project.composition)
                 .map_err(|error| error.to_string())?;
