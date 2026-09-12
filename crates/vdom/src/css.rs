@@ -721,23 +721,51 @@ fn parse_linear_gradient(value: &str) -> Option<(f32, Vec<GradientStop>)> {
             _ => (180.0, first),
         }
     };
-    let mut colors = vec![Color::from_css(first_stop)?];
-    colors.extend(parts.map(Color::from_css).collect::<Option<Vec<_>>>()?);
-    if colors.len() < 2 {
+    let mut stops = vec![parse_gradient_stop(first_stop)?];
+    stops.extend(parts.map(parse_gradient_stop).collect::<Option<Vec<_>>>()?);
+    if stops.len() < 2 {
         return None;
     }
-    let last = (colors.len() - 1) as f32;
+    let last = (stops.len() - 1) as f32;
+    let has_positions = stops.iter().any(|(_, position)| position.is_some());
+    let positions = if has_positions {
+        let mut positions = Vec::with_capacity(stops.len());
+        for (index, (_, position)) in stops.iter().enumerate() {
+            positions.push(position.unwrap_or(index as f32 / last));
+        }
+        positions
+    } else {
+        (0..stops.len()).map(|index| index as f32 / last).collect()
+    };
     Some((
         angle_deg,
-        colors
+        stops
             .into_iter()
+            .map(|(color, _)| color)
             .enumerate()
             .map(|(index, color)| GradientStop {
-                position: index as f32 / last,
+                position: positions[index],
                 color,
             })
             .collect(),
     ))
+}
+
+fn parse_gradient_stop(value: &str) -> Option<(Color, Option<f32>)> {
+    let value = value.trim();
+    let mut fields = value.rsplitn(2, char::is_whitespace);
+    if let (Some(position), Some(color)) = (fields.next(), fields.next()) {
+        if let Some(position) = position
+            .strip_suffix('%')
+            .and_then(|v| v.parse::<f32>().ok())
+        {
+            return Some((
+                Color::from_css(color.trim())?,
+                Some((position / 100.0).clamp(0.0, 1.0)),
+            ));
+        }
+    }
+    Some((Color::from_css(value)?, None))
 }
 
 fn parse_transform(value: &str) -> Option<Transform2D> {
@@ -910,6 +938,21 @@ mod tests {
         element.attributes.insert("class".into(), "hero".into());
         let style = stylesheet.resolve(&element, None);
         assert_eq!(style.background_gradient.unwrap().0, 135.0);
+    }
+
+    #[test]
+    fn preserves_gradient_stop_positions() {
+        let stylesheet =
+            Stylesheet::parse(".hero { background: linear-gradient(red 10%, blue 90%); }").unwrap();
+        let mut element = NativeElement {
+            tag: "div".into(),
+            ..Default::default()
+        };
+        element.attributes.insert("class".into(), "hero".into());
+        let style = stylesheet.resolve(&element, None);
+        let (_, stops) = style.background_gradient.expect("gradient");
+        assert!((stops[0].position - 0.1).abs() < f32::EPSILON);
+        assert!((stops[1].position - 0.9).abs() < f32::EPSILON);
     }
 
     #[test]
