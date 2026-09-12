@@ -818,6 +818,12 @@ pub async fn execute_render_command_with_registry_and_control(
             let rasterizer =
                 BrowserFrameBackend::with_concurrency("node", worker, url, concurrency)
                     .map_err(|error| anyhow::anyhow!("Browser backend init failed: {error}"))?;
+            rasterizer.set_composition(
+                request
+                    .composition
+                    .as_deref()
+                    .unwrap_or("BrowserComposition"),
+            )?;
             rasterizer.set_props(props.clone())?;
             if let Some(format) = request.codec.still_format() {
                 render_still_fallible(

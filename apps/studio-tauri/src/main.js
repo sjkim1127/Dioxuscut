@@ -40,13 +40,14 @@ const cube = new THREE.Mesh(
 scene.add(cube);
 
 // Explicit frame input keeps this scene deterministic for future exports.
-export function renderFrame({ frame: nextFrame, fps = 30, props = {} }) {
+export function renderFrame({ composition = 'three_preview', frame: nextFrame, fps = 30, props = {} }) {
   frame = nextFrame;
   cube.rotation.x = nextFrame / Math.max(fps, 1) * 0.36;
   cube.rotation.y = nextFrame / Math.max(fps, 1) * 0.54;
   if (typeof props.color === 'string') cube.material.color.set(props.color);
   renderer.render(scene, camera);
   document.querySelector('#frame').textContent = `frame ${nextFrame}`;
+  document.querySelector('#protocol').textContent = `composition ${composition}`;
 }
 window.dioxuscut = { renderFrame };
 

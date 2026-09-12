@@ -23,6 +23,7 @@ struct BrowserWorker {
 pub struct BrowserFrameBackend {
     workers: Vec<BrowserWorker>,
     next_worker: AtomicUsize,
+    composition: Mutex<Option<String>>,
     props: Mutex<serde_json::Value>,
     cache: FrameCacheManager,
 }
@@ -55,6 +56,7 @@ impl BrowserFrameBackend {
         Ok(Self {
             workers,
             next_worker: AtomicUsize::new(0),
+            composition: Mutex::new(None),
             props: Mutex::new(serde_json::Value::Null),
             cache: FrameCacheManager::default(),
         })
@@ -114,6 +116,16 @@ impl BrowserWorker {
 }
 
 impl BrowserFrameBackend {
+    /// Select the browser-side composition for subsequent frame requests.
+    pub fn set_composition(&self, composition: impl Into<String>) -> Result<(), RasterError> {
+        *self
+            .composition
+            .lock()
+            .map_err(|_| RasterError::Init("browser composition lock poisoned".into()))? =
+            Some(composition.into());
+        Ok(())
+    }
+
     pub fn set_props(&self, props: serde_json::Value) -> Result<(), RasterError> {
         *self
             .props
@@ -127,8 +139,14 @@ impl BrowserFrameBackend {
         self.cache.metrics()
     }
     pub fn render_web_frame(&self, request: &WebFrameRequest) -> Result<RgbaImage, RasterError> {
+        let composition = self
+            .composition
+            .lock()
+            .map_err(|_| RasterError::Init("browser composition lock poisoned".into()))?
+            .clone()
+            .unwrap_or_else(|| "browser".into());
         let cache_key = FrameCacheKey::from_props(
-            "browser",
+            &composition,
             request.frame as u64,
             request.width,
             request.height,
@@ -246,6 +264,11 @@ impl RasterizerBackend for BrowserFrameBackend {
             .map_err(|_| RasterError::Init("browser worker props lock poisoned".into()))?
             .clone();
         self.render_web_frame(&WebFrameRequest {
+            composition: self
+                .composition
+                .lock()
+                .map_err(|_| RasterError::Init("browser composition lock poisoned".into()))?
+                .clone(),
             frame: config.frame,
             fps: config.fps,
             width: config.width,

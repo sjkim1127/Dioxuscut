@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 /// Deterministic request sent to a browser-backed renderer.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WebFrameRequest {
+    /// Composition selected by the host. Older workers may ignore this field.
+    #[serde(default)]
+    pub composition: Option<String>,
     pub frame: u32,
     pub fps: f64,
     pub width: u32,
@@ -46,6 +49,7 @@ mod tests {
     #[test]
     fn render_request_round_trips_as_json() {
         let message = WebWorkerMessage::Render(WebFrameRequest {
+            composition: Some("demo".into()),
             frame: 12,
             fps: 30.0,
             width: 1280,
