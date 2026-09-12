@@ -6,7 +6,8 @@ CLI or Tauri commands.
 
 ## Project input
 
-Projects use the versioned `.dioxuscut.json` schema:
+Projects use the versioned `.dioxuscut.json` schema. A language-neutral JSON
+Schema is available at `schemas/dioxuscut-project-v1.schema.json`.
 
 ```json
 {

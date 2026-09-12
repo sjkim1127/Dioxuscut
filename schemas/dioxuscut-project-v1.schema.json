@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dioxuscut.dev/schema/project/v1.json",
+  "title": "Dioxuscut Project v1",
+  "type": "object",
+  "required": ["version", "composition", "settings"],
+  "properties": {
+    "version": { "const": 1 },
+    "composition": { "type": "string", "minLength": 1 },
+    "settings": {
+      "type": "object",
+      "required": ["width", "height", "fps", "duration"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "fps": { "type": "number", "exclusiveMinimum": 0 },
+        "duration": { "type": "integer", "minimum": 1 },
+        "backend": { "enum": ["native", "browser", "gpu"] }
+      },
+      "additionalProperties": false
+    },
+    "props": {},
+    "assets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/asset" }
+    },
+    "tracks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/track" }
+    }
+  },
+  "$defs": {
+    "asset": {
+      "type": "object",
+      "required": ["id", "path"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["other", "image", "video", "audio", "font", "model", "shader"] },
+        "sha256": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "track": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "clips": { "type": "array", "items": { "$ref": "#/$defs/clip" } }
+      },
+      "additionalProperties": false
+    },
+    "clip": {
+      "type": "object",
+      "required": ["id", "composition", "start", "duration"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "composition": { "type": "string", "minLength": 1 },
+        "start": { "type": "integer", "minimum": 0 },
+        "duration": { "type": "integer", "minimum": 1 },
+        "props": {}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
