@@ -169,7 +169,12 @@ async fn main() -> anyhow::Result<()> {
                 script: None,
                 props: Some(props_path.clone()),
                 output: output.clone(),
-                audio: vec![],
+                audio: project
+                    .assets
+                    .iter()
+                    .filter(|asset| asset.kind == dioxuscut_project::AssetKind::Audio)
+                    .map(|asset| std::path::PathBuf::from(&asset.path))
+                    .collect(),
                 width: project.settings.width,
                 height: project.settings.height,
                 fps: project.settings.fps,

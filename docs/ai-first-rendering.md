@@ -66,6 +66,10 @@ before the first frame. Images, fonts, and video metadata are loaded once and
 reused across frames; a failed load is retried according to the Browser frame
 retry policy. Active clips receive their local frame and clip props.
 
+Assets with `kind: "audio"` are also forwarded as encoder inputs by
+`render-project` and the Tauri job host, so an AI-generated project can declare
+audio in the shared project file without a host-specific CLI flag.
+
 ## Job lifecycle
 
 1. Submit the project with `submit_project` and retain the returned job id.
