@@ -205,18 +205,25 @@ impl BrowserFrameBackend {
         self.cache.metrics()
     }
     pub fn render_web_frame(&self, request: &WebFrameRequest) -> Result<RgbaImage, RasterError> {
-        let composition = self
-            .composition
-            .lock()
-            .map_err(|_| RasterError::Init("browser composition lock poisoned".into()))?
-            .clone()
-            .unwrap_or_else(|| "browser".into());
+        let composition = request.composition.clone().or_else(|| {
+            self.composition
+                .lock()
+                .ok()
+                .and_then(|composition| composition.clone())
+        });
+        let cache_inputs = serde_json::json!({
+            "props": &request.props,
+            "assets": &request.assets,
+            "timeline": &request.timeline,
+            "image_format": &request.image_format,
+            "jpeg_quality": request.jpeg_quality,
+        });
         let cache_key = FrameCacheKey::from_props(
-            &composition,
+            composition.as_deref().unwrap_or("browser"),
             request.frame as u64,
             request.width,
             request.height,
-            &request.props,
+            &cache_inputs,
         );
         if let Some(image) = self.cache.get(&cache_key) {
             return Ok((*image).clone());
