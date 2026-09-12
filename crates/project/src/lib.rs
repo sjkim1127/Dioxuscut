@@ -436,7 +436,9 @@ impl Project {
                     });
                 }
             }
-            let filename = format!("{actual}-{}", asset.id);
+            // Use only the digest in the cache filename. Asset IDs are user
+            // controlled metadata and must never influence filesystem paths.
+            let filename = format!("{actual}.asset");
             let local = cache_dir.join(filename);
             std::fs::write(&local, &bytes).map_err(|error| ProjectError::AssetRead {
                 asset: asset.id.clone(),
