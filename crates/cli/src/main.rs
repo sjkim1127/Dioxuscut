@@ -221,6 +221,12 @@ async fn main() -> anyhow::Result<()> {
             };
             let previous_browser_assets = std::env::var_os("DIOXUSCUT_BROWSER_ASSETS");
             let previous_browser_timeline = std::env::var_os("DIOXUSCUT_BROWSER_TIMELINE");
+            let previous_browser_image_format = std::env::var_os("DIOXUSCUT_BROWSER_IMAGE_FORMAT");
+            let previous_browser_jpeg_quality = std::env::var_os("DIOXUSCUT_BROWSER_JPEG_QUALITY");
+            let previous_browser_frame_timeout =
+                std::env::var_os("DIOXUSCUT_BROWSER_FRAME_TIMEOUT_MS");
+            let previous_browser_transport_retries =
+                std::env::var_os("DIOXUSCUT_BROWSER_TRANSPORT_RETRIES");
             if request.backend == dioxuscut_cli::RenderBackend::Browser {
                 let asset_separator = if cfg!(windows) { ';' } else { ':' };
                 std::env::set_var(
@@ -248,6 +254,34 @@ async fn main() -> anyhow::Result<()> {
                     "DIOXUSCUT_BROWSER_TIMELINE",
                     serde_json::to_string(&timeline)?,
                 );
+                set_optional_browser_env(
+                    "DIOXUSCUT_BROWSER_IMAGE_FORMAT",
+                    project.settings.browser_image_format.as_deref(),
+                );
+                set_optional_browser_env(
+                    "DIOXUSCUT_BROWSER_JPEG_QUALITY",
+                    project
+                        .settings
+                        .browser_jpeg_quality
+                        .map(|value| value.to_string())
+                        .as_deref(),
+                );
+                set_optional_browser_env(
+                    "DIOXUSCUT_BROWSER_FRAME_TIMEOUT_MS",
+                    project
+                        .settings
+                        .browser_frame_timeout_ms
+                        .map(|value| value.to_string())
+                        .as_deref(),
+                );
+                set_optional_browser_env(
+                    "DIOXUSCUT_BROWSER_TRANSPORT_RETRIES",
+                    project
+                        .settings
+                        .browser_transport_retries
+                        .map(|value| value.to_string())
+                        .as_deref(),
+                );
             }
             let result = dioxuscut_cli::execute_project_render_command_with_control(
                 &request,
@@ -263,6 +297,22 @@ async fn main() -> anyhow::Result<()> {
                 Some(value) => std::env::set_var("DIOXUSCUT_BROWSER_TIMELINE", value),
                 None => std::env::remove_var("DIOXUSCUT_BROWSER_TIMELINE"),
             }
+            restore_browser_env(
+                "DIOXUSCUT_BROWSER_IMAGE_FORMAT",
+                previous_browser_image_format,
+            );
+            restore_browser_env(
+                "DIOXUSCUT_BROWSER_JPEG_QUALITY",
+                previous_browser_jpeg_quality,
+            );
+            restore_browser_env(
+                "DIOXUSCUT_BROWSER_FRAME_TIMEOUT_MS",
+                previous_browser_frame_timeout,
+            );
+            restore_browser_env(
+                "DIOXUSCUT_BROWSER_TRANSPORT_RETRIES",
+                previous_browser_transport_retries,
+            );
             let _ = std::fs::remove_file(props_path);
             result?;
         }
@@ -309,4 +359,19 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn set_optional_browser_env(name: &str, value: Option<&str>) {
+    if let Some(value) = value {
+        std::env::set_var(name, value);
+    } else {
+        std::env::remove_var(name);
+    }
+}
+
+fn restore_browser_env(name: &str, value: Option<std::ffi::OsString>) {
+    match value {
+        Some(value) => std::env::set_var(name, value),
+        None => std::env::remove_var(name),
+    }
 }
