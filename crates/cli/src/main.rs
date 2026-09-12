@@ -176,7 +176,7 @@ async fn main() -> anyhow::Result<()> {
                 audio: dioxuscut_cli::project_audio_assets(&project),
                 width: project.settings.width,
                 height: project.settings.height,
-                scale: 1.0,
+                scale: project.settings.scale,
                 fps: project.settings.fps,
                 duration: project.settings.duration,
                 backend: match project.settings.backend {

@@ -15,6 +15,7 @@
         "height": { "type": "integer", "minimum": 1 },
         "fps": { "type": "number", "exclusiveMinimum": 0 },
         "duration": { "type": "integer", "minimum": 1 },
+        "scale": { "type": "number", "exclusiveMinimum": 0, "default": 1.0 },
         "crf": { "type": ["integer", "null"], "minimum": 0 },
         "preset": { "type": ["string", "null"], "minLength": 1 },
         "concurrency": { "type": ["integer", "null"], "minimum": 1 },

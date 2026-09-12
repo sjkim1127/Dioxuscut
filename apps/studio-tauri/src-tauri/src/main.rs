@@ -134,6 +134,7 @@ fn start_render_job(
                     audio: dioxuscut_cli::project_audio_assets(&project),
                     width: project.settings.width,
                     height: project.settings.height,
+                    scale: project.settings.scale,
                     fps: project.settings.fps,
                     duration: project.settings.duration,
                     backend: match project.settings.backend {
@@ -301,6 +302,7 @@ fn start_render_job(
                     output_path.clone(),
                 )
                 .with_codec(project_video_codec(&output_path))
+                .with_scale(project.settings.scale)
                 .with_frame_step(project.settings.frame_step)
                 .with_frame_start(render_frame_start)
                 .with_quality(

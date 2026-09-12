@@ -29,6 +29,10 @@ fn default_frame_step() -> u32 {
     1
 }
 
+fn default_scale() -> f64 {
+    1.0
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectSettings {
@@ -36,6 +40,9 @@ pub struct ProjectSettings {
     pub height: u32,
     pub fps: f64,
     pub duration: u32,
+    /// Output scale applied after logical composition rendering.
+    #[serde(default = "default_scale")]
+    pub scale: f64,
     /// Optional FFmpeg quality value; hosts use their default when omitted.
     #[serde(default)]
     pub crf: Option<u32>,
@@ -151,6 +158,8 @@ pub enum ProjectError {
     InvalidFrameStep,
     #[error("project concurrency must be greater than zero")]
     InvalidConcurrency,
+    #[error("project scale must be finite and greater than zero")]
+    InvalidScale,
     #[error("invalid render job transition from {from:?} to {to:?}")]
     InvalidJobTransition { from: JobStatus, to: JobStatus },
     #[error("render job '{0}' was not found")]
@@ -178,6 +187,9 @@ impl Project {
         }
         if !self.settings.fps.is_finite() || self.settings.fps <= 0.0 {
             return Err(ProjectError::InvalidFps);
+        }
+        if !self.settings.scale.is_finite() || self.settings.scale <= 0.0 {
+            return Err(ProjectError::InvalidScale);
         }
         if self.settings.frame_step == 0 {
             return Err(ProjectError::InvalidFrameStep);
@@ -392,6 +404,7 @@ mod tests {
                 height: 1920,
                 fps: 30.0,
                 duration: 60,
+                scale: 1.0,
                 crf: None,
                 preset: None,
                 concurrency: None,

@@ -18,6 +18,7 @@ Schema is available at `schemas/dioxuscut-project-v1.schema.json`.
     "height": 720,
     "fps": 30,
     "duration": 150,
+    "scale": 1.0,
     "crf": 18,
     "preset": "fast",
     "concurrency": 4,
