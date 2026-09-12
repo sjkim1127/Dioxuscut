@@ -173,6 +173,8 @@ pub enum ValidationError {
     InvalidDuration(u32),
     #[error("Invalid frame range: start {start}, end {end}, composition duration {duration}")]
     InvalidFrameRange { start: u32, end: u32, duration: u32 },
+    #[error("Invalid frame step: {0}; expected a value greater than zero")]
+    InvalidFrameStep(u32),
     #[error("Output extension '.{actual}' is invalid for {codec}; expected {expected}")]
     InvalidOutputExtension {
         codec: String,
@@ -603,6 +605,12 @@ fn validate_render_params_for_codec(
 }
 
 fn validate_render_options(request: &RenderRequest) -> Result<(u32, u32), ValidationError> {
+    if request.frame_step == 0 {
+        return Err(ValidationError::InvalidFrameStep(request.frame_step));
+    }
+    if request.frame_step > 1 && request.codec != RenderCodec::Gif {
+        return Err(ValidationError::InvalidFrameStep(request.frame_step));
+    }
     let end = request.frame_end.unwrap_or_else(|| {
         if request.codec.still_format().is_some() {
             request.frame_start
@@ -787,6 +795,11 @@ pub async fn execute_render_command_with_registry_and_control(
     )?;
     let (frame_start, frame_end) = validate_render_options(request)?;
     let frame_count = frame_end - frame_start + 1;
+    let output_frame_count = if request.codec == RenderCodec::Gif {
+        frame_count.div_ceil(request.frame_step)
+    } else {
+        frame_count
+    };
     for path in &request.audio {
         if !path.is_file() {
             return Err(ValidationError::AudioFileNotFound(path.clone()).into());
@@ -914,7 +927,7 @@ pub async fn execute_render_command_with_registry_and_control(
                     request.width,
                     request.height,
                     request.fps,
-                    frame_count,
+                    output_frame_count,
                     &request.output,
                 )
                 .with_frame_start(frame_start)
@@ -973,7 +986,7 @@ pub async fn execute_render_command_with_registry_and_control(
                     request.width,
                     request.height,
                     request.fps,
-                    frame_count,
+                    output_frame_count,
                     &request.output,
                 )
                 .with_frame_start(frame_start)
@@ -1019,7 +1032,7 @@ pub async fn execute_render_command_with_registry_and_control(
                         request.width,
                         request.height,
                         request.fps,
-                        frame_count,
+                        output_frame_count,
                         &request.output,
                     )
                     .with_frame_start(frame_start)
@@ -1049,7 +1062,7 @@ pub async fn execute_render_command_with_registry_and_control(
                 "codec": format!("{:?}", request.codec).to_ascii_lowercase(),
                 "frame_start": frame_start,
                 "frame_end": frame_end,
-                "frames": frame_count,
+                "frames": output_frame_count,
             })
         );
     }

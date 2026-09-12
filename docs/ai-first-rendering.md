@@ -18,6 +18,7 @@ Schema is available at `schemas/dioxuscut-project-v1.schema.json`.
     "height": 720,
     "fps": 30,
     "duration": 150,
+    "frame_step": 1,
     "backend": "browser"
   },
   "props": { "color": "#6c63ff" },

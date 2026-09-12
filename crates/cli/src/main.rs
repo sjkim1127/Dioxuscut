@@ -184,7 +184,7 @@ async fn main() -> anyhow::Result<()> {
                 codec: project_codec(output)?,
                 frame_start: project.settings.frame_start.unwrap_or(0),
                 frame_end: project.settings.frame_end,
-                frame_step: 1,
+                frame_step: project.settings.frame_step,
                 timeout_seconds: None,
                 crf: 18,
                 preset: "fast".into(),

@@ -25,6 +25,10 @@ fn default_props() -> serde_json::Value {
     serde_json::json!({})
 }
 
+fn default_frame_step() -> u32 {
+    1
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectSettings {
@@ -32,6 +36,8 @@ pub struct ProjectSettings {
     pub height: u32,
     pub fps: f64,
     pub duration: u32,
+    #[serde(default = "default_frame_step")]
+    pub frame_step: u32,
     /// Optional inclusive frame range for automation and partial renders.
     #[serde(default)]
     pub frame_start: Option<u32>,
@@ -132,6 +138,8 @@ pub enum ProjectError {
     },
     #[error("invalid project frame range: {start}..={end} for duration {duration}")]
     InvalidFrameRange { start: u32, end: u32, duration: u32 },
+    #[error("project frame step must be greater than zero")]
+    InvalidFrameStep,
     #[error("invalid render job transition from {from:?} to {to:?}")]
     InvalidJobTransition { from: JobStatus, to: JobStatus },
     #[error("render job '{0}' was not found")]
@@ -159,6 +167,9 @@ impl Project {
         }
         if !self.settings.fps.is_finite() || self.settings.fps <= 0.0 {
             return Err(ProjectError::InvalidFps);
+        }
+        if self.settings.frame_step == 0 {
+            return Err(ProjectError::InvalidFrameStep);
         }
         if let Some(end) = self.settings.frame_end {
             let start = self.settings.frame_start.unwrap_or(0);
@@ -367,6 +378,7 @@ mod tests {
                 height: 1920,
                 fps: 30.0,
                 duration: 60,
+                frame_step: 1,
                 frame_start: None,
                 frame_end: None,
                 backend: BackendKind::Native,
