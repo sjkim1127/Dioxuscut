@@ -1,5 +1,5 @@
 use crate::dom::NativeElement;
-use dioxuscut_rasterizer::{Color, ImageFit};
+use dioxuscut_rasterizer::{Color, GradientStop, ImageFit};
 use std::collections::HashMap;
 use taffy::geometry::{Line, Point, Rect, Size};
 use taffy::prelude::{
@@ -43,6 +43,8 @@ pub struct ResolvedStyle {
     pub layout: Style,
     pub color: Color,
     pub background: Option<Color>,
+    /// A supported CSS linear-gradient background: angle and color stops.
+    pub background_gradient: Option<(f32, Vec<GradientStop>)>,
     pub border_color: Option<Color>,
     pub border_width: f32,
     pub border_radius: f32,
@@ -65,6 +67,7 @@ impl Default for ResolvedStyle {
             layout,
             color: Color::BLACK,
             background: None,
+            background_gradient: None,
             border_color: None,
             border_width: 0.0,
             border_radius: 0.0,
@@ -444,7 +447,14 @@ pub(crate) fn apply_declarations(style: &mut ResolvedStyle, declarations: &[(Str
             "grid-row-end" => style.layout.grid_row.end = parse_grid_placement(value),
             "grid-column-start" => style.layout.grid_column.start = parse_grid_placement(value),
             "grid-column-end" => style.layout.grid_column.end = parse_grid_placement(value),
-            "background" | "background-color" => style.background = Color::from_css(value),
+            "background" => {
+                style.background = Color::from_css(value);
+                style.background_gradient = parse_linear_gradient(value);
+            }
+            "background-color" => style.background = Color::from_css(value),
+            "background-image" => {
+                style.background_gradient = parse_linear_gradient(value);
+            }
             "color" => {
                 if let Some(color) = Color::from_css(value) {
                     style.color = color;
@@ -681,6 +691,44 @@ fn parse_grid_placement(value: &str) -> GridPlacement<String> {
     }
 }
 
+fn parse_linear_gradient(value: &str) -> Option<(f32, Vec<GradientStop>)> {
+    let contents = value
+        .trim()
+        .strip_prefix("linear-gradient(")?
+        .strip_suffix(')')?;
+    let mut parts = contents.split(',').map(str::trim);
+    let first = parts.next()?;
+    let (angle_deg, first_stop) = if let Some(angle) = first.strip_suffix("deg") {
+        (angle.trim().parse().ok()?, parts.next()?)
+    } else {
+        let angle = match first {
+            "to right" => 90.0,
+            "to left" => 270.0,
+            "to bottom" => 180.0,
+            "to top" => 0.0,
+            _ => 180.0,
+        };
+        (angle, first)
+    };
+    let mut colors = vec![Color::from_css(first_stop)?];
+    colors.extend(parts.map(Color::from_css).collect::<Option<Vec<_>>>()?);
+    if colors.len() < 2 {
+        return None;
+    }
+    let last = (colors.len() - 1) as f32;
+    Some((
+        angle_deg,
+        colors
+            .into_iter()
+            .enumerate()
+            .map(|(index, color)| GradientStop {
+                position: index as f32 / last,
+                color,
+            })
+            .collect(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -741,5 +789,23 @@ mod tests {
             GridPlacement::Line(_)
         ));
         assert_eq!(item_style.layout.grid_column.end, GridPlacement::Span(2));
+    }
+
+    #[test]
+    fn parses_linear_gradient_background() {
+        let stylesheet =
+            Stylesheet::parse(".hero { background: linear-gradient(90deg, #ff0000, #0000ff); }")
+                .unwrap();
+        let mut element = NativeElement {
+            tag: "div".into(),
+            ..Default::default()
+        };
+        element.attributes.insert("class".into(), "hero".into());
+        let style = stylesheet.resolve(&element, None);
+        let (angle, stops) = style.background_gradient.expect("gradient");
+        assert_eq!(angle, 90.0);
+        assert_eq!(stops.len(), 2);
+        assert_eq!(stops[0].color, Color::rgb(255, 0, 0));
+        assert_eq!(stops[1].color, Color::rgb(0, 0, 255));
     }
 }
