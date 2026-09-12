@@ -254,6 +254,12 @@ impl Project {
                     Some("composition cannot be empty")
                 } else if clip.duration == 0 {
                     Some("duration must be greater than zero")
+                } else if clip
+                    .start
+                    .checked_add(clip.duration)
+                    .is_none_or(|end| end > self.settings.duration)
+                {
+                    Some("clip range must fit within the project duration")
                 } else {
                     None
                 };
@@ -1034,6 +1040,33 @@ mod tests {
         assert!(matches!(
             p.validate(),
             Err(ProjectError::InvalidFrameRange { .. })
+        ));
+    }
+
+    #[test]
+    fn project_rejects_clips_outside_duration() {
+        let mut p = project();
+        p.tracks = vec![Track {
+            id: "main".into(),
+            clips: vec![Clip {
+                id: "late".into(),
+                composition: "caption".into(),
+                start: 59,
+                duration: 2,
+                props: serde_json::json!({}),
+            }],
+        }];
+        assert!(matches!(
+            p.validate(),
+            Err(ProjectError::InvalidClip { reason, .. })
+                if reason == "clip range must fit within the project duration"
+        ));
+
+        p.tracks[0].clips[0].start = u32::MAX;
+        assert!(matches!(
+            p.validate(),
+            Err(ProjectError::InvalidClip { reason, .. })
+                if reason == "clip range must fit within the project duration"
         ));
     }
 
