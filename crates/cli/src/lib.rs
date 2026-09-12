@@ -1036,9 +1036,9 @@ pub async fn execute_render_command_with_registry_and_control(
                         .and_then(|value| value.parse::<usize>().ok())
                 })
                 .unwrap_or(1);
-            let rasterizer =
-                BrowserFrameBackend::with_concurrency("node", worker, url, concurrency)
-                    .map_err(|error| anyhow::anyhow!("Browser backend init failed: {error}"))?;
+            let node = std::env::var_os("DIOXUSCUT_BROWSER_NODE").unwrap_or_else(|| "node".into());
+            let rasterizer = BrowserFrameBackend::with_concurrency(node, worker, url, concurrency)
+                .map_err(|error| anyhow::anyhow!("Browser backend init failed: {error}"))?;
             rasterizer.set_composition(
                 request
                     .composition

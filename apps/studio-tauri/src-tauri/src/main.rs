@@ -234,7 +234,8 @@ fn start_render_job(
         .insert(id.clone(), cancellation.clone());
     thread::spawn(move || {
         let result = (|| -> Result<(), String> {
-            let backend = BrowserFrameBackend::with_concurrency("node", worker, url, concurrency)
+            let node = std::env::var_os("DIOXUSCUT_BROWSER_NODE").unwrap_or_else(|| "node".into());
+            let backend = BrowserFrameBackend::with_concurrency(node, worker, url, concurrency)
                 .map_err(|error| error.to_string())?;
             backend
                 .set_composition(&project.composition)
@@ -485,7 +486,8 @@ fn list_browser_compositions() -> Result<Vec<String>, String> {
         .ok_or_else(|| "Browser backend requires DIOXUSCUT_BROWSER_WORKER".to_string())?;
     let url = std::env::var("DIOXUSCUT_BROWSER_URL")
         .unwrap_or_else(|_| "http://localhost:1420".to_string());
-    let backend = BrowserFrameBackend::with_concurrency("node", worker, url, 1)
+    let node = std::env::var_os("DIOXUSCUT_BROWSER_NODE").unwrap_or_else(|| "node".into());
+    let backend = BrowserFrameBackend::with_concurrency(node, worker, url, 1)
         .map_err(|error| error.to_string())?;
     Ok(backend.compositions())
 }
