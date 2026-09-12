@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -158,6 +159,12 @@ pub enum ProjectError {
     InvalidFrameStep,
     #[error("project concurrency must be greater than zero")]
     InvalidConcurrency,
+    #[error("project asset id cannot be empty")]
+    EmptyAssetId,
+    #[error("project asset path cannot be empty for '{0}'")]
+    EmptyAssetPath(String),
+    #[error("project asset id '{0}' is duplicated")]
+    DuplicateAssetId(String),
     #[error("project scale must be finite and greater than zero")]
     InvalidScale,
     #[error("invalid render job transition from {from:?} to {to:?}")]
@@ -205,6 +212,18 @@ impl Project {
                     end,
                     duration: self.settings.duration,
                 });
+            }
+        }
+        let mut asset_ids = BTreeSet::new();
+        for asset in &self.assets {
+            if asset.id.trim().is_empty() {
+                return Err(ProjectError::EmptyAssetId);
+            }
+            if asset.path.trim().is_empty() {
+                return Err(ProjectError::EmptyAssetPath(asset.id.clone()));
+            }
+            if !asset_ids.insert(asset.id.as_str()) {
+                return Err(ProjectError::DuplicateAssetId(asset.id.clone()));
             }
         }
         for track in &self.tracks {
@@ -424,6 +443,37 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Project>(&serde_json::to_string(&p).unwrap()).unwrap(),
             p
+        );
+    }
+
+    #[test]
+    fn project_rejects_ambiguous_asset_manifest() {
+        let mut p = project();
+        p.assets = vec![
+            AssetRef {
+                id: "logo".into(),
+                path: "logo.png".into(),
+                kind: AssetKind::Image,
+                sha256: None,
+            },
+            AssetRef {
+                id: "logo".into(),
+                path: "other.png".into(),
+                kind: AssetKind::Image,
+                sha256: None,
+            },
+        ];
+        assert_eq!(
+            p.validate(),
+            Err(ProjectError::DuplicateAssetId("logo".into()))
+        );
+        p.assets[1].id.clear();
+        assert_eq!(p.validate(), Err(ProjectError::EmptyAssetId));
+        p.assets[1].id = "other".into();
+        p.assets[1].path.clear();
+        assert_eq!(
+            p.validate(),
+            Err(ProjectError::EmptyAssetPath("other".into()))
         );
     }
     #[test]
