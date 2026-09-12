@@ -94,6 +94,11 @@ node benchmarks/browser/three-worker-bench.mjs
 Set `WORKERS=2` or `WORKERS=4` to measure persistent Chromium worker scaling;
 each worker owns an isolated page and receives a different frame in each batch.
 
+For transport comparisons, set `DIOXUSCUT_BROWSER_IMAGE_FORMAT=jpeg` and
+optionally `DIOXUSCUT_BROWSER_JPEG_QUALITY=90`. On the reference M4 Pro
+Three.js scene, JPEG quality 90 measured about 2x the PNG throughput (roughly
+60 FPS versus 30 FPS), but remains opt-in because it is lossy.
+
 Set `OUTPUT=benchmarks/browser-result.json` to persist the raw Chromium worker
 sample report. The worker marks headless pages so the Studio preview loop cannot
 race an explicit frame request. Validate browser media seeking and timeline
