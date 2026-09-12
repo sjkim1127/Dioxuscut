@@ -69,6 +69,8 @@ export DIOXUSCUT_BROWSER_URL=http://localhost:1420
 export DIOXUSCUT_BROWSER_CONCURRENCY=1
 # Optional: fail readiness or an async renderFrame() that exceeds this limit.
 export DIOXUSCUT_BROWSER_FRAME_TIMEOUT_MS=30000
+# Optional: retry a failed frame (default: 1 retry).
+export DIOXUSCUT_BROWSER_FRAME_RETRIES=1
 ```
 
 Use concurrency greater than one only after measuring the target composition;

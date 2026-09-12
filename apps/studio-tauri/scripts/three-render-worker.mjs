@@ -13,7 +13,20 @@ const configuredFrameTimeoutMs = Number(args.get('frame-timeout-ms') ?? process.
 const frameTimeoutMs = Number.isFinite(configuredFrameTimeoutMs) && configuredFrameTimeoutMs > 0
   ? configuredFrameTimeoutMs
   : 30000;
+const configuredFrameRetries = Number(args.get('frame-retries') ?? process.env.DIOXUSCUT_BROWSER_FRAME_RETRIES ?? 1);
+const frameRetries = Number.isInteger(configuredFrameRetries) && configuredFrameRetries >= 0
+  ? configuredFrameRetries
+  : 1;
 const write = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
+const renderFrame = (request) => new Promise((resolve, reject) => {
+  const timer = setTimeout(
+    () => reject(new Error(`renderFrame timed out after ${frameTimeoutMs}ms`)),
+    frameTimeoutMs,
+  );
+  page.evaluate((value) => window.dioxuscut.renderFrame(value), request)
+    .then(resolve, reject)
+    .finally(() => clearTimeout(timer));
+});
 
 const browser = await chromium.launch({ executablePath, headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
@@ -32,14 +45,18 @@ rl.on('line', (line) => { queue = queue.then(async () => {
   if (message.type !== 'render') return;
   try {
     const request = message;
-    await page.setViewportSize({ width: request.width, height: request.height });
-    await Promise.race([
-      page.evaluate((value) => window.dioxuscut.renderFrame(value), request),
-      new Promise((_, reject) => setTimeout(
-        () => reject(new Error(`renderFrame timed out after ${frameTimeoutMs}ms`)),
-        frameTimeoutMs,
-      )),
-    ]);
+    let lastError;
+    for (let attempt = 0; attempt <= frameRetries; attempt += 1) {
+      try {
+        await page.setViewportSize({ width: request.width, height: request.height });
+        await renderFrame(request);
+        lastError = undefined;
+        break;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (lastError) throw lastError;
     const screenshot = await page.screenshot({ type: 'png' });
     write({ type: 'frame', frame: request.frame, width: request.width, height: request.height,
       png_base64: Buffer.from(screenshot).toString('base64') });
