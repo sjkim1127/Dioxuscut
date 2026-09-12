@@ -2,19 +2,24 @@
 
 use dioxuscut_project::{JobStatus, JobStore, Project, RenderJob};
 use dioxuscut_rasterizer::{
-    render_web_to_ffmpeg_pipe_fallible, BackendCapabilities, BrowserFrameBackend, PipeConfig,
-    RenderControl, VideoCodec, WebFrameRequest, WebWorkerMessage, WEB_WORKER_PROTOCOL_VERSION,
+    make_cancel_signal, render_web_to_ffmpeg_pipe_fallible, BackendCapabilities,
+    BrowserFrameBackend, PipeConfig, RenderCancellationToken, RenderControl, VideoCodec,
+    WebFrameRequest, WebWorkerMessage, WEB_WORKER_PROTOCOL_VERSION,
 };
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-struct AppState(Arc<Mutex<JobStore>>);
+struct AppState {
+    jobs: Arc<Mutex<JobStore>>,
+    cancellations: Arc<Mutex<HashMap<String, RenderCancellationToken>>>,
+}
 
 #[tauri::command]
 fn submit_project(state: tauri::State<'_, AppState>, project: Project) -> Result<String, String> {
     state
-        .0
+        .jobs
         .lock()
         .map_err(|_| "job store lock poisoned".to_string())?
         .submit(project)
@@ -29,7 +34,7 @@ fn start_render_job(
 ) -> Result<(), String> {
     let project = {
         let mut store = state
-            .0
+            .jobs
             .lock()
             .map_err(|_| "job store lock poisoned".to_string())?;
         let job = store
@@ -52,22 +57,30 @@ fn start_render_job(
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(1);
-    let state = Arc::clone(&state.0);
+    let state_jobs = Arc::clone(&state.jobs);
+    let state_cancellations = Arc::clone(&state.cancellations);
+    let cancellation = make_cancel_signal();
+    state_cancellations
+        .lock()
+        .map_err(|_| "cancellation store lock poisoned".to_string())?
+        .insert(id.clone(), cancellation.clone());
     thread::spawn(move || {
         let result = (|| -> Result<(), String> {
             let backend = BrowserFrameBackend::with_concurrency("node", worker, url, concurrency)
                 .map_err(|error| error.to_string())?;
-            let state_for_progress = Arc::clone(&state);
+            let state_for_progress = Arc::clone(&state_jobs);
             let progress_id = id.clone();
-            let control = RenderControl::new().with_progress(move |progress| {
-                if let Ok(mut store) = state_for_progress.lock() {
-                    let _ = store.try_update(
-                        &progress_id,
-                        JobStatus::Rendering,
-                        progress.completed_frames,
-                    );
-                }
-            });
+            let control = RenderControl::new()
+                .with_cancellation(cancellation)
+                .with_progress(move |progress| {
+                    if let Ok(mut store) = state_for_progress.lock() {
+                        let _ = store.try_update(
+                            &progress_id,
+                            JobStatus::Rendering,
+                            progress.completed_frames,
+                        );
+                    }
+                });
             let config = PipeConfig::new(
                 project.settings.width,
                 project.settings.height,
@@ -79,7 +92,7 @@ fn start_render_job(
             .with_control(control);
             render_web_to_ffmpeg_pipe_fallible(&backend, &config, project.props.clone())
                 .map_err(|error| error.to_string())?;
-            let mut store = state
+            let mut store = state_jobs
                 .lock()
                 .map_err(|_| "job store lock poisoned".to_string())?;
             store
@@ -89,9 +102,17 @@ fn start_render_job(
                 .try_update(&id, JobStatus::Completed, project.settings.duration)
                 .map_err(|error| error.to_string())
         })();
+        if let Ok(mut cancellations) = state_cancellations.lock() {
+            cancellations.remove(&id);
+        }
         if let Err(error) = result {
-            if let Ok(mut store) = state.lock() {
-                let _ = store.fail(&id, error);
+            if let Ok(mut store) = state_jobs.lock() {
+                if store
+                    .get(&id)
+                    .is_some_and(|job| job.status != JobStatus::Cancelled)
+                {
+                    let _ = store.fail(&id, error);
+                }
             }
         }
     });
@@ -114,7 +135,7 @@ fn get_render_job(
     id: String,
 ) -> Result<Option<RenderJob>, String> {
     Ok(state
-        .0
+        .jobs
         .lock()
         .map_err(|_| "job store lock poisoned".to_string())?
         .get(&id)
@@ -124,7 +145,7 @@ fn get_render_job(
 #[tauri::command]
 fn list_render_jobs(state: tauri::State<'_, AppState>) -> Result<Vec<RenderJob>, String> {
     Ok(state
-        .0
+        .jobs
         .lock()
         .map_err(|_| "job store lock poisoned".to_string())?
         .list())
@@ -138,7 +159,7 @@ fn update_render_job(
     completed_frames: u32,
 ) -> Result<(), String> {
     state
-        .0
+        .jobs
         .lock()
         .map_err(|_| "job store lock poisoned".to_string())?
         .try_update(&id, status, completed_frames)
@@ -152,7 +173,7 @@ fn fail_render_job(
     message: String,
 ) -> Result<(), String> {
     state
-        .0
+        .jobs
         .lock()
         .map_err(|_| "job store lock poisoned".to_string())?
         .fail(&id, message)
@@ -161,8 +182,13 @@ fn fail_render_job(
 
 #[tauri::command]
 fn cancel_render_job(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+    if let Ok(cancellations) = state.cancellations.lock() {
+        if let Some(token) = cancellations.get(&id) {
+            token.cancel();
+        }
+    }
     state
-        .0
+        .jobs
         .lock()
         .map_err(|_| "job store lock poisoned".to_string())?
         .cancel(&id)
@@ -172,7 +198,7 @@ fn cancel_render_job(state: tauri::State<'_, AppState>, id: String) -> Result<()
 #[tauri::command]
 fn retry_render_job(state: tauri::State<'_, AppState>, id: String) -> Result<String, String> {
     state
-        .0
+        .jobs
         .lock()
         .map_err(|_| "job store lock poisoned".to_string())?
         .retry(&id)
@@ -214,7 +240,10 @@ fn web_worker_protocol() -> serde_json::Value {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(AppState(Arc::new(Mutex::new(JobStore::default()))))
+        .manage(AppState {
+            jobs: Arc::new(Mutex::new(JobStore::default())),
+            cancellations: Arc::new(Mutex::new(HashMap::new())),
+        })
         .invoke_handler(tauri::generate_handler![
             backend_capabilities,
             web_worker_protocol,

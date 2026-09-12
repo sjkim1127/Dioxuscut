@@ -162,6 +162,11 @@ impl RenderControl {
         self.cancellation.clone()
     }
 
+    pub fn with_cancellation(mut self, cancellation: RenderCancellationToken) -> Self {
+        self.cancellation = cancellation;
+        self
+    }
+
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
