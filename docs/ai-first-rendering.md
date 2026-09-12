@@ -132,6 +132,21 @@ export DIOXUSCUT_BROWSER_IMAGE_FORMAT=jpeg
 export DIOXUSCUT_BROWSER_JPEG_QUALITY=90
 ```
 
+Rust embedders such as Tauri can configure the same capture policy on an
+individual `BrowserFrameBackend` without process-wide environment variables:
+
+```rust,ignore
+let backend = BrowserFrameBackend::with_concurrency(node, worker, url, 4)?
+    .with_image_format("jpeg")
+    .with_jpeg_quality(90)
+    .with_transparent(false)
+    .with_frame_timeout(std::time::Duration::from_secs(30))
+    .with_transport_retries(2);
+```
+
+This keeps browser transport policy local to a Tauri render job while the
+wire protocol remains identical for Dioxus desktop, CLI, and other hosts.
+
 When the packaged Tauri app runs without `DIOXUSCUT_BROWSER_URL`, the host
 serves its bundled `dist` directory from a dynamic loopback port and points the
 Chromium workers at that server. Production browser rendering therefore does
