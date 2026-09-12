@@ -14,6 +14,9 @@ pub struct WebFrameRequest {
     pub height: u32,
     #[serde(default)]
     pub props: serde_json::Value,
+    /// Host-provided local or URL assets that the browser composition may preload.
+    #[serde(default)]
+    pub assets: Vec<String>,
 }
 
 /// Result returned by a browser-backed renderer.
@@ -55,6 +58,7 @@ mod tests {
             width: 1280,
             height: 720,
             props: serde_json::json!({"seed": 7}),
+            assets: vec![],
         });
         let json = serde_json::to_string(&message).unwrap();
         assert_eq!(

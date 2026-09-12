@@ -42,6 +42,21 @@ scene.add(cube);
 // Browser compositions can replace the demo scene without changing the Rust
 // protocol. Adapters may register Three.js, R3F, or another WebGL renderer.
 const compositions = new Map();
+const preloadedAssets = new Map();
+async function preloadAssets(assets = []) {
+  await Promise.all(assets.map(async (source) => {
+    if (preloadedAssets.has(source)) return preloadedAssets.get(source);
+    const task = new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error(`failed to preload asset: ${source}`));
+      image.src = source;
+    });
+    preloadedAssets.set(source, task);
+    return task;
+  }));
+}
+
 export function registerComposition(id, render) {
   if (typeof id !== 'string' || !id || typeof render !== 'function') {
     throw new TypeError('registerComposition expects a non-empty id and render function');
@@ -50,10 +65,11 @@ export function registerComposition(id, render) {
 }
 
 // Explicit frame input keeps this scene deterministic for future exports.
-export function renderFrame({ composition = 'three_preview', frame: nextFrame, fps = 30, props: inputProps = {} }) {
+export async function renderFrame({ composition = 'three_preview', frame: nextFrame, fps = 30, props: inputProps = {}, assets = [] }) {
   const props = inputProps && typeof inputProps === 'object' ? inputProps : {};
+  await preloadAssets(assets);
   const customRender = compositions.get(composition);
-  if (customRender) return customRender({ frame: nextFrame, fps, props });
+  if (customRender) return customRender({ frame: nextFrame, fps, props, assets });
   frame = nextFrame;
   cube.rotation.x = nextFrame / Math.max(fps, 1) * 0.36;
   cube.rotation.y = nextFrame / Math.max(fps, 1) * 0.54;

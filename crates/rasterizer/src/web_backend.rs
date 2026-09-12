@@ -27,6 +27,7 @@ pub struct BrowserFrameBackend {
     workers: Vec<BrowserWorker>,
     next_worker: AtomicUsize,
     composition: Mutex<Option<String>>,
+    assets: Mutex<Vec<String>>,
     props: Mutex<serde_json::Value>,
     cache: FrameCacheManager,
 }
@@ -60,6 +61,7 @@ impl BrowserFrameBackend {
             workers,
             next_worker: AtomicUsize::new(0),
             composition: Mutex::new(None),
+            assets: Mutex::new(vec![]),
             props: Mutex::new(serde_json::json!({})),
             cache: FrameCacheManager::default(),
         })
@@ -120,6 +122,15 @@ impl BrowserWorker {
 }
 
 impl BrowserFrameBackend {
+    /// Configure assets that browser compositions should preload before frames.
+    pub fn set_assets(&self, assets: Vec<String>) -> Result<(), RasterError> {
+        *self
+            .assets
+            .lock()
+            .map_err(|_| RasterError::Init("browser assets lock poisoned".into()))? = assets;
+        Ok(())
+    }
+
     /// Select the browser-side composition for subsequent frame requests.
     pub fn set_composition(&self, composition: impl Into<String>) -> Result<(), RasterError> {
         *self
@@ -281,6 +292,11 @@ impl RasterizerBackend for BrowserFrameBackend {
             fps: config.fps,
             width: config.width,
             height: config.height,
+            assets: self
+                .assets
+                .lock()
+                .map_err(|_| RasterError::Init("browser assets lock poisoned".into()))?
+                .clone(),
             props,
         })
     }
