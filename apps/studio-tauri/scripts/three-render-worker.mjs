@@ -39,6 +39,8 @@ const renderFrame = (request) => new Promise((resolve, reject) => {
 
 const browser = await chromium.launch({ executablePath, headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+let viewportWidth = 1280;
+let viewportHeight = 720;
 await page.addInitScript(() => { window.__DIOXUSCUT_HEADLESS_RENDER__ = true; });
 // Dev servers keep HMR/websocket connections open, so networkidle can never
 // settle. The explicit renderFrame readiness check below is the real gate.
@@ -70,7 +72,11 @@ rl.on('line', (line) => { queue = queue.then(async () => {
     try {
       for (let attempt = 0; attempt <= frameRetries; attempt += 1) {
         try {
-          await page.setViewportSize({ width: request.width, height: request.height });
+          if (request.width !== viewportWidth || request.height !== viewportHeight) {
+            await page.setViewportSize({ width: request.width, height: request.height });
+            viewportWidth = request.width;
+            viewportHeight = request.height;
+          }
           await renderFrame(request);
           if (pageError) throw pageError;
           lastError = undefined;
