@@ -18,6 +18,7 @@ Schema is available at `schemas/dioxuscut-project-v1.schema.json`.
     "height": 720,
     "fps": 30,
     "duration": 150,
+    "concurrency": 4,
     "frame_step": 1,
     "backend": "browser"
   },
@@ -31,6 +32,8 @@ Schema is available at `schemas/dioxuscut-project-v1.schema.json`.
 ```
 
 The same `Project` model is shared by Dioxus, Tauri, and CLI integrations.
+Set `settings.concurrency` to a positive worker count when a project needs
+reproducible parallelism; omit it for host-selected defaults.
 
 Discover Native composition IDs without starting a UI:
 

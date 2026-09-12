@@ -36,6 +36,9 @@ pub struct ProjectSettings {
     pub height: u32,
     pub fps: f64,
     pub duration: u32,
+    /// Optional render worker count. `None` lets the host choose automatically.
+    #[serde(default)]
+    pub concurrency: Option<u32>,
     #[serde(default = "default_frame_step")]
     pub frame_step: u32,
     /// Optional inclusive frame range for automation and partial renders.
@@ -140,6 +143,8 @@ pub enum ProjectError {
     InvalidFrameRange { start: u32, end: u32, duration: u32 },
     #[error("project frame step must be greater than zero")]
     InvalidFrameStep,
+    #[error("project concurrency must be greater than zero")]
+    InvalidConcurrency,
     #[error("invalid render job transition from {from:?} to {to:?}")]
     InvalidJobTransition { from: JobStatus, to: JobStatus },
     #[error("render job '{0}' was not found")]
@@ -170,6 +175,9 @@ impl Project {
         }
         if self.settings.frame_step == 0 {
             return Err(ProjectError::InvalidFrameStep);
+        }
+        if self.settings.concurrency == Some(0) {
+            return Err(ProjectError::InvalidConcurrency);
         }
         if let Some(end) = self.settings.frame_end {
             let start = self.settings.frame_start.unwrap_or(0);
@@ -378,6 +386,7 @@ mod tests {
                 height: 1920,
                 fps: 30.0,
                 duration: 60,
+                concurrency: None,
                 frame_step: 1,
                 frame_start: None,
                 frame_end: None,
@@ -414,6 +423,17 @@ mod tests {
             Project::from_json_str(&value.to_string()),
             Err(ProjectError::Json(_))
         ));
+    }
+
+    #[test]
+    fn project_rejects_zero_concurrency() {
+        let mut value = serde_json::to_value(project()).unwrap();
+        value["settings"]["concurrency"] = serde_json::json!(0);
+
+        assert_eq!(
+            Project::from_json_str(&serde_json::to_string(&value).unwrap()),
+            Err(ProjectError::InvalidConcurrency)
+        );
     }
     #[test]
     fn job_store_validates_and_tracks_progress() {
