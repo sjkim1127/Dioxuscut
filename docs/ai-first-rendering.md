@@ -100,7 +100,10 @@ relative paths when saving the project.
 
 ## Job lifecycle
 
-1. Submit the project with `submit_project` and retain the returned job id.
+1. Submit the project with `submit_project` (when assets are already resolved),
+   or use Tauri's `submit_project_from_path` to load, validate, and resolve
+   relative assets against the project file before submission. Retain the
+   returned job id.
 2. Start a browser job with `start_render_job(id, output)`.
 3. Poll `get_render_job(id)` or `list_render_jobs()`.
 4. Cancel active work with `cancel_render_job(id)`; cancellation reaches the

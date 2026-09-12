@@ -127,6 +127,18 @@ fn submit_project(state: tauri::State<'_, AppState>, project: Project) -> Result
         .map_err(|error| error.to_string())
 }
 
+/// Load and submit a project using its file directory as the asset base.
+/// This is the AI-friendly counterpart to `submit_project(Project)`, which is
+/// intentionally path-independent for callers that already resolved assets.
+#[tauri::command]
+fn submit_project_from_path(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<String, String> {
+    let project = load_project_file(std::path::Path::new(&path))?;
+    submit_project(state, project)
+}
+
 #[tauri::command]
 fn start_render_job(
     state: tauri::State<'_, AppState>,
@@ -425,8 +437,11 @@ fn start_render_job(
 
 #[tauri::command]
 fn load_project(path: String) -> Result<Project, String> {
-    let path = std::path::PathBuf::from(path);
-    let mut project = Project::load(&path).map_err(|error| error.to_string())?;
+    load_project_file(std::path::Path::new(&path))
+}
+
+fn load_project_file(path: &std::path::Path) -> Result<Project, String> {
+    let mut project = Project::load(path).map_err(|error| error.to_string())?;
     let base_dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
     project
         .validate_asset_files(base_dir)
@@ -591,6 +606,7 @@ fn main() {
             list_browser_compositions,
             validate_frame_request,
             submit_project,
+            submit_project_from_path,
             start_render_job,
             load_project,
             save_project,
