@@ -43,6 +43,7 @@ mod project_timeline_tests {
                 duration: 2,
                 props: serde_json::json!({}),
             }],
+            registry: built_in_registry(),
         };
         let prepared = timeline
             .prepare(
@@ -67,6 +68,7 @@ struct BrowserPreparedComposition;
 struct ProjectTimelineComposition {
     id: String,
     clips: Vec<Clip>,
+    registry: CompositionRegistry,
 }
 
 struct ProjectTimelinePrepared<'a> {
@@ -77,12 +79,13 @@ struct ProjectTimelinePrepared<'a> {
 impl dioxuscut_composition::PreparedComposition for ProjectTimelinePrepared<'_> {
     fn render(&self, frame: u32) -> Result<dioxuscut_rasterizer::Scene, CompositionError> {
         let mut scene = dioxuscut_rasterizer::Scene::new();
-        let registry = built_in_registry();
         for clip in &self.composition.clips {
             if frame < clip.start || frame >= clip.start.saturating_add(clip.duration) {
                 continue;
             }
-            let composition = registry
+            let composition = self
+                .composition
+                .registry
                 .get(&clip.composition)
                 .map_err(|error| CompositionError::render(frame, error.to_string()))?;
             let clip_context = NativeCompositionContext {
@@ -724,6 +727,7 @@ pub async fn execute_project_render_command_with_control(
             .iter()
             .flat_map(|track| track.clips.iter().cloned())
             .collect(),
+        registry: built_in_registry(),
     })?;
     execute_render_command_with_registry_and_control(request, &registry, control).await
 }
