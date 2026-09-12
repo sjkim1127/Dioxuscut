@@ -32,6 +32,11 @@ pub struct ProjectSettings {
     pub height: u32,
     pub fps: f64,
     pub duration: u32,
+    /// Optional inclusive frame range for automation and partial renders.
+    #[serde(default)]
+    pub frame_start: Option<u32>,
+    #[serde(default)]
+    pub frame_end: Option<u32>,
     #[serde(default)]
     pub backend: BackendKind,
 }
@@ -125,6 +130,8 @@ pub enum ProjectError {
         clip: String,
         reason: String,
     },
+    #[error("invalid project frame range: {start}..={end} for duration {duration}")]
+    InvalidFrameRange { start: u32, end: u32, duration: u32 },
     #[error("invalid render job transition from {from:?} to {to:?}")]
     InvalidJobTransition { from: JobStatus, to: JobStatus },
     #[error("render job '{0}' was not found")]
@@ -152,6 +159,16 @@ impl Project {
         }
         if !self.settings.fps.is_finite() || self.settings.fps <= 0.0 {
             return Err(ProjectError::InvalidFps);
+        }
+        if let Some(end) = self.settings.frame_end {
+            let start = self.settings.frame_start.unwrap_or(0);
+            if start > end || end >= self.settings.duration {
+                return Err(ProjectError::InvalidFrameRange {
+                    start,
+                    end,
+                    duration: self.settings.duration,
+                });
+            }
         }
         for track in &self.tracks {
             for clip in &track.clips {
@@ -350,6 +367,8 @@ mod tests {
                 height: 1920,
                 fps: 30.0,
                 duration: 60,
+                frame_start: None,
+                frame_end: None,
                 backend: BackendKind::Native,
             },
             props: serde_json::json!({"title":"hello"}),
