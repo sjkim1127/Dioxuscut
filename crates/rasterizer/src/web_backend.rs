@@ -9,12 +9,18 @@ use base64::Engine;
 use image::RgbaImage;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-pub struct BrowserFrameBackend {
+struct BrowserWorker {
     child: Mutex<Child>,
     stdin: Mutex<ChildStdin>,
     stdout: Mutex<BufReader<ChildStdout>>,
+}
+
+pub struct BrowserFrameBackend {
+    workers: Vec<BrowserWorker>,
+    next_worker: AtomicUsize,
     props: Mutex<serde_json::Value>,
 }
 
@@ -24,9 +30,42 @@ impl BrowserFrameBackend {
         worker: impl AsRef<std::path::Path>,
         url: impl Into<String>,
     ) -> Result<Self, RasterError> {
+        Self::with_concurrency(node, worker, url, 1)
+    }
+
+    pub fn with_concurrency(
+        node: impl AsRef<std::ffi::OsStr>,
+        worker: impl AsRef<std::path::Path>,
+        url: impl Into<String>,
+        concurrency: usize,
+    ) -> Result<Self, RasterError> {
+        if concurrency == 0 {
+            return Err(RasterError::Init(
+                "browser worker concurrency must be greater than zero".into(),
+            ));
+        }
+        let url = url.into();
+        let mut workers = Vec::with_capacity(concurrency);
+        for _ in 0..concurrency {
+            workers.push(BrowserWorker::spawn(&node, worker.as_ref(), &url)?);
+        }
+        Ok(Self {
+            workers,
+            next_worker: AtomicUsize::new(0),
+            props: Mutex::new(serde_json::Value::Null),
+        })
+    }
+}
+
+impl BrowserWorker {
+    fn spawn(
+        node: &impl AsRef<std::ffi::OsStr>,
+        worker: &std::path::Path,
+        url: &str,
+    ) -> Result<Self, RasterError> {
         let mut child = Command::new(node)
-            .arg(worker.as_ref())
-            .arg(format!("--url={}", url.into()))
+            .arg(worker)
+            .arg(format!("--url={url}"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -66,10 +105,11 @@ impl BrowserFrameBackend {
             child: Mutex::new(child),
             stdin: Mutex::new(stdin),
             stdout: Mutex::new(stdout),
-            props: Mutex::new(serde_json::Value::Null),
         })
     }
+}
 
+impl BrowserFrameBackend {
     pub fn set_props(&self, props: serde_json::Value) -> Result<(), RasterError> {
         *self
             .props
@@ -85,14 +125,16 @@ impl BrowserFrameBackend {
                     reason: e.to_string(),
                 }
             })?;
-        let mut stdin = self
+        let worker =
+            &self.workers[self.next_worker.fetch_add(1, Ordering::Relaxed) % self.workers.len()];
+        let mut stdin = worker
             .stdin
             .lock()
             .map_err(|_| RasterError::Init("browser worker stdin lock poisoned".into()))?;
         writeln!(stdin, "{encoded}")?;
         stdin.flush()?;
         drop(stdin);
-        let mut stdout = self
+        let mut stdout = worker
             .stdout
             .lock()
             .map_err(|_| RasterError::Init("browser worker stdout lock poisoned".into()))?;
@@ -154,12 +196,14 @@ impl BrowserFrameBackend {
 }
 impl Drop for BrowserFrameBackend {
     fn drop(&mut self) {
-        if let Ok(mut stdin) = self.stdin.lock() {
-            let _ = writeln!(stdin, "{{\"type\":\"shutdown\"}}");
-            let _ = stdin.flush();
-        }
-        if let Ok(mut child) = self.child.lock() {
-            let _ = child.wait();
+        for worker in &self.workers {
+            if let Ok(mut stdin) = worker.stdin.lock() {
+                let _ = writeln!(stdin, "{{\"type\":\"shutdown\"}}");
+                let _ = stdin.flush();
+            }
+            if let Ok(mut child) = worker.child.lock() {
+                let _ = child.wait();
+            }
         }
     }
 }

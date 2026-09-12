@@ -744,8 +744,13 @@ pub async fn execute_render_command_with_registry_and_control(
             })?;
             let url = std::env::var("DIOXUSCUT_BROWSER_URL")
                 .unwrap_or_else(|_| "http://localhost:1420".to_string());
-            let rasterizer = BrowserFrameBackend::new("node", worker, url)
-                .map_err(|error| anyhow::anyhow!("Browser backend init failed: {error}"))?;
+            let concurrency = std::env::var("DIOXUSCUT_BROWSER_CONCURRENCY")
+                .ok()
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(1);
+            let rasterizer =
+                BrowserFrameBackend::with_concurrency("node", worker, url, concurrency)
+                    .map_err(|error| anyhow::anyhow!("Browser backend init failed: {error}"))?;
             rasterizer.set_props(props.clone())?;
             if let Some(format) = request.codec.still_format() {
                 render_still_fallible(
