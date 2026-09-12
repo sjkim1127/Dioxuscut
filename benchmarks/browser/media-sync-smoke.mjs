@@ -31,7 +31,10 @@ try {
   await page.waitForFunction(() => typeof window.dioxuscut?.renderFrame === 'function');
 
   const result = await page.evaluate(async ({ jsonAsset, canvasAsset, retryAssetPath }) => {
-    window.dioxuscut.registerComposition('media_sync_smoke', async ({ frame }) => {
+    let compositionContext;
+    window.dioxuscut.registerComposition('media_sync_smoke', async (context) => {
+      compositionContext = context;
+      const { frame } = context;
       let media = document.querySelector('video[data-dioxuscut-smoke]');
       if (!media) {
         media = document.createElement('video');
@@ -91,7 +94,7 @@ try {
 
     await window.dioxuscut.renderFrame({
       composition: 'media_sync_smoke', frame: 15, fps: 10,
-      props: {}, assets: [jsonAsset], timeline: [],
+      props: {}, assets: [jsonAsset], timeline: [], width: 320, height: 180, durationInFrames: 60,
     });
     const media = document.querySelector('video[data-dioxuscut-smoke]');
     const lottie = document.querySelector('[data-dioxuscut-lottie-smoke]');
@@ -105,7 +108,7 @@ try {
 
     await window.dioxuscut.renderFrame({
       composition: 'media_sync_smoke', frame: 40, fps: 10,
-      props: {}, assets: [jsonAsset], timeline: [],
+      props: {}, assets: [jsonAsset], timeline: [], width: 320, height: 180, durationInFrames: 60,
     });
     return {
       active,
@@ -116,6 +119,11 @@ try {
       retryCanvasPixel: [...document.querySelector('[data-dioxuscut-canvas-image-retry-smoke]').getContext('2d').getImageData(0, 0, 1, 1).data],
       canvasRetries: document.querySelector('[data-dioxuscut-canvas-image-smoke]').dataset.maxRetries,
       canvasPause: document.querySelector('[data-dioxuscut-canvas-image-smoke]').dataset.pauseWhenLoading,
+      compositionContext: {
+        width: compositionContext.width,
+        height: compositionContext.height,
+        durationInFrames: compositionContext.durationInFrames,
+      },
     };
   }, { jsonAsset, canvasAsset, retryAssetPath });
 
@@ -135,6 +143,10 @@ try {
   assert(result.canvasPause === 'true', 'CanvasImage loading policy was not preserved');
   assert(retryRequests === 2, `CanvasImage did not retry after failure: ${retryRequests}`);
   assert(result.retryCanvasPixel[3] > 0, `CanvasImage retry did not rasterize: ${result.retryCanvasPixel}`);
+  assert(result.compositionContext.width === 320, `unexpected composition width: ${result.compositionContext.width}`);
+  assert(result.compositionContext.height === 180, `unexpected composition height: ${result.compositionContext.height}`);
+  assert(result.compositionContext.durationInFrames === 60,
+    `unexpected composition duration: ${result.compositionContext.durationInFrames}`);
   console.log('browser media sync smoke: passed');
 } finally {
   await browser.close();

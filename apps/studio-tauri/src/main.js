@@ -178,8 +178,13 @@ export function listCompositions() {
 }
 
 // Explicit frame input keeps this scene deterministic for future exports.
-function renderDefaultFrame({ composition, frame: nextFrame, fps, props }) {
+function renderDefaultFrame({ composition, frame: nextFrame, fps, props, width, height }) {
   frame = nextFrame;
+  if (Number.isFinite(width) && Number.isFinite(height)) {
+    renderer.setSize(width, height, false);
+    camera.aspect = width / Math.max(height, 1);
+    camera.updateProjectionMatrix();
+  }
   cube.rotation.x = nextFrame / Math.max(fps, 1) * 0.36;
   cube.rotation.y = nextFrame / Math.max(fps, 1) * 0.54;
   if (typeof props.color === 'string') cube.material.color.set(props.color);
@@ -291,7 +296,7 @@ async function syncCanvasImages(nextFrame) {
   }));
 }
 
-export async function renderFrame({ composition = 'three_preview', frame: nextFrame, fps = 30, props: inputProps = {}, assets = [], timeline = [] }) {
+export async function renderFrame({ composition = 'three_preview', frame: nextFrame, fps = 30, props: inputProps = {}, assets = [], timeline = [], width, height, durationInFrames }) {
   const props = inputProps && typeof inputProps === 'object' ? inputProps : {};
   // A cancelled gate belongs to the current frame only. Reset it before the
   // next request so a transient asset/render cancellation does not poison the
@@ -313,6 +318,9 @@ export async function renderFrame({ composition = 'three_preview', frame: nextFr
         fps,
         props: clip.props ?? {},
         assets,
+        width,
+        height,
+        durationInFrames: clip.duration,
       });
     }
     await syncMediaElements({ frame: nextFrame, fps });
@@ -323,14 +331,23 @@ export async function renderFrame({ composition = 'three_preview', frame: nextFr
   }
   const customRender = compositions.get(composition);
   if (customRender) {
-    const result = await customRender({ frame: nextFrame, fps, props, assets });
+    const result = await customRender({
+      composition,
+      frame: nextFrame,
+      fps,
+      props,
+      assets,
+      width,
+      height,
+      durationInFrames,
+    });
     await syncMediaElements({ frame: nextFrame, fps });
     await syncLottieElements({ frame: nextFrame, fps });
     await syncCanvasImages(nextFrame);
     await waitForRenderGates();
     return result;
   }
-  const result = renderDefaultFrame({ composition, frame: nextFrame, fps, props });
+  const result = renderDefaultFrame({ composition, frame: nextFrame, fps, props, width, height });
   await syncMediaElements({ frame: nextFrame, fps });
   await syncLottieElements({ frame: nextFrame, fps });
   await syncCanvasImages(nextFrame);
