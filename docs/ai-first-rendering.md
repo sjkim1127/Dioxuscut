@@ -175,6 +175,11 @@ may return a Promise for asynchronous asset loading. `frame` is the local frame
 when the composition is used inside a timeline clip; `width`, `height`, and
 `durationInFrames` let Three.js/R3F code configure its camera and responsive
 scene deterministically for both Studio preview and headless export.
+For adapters that expect Remotion's hook-shaped API, the same host exposes
+`window.dioxuscut.useCurrentFrame()` and
+`window.dioxuscut.useVideoConfig()`. These return the current explicit frame and
+the synchronized `{fps, width, height, durationInFrames}` for the active
+request; they do not introduce React or a browser render loop.
 For non-React Three.js compositions, `window.dioxuscut.useVideoTexture(src,
 {frame, fps})` (also available as `getVideoTexture`) returns a cached
 `THREE.VideoTexture` after `loadeddata` and

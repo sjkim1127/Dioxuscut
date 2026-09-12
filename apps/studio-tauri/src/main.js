@@ -313,6 +313,17 @@ export function listCompositions() {
   return [...new Set(['three_preview', ...compositions.keys()])];
 }
 
+// Remotion-compatible read-only hooks for browser compositions. They are
+// updated at the start of every explicit render request, so adapters ported
+// from React Three Fiber can use the familiar API without depending on React.
+export function useCurrentFrame() {
+  return frame;
+}
+
+export function useVideoConfig() {
+  return { ...videoConfig };
+}
+
 // Explicit frame input keeps this scene deterministic for future exports.
 function renderDefaultFrame({ composition, frame: nextFrame, fps, props, width, height }) {
   frame = nextFrame;
@@ -434,6 +445,14 @@ async function syncCanvasImages(nextFrame) {
 
 export async function renderFrame({ composition = 'three_preview', frame: nextFrame, fps = 30, props: inputProps = {}, assets = [], timeline = [], width, height, durationInFrames }) {
   const props = inputProps && typeof inputProps === 'object' ? inputProps : {};
+  frame = nextFrame;
+  videoConfig = {
+    ...videoConfig,
+    fps,
+    ...(Number.isFinite(width) ? { width } : {}),
+    ...(Number.isFinite(height) ? { height } : {}),
+    ...(Number.isFinite(durationInFrames) ? { durationInFrames } : {}),
+  };
   // A cancelled gate belongs to the current frame only. Reset it before the
   // next request so a transient asset/render cancellation does not poison the
   // rest of the composition.
@@ -505,6 +524,8 @@ window.dioxuscut = {
   getAudioDurationInSeconds,
   getAudioDuration,
   releaseVideoTexture,
+  useCurrentFrame,
+  useVideoConfig,
 };
 
 function resize() {
@@ -517,6 +538,7 @@ window.addEventListener('resize', resize);
 resize();
 
 let frame = 0;
+let videoConfig = { fps: 30, width: 1280, height: 720, durationInFrames: 150 };
 let playing = true;
 let currentJobId = null;
 let playbackStartedAt = performance.now();

@@ -32,8 +32,13 @@ try {
 
   const result = await page.evaluate(async ({ jsonAsset, canvasAsset, retryAssetPath }) => {
     let compositionContext;
+    let hookContext;
     window.dioxuscut.registerComposition('media_sync_smoke', async (context) => {
       compositionContext = context;
+      hookContext = {
+        frame: window.dioxuscut.useCurrentFrame(),
+        config: window.dioxuscut.useVideoConfig(),
+      };
       const { frame } = context;
       let media = document.querySelector('video[data-dioxuscut-smoke]');
       if (!media) {
@@ -126,6 +131,7 @@ try {
         height: compositionContext.height,
         durationInFrames: compositionContext.durationInFrames,
       },
+      hookContext,
       imageDimensions,
       cachedImageDimensions,
     };
@@ -151,6 +157,10 @@ try {
   assert(result.compositionContext.height === 180, `unexpected composition height: ${result.compositionContext.height}`);
   assert(result.compositionContext.durationInFrames === 60,
     `unexpected composition duration: ${result.compositionContext.durationInFrames}`);
+  assert(result.hookContext.frame === 40, `unexpected hook frame: ${result.hookContext.frame}`);
+  assert(result.hookContext.config.fps === 10 && result.hookContext.config.width === 320 &&
+    result.hookContext.config.height === 180 && result.hookContext.config.durationInFrames === 60,
+  `unexpected hook video config: ${JSON.stringify(result.hookContext.config)}`);
   assert(result.imageDimensions.width === 1 && result.imageDimensions.height === 1,
     `unexpected image dimensions: ${JSON.stringify(result.imageDimensions)}`);
   assert(result.cachedImageDimensions.width === 1 && result.cachedImageDimensions.height === 1,
