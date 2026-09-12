@@ -419,6 +419,32 @@ mod tests {
         assert_eq!(p.validate(), Err(ProjectError::InvalidFps));
     }
     #[test]
+    fn invalid_project_frame_ranges_are_rejected() {
+        let mut p = project();
+        p.settings.frame_start = Some(20);
+        p.settings.frame_end = Some(10);
+        assert!(matches!(
+            p.validate(),
+            Err(ProjectError::InvalidFrameRange { .. })
+        ));
+
+        p.settings.frame_start = Some(0);
+        p.settings.frame_end = Some(p.settings.duration);
+        assert!(matches!(
+            p.validate(),
+            Err(ProjectError::InvalidFrameRange { .. })
+        ));
+    }
+
+    #[test]
+    fn project_frame_start_without_end_defaults_to_duration_end() {
+        let mut p = project();
+        p.settings.frame_start = Some(12);
+        assert!(p.validate().is_ok());
+        let json = serde_json::to_value(&p).unwrap();
+        assert_eq!(json["settings"]["frame_start"], 12);
+    }
+    #[test]
     fn invalid_job_transition_is_rejected() {
         let mut store = JobStore::default();
         let id = store.submit(project()).unwrap();
