@@ -44,6 +44,7 @@ scene.add(cube);
 // protocol. Adapters may register Three.js, R3F, or another WebGL renderer.
 const compositions = new Map();
 const preloadedAssets = new Map();
+const imageDimensionsCache = new Map();
 const videoTextureCache = new Map();
 const renderGates = new Map();
 let lottieAdapter = null;
@@ -127,6 +128,25 @@ export function registerComposition(id, render) {
     throw new TypeError('registerComposition expects a non-empty id and render function');
   }
   compositions.set(id, render);
+}
+
+// Browser equivalent of @remotion/media-utils/getImageDimensions. Dimensions
+// are cached independently from decoded assets so layout probes do not force a
+// second request or decode in a composition.
+export async function getImageDimensions(source) {
+  if (typeof source !== 'string' || !source) throw new TypeError('getImageDimensions expects a source URL');
+  if (imageDimensionsCache.has(source)) return imageDimensionsCache.get(source);
+  const dimensions = new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    image.onerror = () => reject(new Error(`failed to load image dimensions: ${source}`));
+    image.src = source;
+  }).catch((error) => {
+    imageDimensionsCache.delete(source);
+    throw error;
+  });
+  imageDimensionsCache.set(source, dimensions);
+  return dimensions;
 }
 
 // Browser equivalent of Remotion's useVideoTexture for non-React Three.js
@@ -416,6 +436,7 @@ window.dioxuscut = {
   registerLottieAdapter,
   getVideoTexture,
   useVideoTexture,
+  getImageDimensions,
   releaseVideoTexture,
 };
 

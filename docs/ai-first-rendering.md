@@ -208,6 +208,10 @@ header-only image inspection helper corresponding to Remotion's
 decoded pixel buffer, so AI-generated compositions can validate image layout
 before scheduling a render.
 
+Browser compositions can use `window.dioxuscut.getImageDimensions(src)` for the
+same Promise-based query. Results are cached by source and expose
+`{width, height}`, matching vendor `@remotion/media-utils` behavior.
+
 Each worker owns one Chromium page and serializes its own requests; the shared
 streaming pipeline schedules different frames across the pool while preserving
 output order. Use concurrency greater than one only after measuring the target

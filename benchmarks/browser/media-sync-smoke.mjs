@@ -110,6 +110,8 @@ try {
       composition: 'media_sync_smoke', frame: 40, fps: 10,
       props: {}, assets: [jsonAsset], timeline: [], width: 320, height: 180, durationInFrames: 60,
     });
+    const imageDimensions = await window.dioxuscut.getImageDimensions(canvasAsset);
+    const cachedImageDimensions = await window.dioxuscut.getImageDimensions(canvasAsset);
     return {
       active,
       inactiveVisibility: media.style.visibility,
@@ -124,6 +126,8 @@ try {
         height: compositionContext.height,
         durationInFrames: compositionContext.durationInFrames,
       },
+      imageDimensions,
+      cachedImageDimensions,
     };
   }, { jsonAsset, canvasAsset, retryAssetPath });
 
@@ -147,6 +151,10 @@ try {
   assert(result.compositionContext.height === 180, `unexpected composition height: ${result.compositionContext.height}`);
   assert(result.compositionContext.durationInFrames === 60,
     `unexpected composition duration: ${result.compositionContext.durationInFrames}`);
+  assert(result.imageDimensions.width === 1 && result.imageDimensions.height === 1,
+    `unexpected image dimensions: ${JSON.stringify(result.imageDimensions)}`);
+  assert(result.cachedImageDimensions.width === 1 && result.cachedImageDimensions.height === 1,
+    `cached image dimensions failed: ${JSON.stringify(result.cachedImageDimensions)}`);
   console.log('browser media sync smoke: passed');
 } finally {
   await browser.close();
