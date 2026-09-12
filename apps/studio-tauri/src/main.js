@@ -44,6 +44,7 @@ scene.add(cube);
 // protocol. Adapters may register Three.js, R3F, or another WebGL renderer.
 const compositions = new Map();
 const preloadedAssets = new Map();
+const videoTextureCache = new Map();
 const renderGates = new Map();
 let lottieAdapter = null;
 const lottieInstances = new WeakMap();
@@ -126,6 +127,41 @@ export function registerComposition(id, render) {
     throw new TypeError('registerComposition expects a non-empty id and render function');
   }
   compositions.set(id, render);
+}
+
+// Browser equivalent of Remotion's useVideoTexture for non-React Three.js
+// compositions. The element and texture are cached by source so a frame
+// callback can reuse GPU resources across the entire render.
+export async function getVideoTexture(source, options = {}) {
+  if (typeof source !== 'string' || !source) throw new TypeError('getVideoTexture expects a source URL');
+  const cached = videoTextureCache.get(source);
+  if (cached) return cached.texture;
+  const video = document.createElement('video');
+  video.preload = 'auto';
+  video.muted = options.muted ?? true;
+  video.loop = options.loop ?? false;
+  video.playsInline = true;
+  video.src = source;
+  const ready = video.readyState >= 2 ? Promise.resolve() : new Promise((resolve, reject) => {
+    video.addEventListener('loadeddata', resolve, { once: true });
+    video.addEventListener('error', () => reject(new Error(`failed to load video texture: ${source}`)), { once: true });
+  });
+  await ready;
+  const texture = new THREE.VideoTexture(video);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  videoTextureCache.set(source, { video, texture });
+  return texture;
+}
+
+export function releaseVideoTexture(source) {
+  const cached = videoTextureCache.get(source);
+  if (!cached) return false;
+  cached.texture.dispose();
+  cached.video.pause();
+  cached.video.removeAttribute('src');
+  cached.video.load();
+  videoTextureCache.delete(source);
+  return true;
 }
 
 // Optional browser ecosystem adapter. The core worker stays independent from
@@ -362,6 +398,8 @@ window.dioxuscut = {
   continueRender,
   cancelRender,
   registerLottieAdapter,
+  getVideoTexture,
+  releaseVideoTexture,
 };
 
 function resize() {
