@@ -1,10 +1,12 @@
 //! Shared native composition contract and built-in composition registry.
 
 pub mod layout;
+pub mod mesh3d;
 pub mod safe_area;
 mod scene_emitter;
 
 pub use layout::{LayoutBox, LayoutChild, SceneFlex, SceneGrid};
+pub use mesh3d::{Mesh3DPrimitive, SceneMesh3D};
 pub use safe_area::{
     fit_text, get_safe_area_insets, measure_text_approx, Platform, SafeAreaInsets,
 };
