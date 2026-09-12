@@ -7,6 +7,7 @@ const args = new Map(process.argv.slice(2).flatMap((arg) => {
   return key.startsWith('--') ? [[key.slice(2), value ?? '']] : [];
 }));
 const url = args.get('url') ?? 'http://localhost:1420';
+const compositionModule = args.get('composition-module') ?? process.env.DIOXUSCUT_BROWSER_COMPOSITION_MODULE;
 const executablePath = args.get('browser') ?? process.env.CHROME_PATH ??
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const configuredFrameTimeoutMs = Number(args.get('frame-timeout-ms') ?? process.env.DIOXUSCUT_BROWSER_FRAME_TIMEOUT_MS ?? 30000);
@@ -41,6 +42,11 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, dev
 // Dev servers keep HMR/websocket connections open, so networkidle can never
 // settle. The explicit renderFrame readiness check below is the real gate.
 await page.goto(url, { waitUntil: 'domcontentloaded', timeout: frameTimeoutMs });
+if (compositionModule) {
+  await page.evaluate(async (moduleUrl) => {
+    await import(moduleUrl);
+  }, compositionModule);
+}
 await page.waitForFunction(() => typeof window.dioxuscut?.renderFrame === 'function', {
   timeout: frameTimeoutMs,
 });

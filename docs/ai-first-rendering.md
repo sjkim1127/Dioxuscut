@@ -97,6 +97,8 @@ The CLI and Tauri host use a persistent worker pool. Configure the pool with:
 export DIOXUSCUT_BROWSER_WORKER=$PWD/apps/studio-tauri/scripts/three-render-worker.mjs
 # Optional: use a bundled or platform-specific Node.js executable.
 export DIOXUSCUT_BROWSER_NODE=node
+# Optional: load an AI-generated/browser composition module after the app loads.
+export DIOXUSCUT_BROWSER_COMPOSITION_MODULE=http://localhost:1420/src/compositions/demo.js
 export DIOXUSCUT_BROWSER_URL=http://localhost:1420
 export DIOXUSCUT_BROWSER_CONCURRENCY=4
 # Optional: fail readiness or an async renderFrame() that exceeds this limit.
