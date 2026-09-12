@@ -46,7 +46,7 @@
 
 #![cfg(feature = "gpu")]
 
-use crate::backend::{FrameConfig, RasterError, RasterizerBackend};
+use crate::backend::{BackendCapabilities, FrameConfig, RasterError, RasterizerBackend};
 use crate::scene::{Color, GradientStop, Scene, SceneNode};
 use crate::tiny_skia_backend::{svgpath_to_tiny_skia, TinySkiaBackend};
 use image::RgbaImage;
@@ -759,6 +759,15 @@ impl WgpuBackend {
 }
 
 impl RasterizerBackend for WgpuBackend {
+    fn capabilities(&self) -> BackendCapabilities {
+        BackendCapabilities {
+            native_scene: true,
+            browser_runtime: false,
+            gpu_accelerated: true,
+            supports_streaming: self.supports_streaming(),
+        }
+    }
+
     fn render_frame(&self, scene: &Scene, config: &FrameConfig) -> Result<RgbaImage, RasterError> {
         let Some(commands) = compile_scene(scene) else {
             return self.fallback.render_frame(scene, config);

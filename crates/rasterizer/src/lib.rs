@@ -46,6 +46,7 @@ pub mod shader;
 pub mod text_layout;
 pub mod tiny_skia_backend;
 mod video_cache;
+pub mod web;
 #[cfg(feature = "gpu")]
 pub mod wgpu_backend;
 
@@ -60,7 +61,7 @@ pub use particles::{ConfettiEmitter, ConfettiShape, Particle};
 pub use shader::WgpuShaderRunner;
 pub use shader::{render_shader_cpu, wrap_wgsl_shader, ShaderUniforms};
 
-pub use backend::{FrameConfig, RasterError, RasterizerBackend};
+pub use backend::{BackendCapabilities, FrameConfig, RasterError, RasterizerBackend};
 pub use font::{
     create_rounded_text_box, create_rounded_text_box_from_measurements, fill_text_box, fit_text,
     fit_text_on_n_lines, layout_text_box, measure_text_width, measure_text_width_with_font,
@@ -78,6 +79,7 @@ pub use render::{
     save_frame, CancelSignal, HwAccel, NativeRenderConfig, PipeConfig, RenderCancellationToken,
     RenderControl, RenderProgress, StillImageFormat, VideoCodec,
 };
+pub use web::{WebFrameRequest, WebFrameResponse, WebWorkerMessage, WEB_WORKER_PROTOCOL_VERSION};
 
 pub use gif_cache::{GifFrame, GifFrameCache, LoopBehavior};
 pub use scene::{

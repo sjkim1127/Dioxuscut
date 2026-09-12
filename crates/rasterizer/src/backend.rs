@@ -40,6 +40,18 @@ pub struct FrameConfig {
     pub fps: f64,
 }
 
+/// Capabilities exposed by a rendering backend.
+///
+/// A frontend (for example a Three.js/Chromium worker) can use this metadata
+/// to select an appropriate scene path without guessing from the backend name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BackendCapabilities {
+    pub native_scene: bool,
+    pub browser_runtime: bool,
+    pub gpu_accelerated: bool,
+    pub supports_streaming: bool,
+}
+
 impl FrameConfig {
     pub fn new(width: u32, height: u32, frame: u32, fps: f64) -> Self {
         Self {
@@ -60,6 +72,16 @@ impl FrameConfig {
 pub trait RasterizerBackend: Send + Sync {
     /// Render a single `Scene` into an `RgbaImage`.
     fn render_frame(&self, scene: &Scene, config: &FrameConfig) -> Result<RgbaImage, RasterError>;
+
+    /// Describe the execution environment used by this backend.
+    fn capabilities(&self) -> BackendCapabilities {
+        BackendCapabilities {
+            native_scene: true,
+            browser_runtime: false,
+            gpu_accelerated: false,
+            supports_streaming: self.supports_streaming(),
+        }
+    }
 
     /// Whether this backend provides an internal pipelined streaming implementation
     /// (e.g. GPU double-buffered ring buffers).
