@@ -3,15 +3,51 @@
 use crate::backend::RasterError;
 use base64::Engine as _;
 use image::RgbaImage;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
 pub(crate) struct ImageCache {
-    decoded: Mutex<HashMap<String, Arc<RgbaImage>>>,
+    decoded: Mutex<ImageCacheState>,
 }
 
 const MAX_DATA_URI_BYTES: usize = 32 * 1024 * 1024;
+const MAX_CACHE_BYTES: usize = 256 * 1024 * 1024;
+
+#[derive(Default)]
+struct ImageCacheState {
+    images: HashMap<String, Arc<RgbaImage>>,
+    lru: VecDeque<String>,
+    bytes: usize,
+}
+
+impl ImageCacheState {
+    fn get(&mut self, key: &str) -> Option<Arc<RgbaImage>> {
+        let image = self.images.get(key).cloned()?;
+        self.lru.retain(|entry| entry != key);
+        self.lru.push_back(key.to_string());
+        Some(image)
+    }
+
+    fn insert(&mut self, key: String, image: Arc<RgbaImage>) -> Arc<RgbaImage> {
+        if let Some(existing) = self.get(&key) {
+            return existing;
+        }
+        let size = image.as_raw().len();
+        self.images.insert(key.clone(), Arc::clone(&image));
+        self.lru.push_back(key);
+        self.bytes = self.bytes.saturating_add(size);
+        while self.bytes > MAX_CACHE_BYTES {
+            let Some(oldest) = self.lru.pop_front() else {
+                break;
+            };
+            if let Some(evicted) = self.images.remove(&oldest) {
+                self.bytes = self.bytes.saturating_sub(evicted.as_raw().len());
+            }
+        }
+        image
+    }
+}
 
 impl ImageCache {
     #[allow(dead_code)]
@@ -40,7 +76,6 @@ impl ImageCache {
             .lock()
             .expect("image cache lock poisoned")
             .get(&key)
-            .cloned()
         {
             return Ok(image);
         }
@@ -56,10 +91,7 @@ impl ImageCache {
             .to_rgba8();
         let decoded = Arc::new(decoded);
         let mut cache = self.decoded.lock().expect("image cache lock poisoned");
-        Ok(cache
-            .entry(key)
-            .or_insert_with(|| Arc::clone(&decoded))
-            .clone())
+        Ok(cache.insert(key, decoded))
     }
 
     fn load_data_uri(&self, src: &str, data: &str) -> Result<Arc<RgbaImage>, RasterError> {
@@ -68,7 +100,6 @@ impl ImageCache {
             .lock()
             .expect("image cache lock poisoned")
             .get(src)
-            .cloned()
         {
             return Ok(image);
         }
@@ -124,11 +155,8 @@ impl ImageCache {
         })?
         .to_rgba8();
         let decoded = Arc::new(decoded);
-        self.decoded
-            .lock()
-            .expect("image cache lock poisoned")
-            .insert(src.to_string(), Arc::clone(&decoded));
-        Ok(decoded)
+        let mut cache = self.decoded.lock().expect("image cache lock poisoned");
+        Ok(cache.insert(src.to_string(), decoded))
     }
 
     #[cfg(test)]
@@ -136,6 +164,7 @@ impl ImageCache {
         self.decoded
             .lock()
             .expect("image cache lock poisoned")
+            .images
             .len()
     }
 }
