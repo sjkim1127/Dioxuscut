@@ -9,20 +9,29 @@ use crate::web::{
 };
 use base64::Engine;
 use image::RgbaImage;
+use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 
 struct BrowserWorker {
-    child: Mutex<Child>,
+    process: Mutex<WorkerProcess>,
+    node: OsString,
+    worker: PathBuf,
+    url: String,
     compositions: Vec<String>,
     /// A worker processes one request at a time; protect the full
     /// write/read transaction so concurrent host threads cannot steal replies.
     request: Mutex<()>,
-    stdin: Mutex<ChildStdin>,
-    stdout: Mutex<BufReader<ChildStdout>>,
+}
+
+struct WorkerProcess {
+    child: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
 }
 
 pub struct BrowserFrameBackend {
@@ -97,9 +106,28 @@ impl BrowserFrameBackend {
 impl BrowserWorker {
     fn spawn(
         node: &impl AsRef<std::ffi::OsStr>,
-        worker: &std::path::Path,
+        worker: &Path,
         url: &str,
     ) -> Result<Self, RasterError> {
+        let node = node.as_ref().to_os_string();
+        let worker = worker.to_path_buf();
+        let url = url.to_string();
+        let (process, compositions) = Self::spawn_process(&node, &worker, &url)?;
+        Ok(Self {
+            process: Mutex::new(process),
+            node,
+            worker,
+            url,
+            compositions,
+            request: Mutex::new(()),
+        })
+    }
+
+    fn spawn_process(
+        node: &OsString,
+        worker: &Path,
+        url: &str,
+    ) -> Result<(WorkerProcess, Vec<String>), RasterError> {
         let mut child = Command::new(node)
             .arg(worker)
             .arg(format!("--url={url}"))
@@ -140,13 +168,44 @@ impl BrowserWorker {
                 )))
             }
         };
-        Ok(Self {
-            child: Mutex::new(child),
+        Ok((
+            WorkerProcess {
+                child,
+                stdin,
+                stdout,
+            },
             compositions,
-            request: Mutex::new(()),
-            stdin: Mutex::new(stdin),
-            stdout: Mutex::new(stdout),
-        })
+        ))
+    }
+
+    fn restart(&self) -> Result<(), RasterError> {
+        let mut process = self
+            .process
+            .lock()
+            .map_err(|_| RasterError::Init("browser worker process lock poisoned".into()))?;
+        let _ = process.child.kill();
+        let _ = process.child.wait();
+        let (replacement, _) = Self::spawn_process(&self.node, &self.worker, &self.url)?;
+        *process = replacement;
+        Ok(())
+    }
+
+    fn request_line(&self, encoded: &str) -> Result<String, RasterError> {
+        let mut process = self
+            .process
+            .lock()
+            .map_err(|_| RasterError::Init("browser worker process lock poisoned".into()))?;
+        writeln!(process.stdin, "{encoded}")?;
+        process.stdin.flush()?;
+        let mut line = String::new();
+        process.stdout.read_line(&mut line)?;
+        if line.is_empty() {
+            return Err(RasterError::Frame {
+                frame: 0,
+                reason: "browser worker exited without a response".into(),
+            });
+        }
+        Ok(line)
     }
 }
 
@@ -241,20 +300,25 @@ impl BrowserFrameBackend {
             .request
             .lock()
             .map_err(|_| RasterError::Init("browser worker request lock poisoned".into()))?;
-        let mut stdin = worker
-            .stdin
-            .lock()
-            .map_err(|_| RasterError::Init("browser worker stdin lock poisoned".into()))?;
-        writeln!(stdin, "{encoded}")?;
-        stdin.flush()?;
-        drop(stdin);
+        let line = match worker.request_line(&encoded) {
+            Ok(line) => line,
+            Err(first_error) => {
+                tracing::warn!(frame = request.frame, error = %first_error, "browser worker transport failed; restarting");
+                worker
+                    .restart()
+                    .map_err(|restart_error| RasterError::Frame {
+                        frame: request.frame,
+                        reason: format!("{first_error}; worker restart failed: {restart_error}"),
+                    })?;
+                worker
+                    .request_line(&encoded)
+                    .map_err(|retry_error| RasterError::Frame {
+                        frame: request.frame,
+                        reason: format!("browser worker retry failed: {retry_error}"),
+                    })?
+            }
+        };
         tracing::debug!(frame = request.frame, "browser frame request sent");
-        let mut stdout = worker
-            .stdout
-            .lock()
-            .map_err(|_| RasterError::Init("browser worker stdout lock poisoned".into()))?;
-        let mut line = String::new();
-        stdout.read_line(&mut line)?;
         tracing::debug!(
             frame = request.frame,
             bytes = line.len(),
@@ -361,16 +425,14 @@ impl BrowserFrameBackend {
 impl Drop for BrowserFrameBackend {
     fn drop(&mut self) {
         for worker in &self.workers {
-            if let Ok(mut stdin) = worker.stdin.lock() {
-                let _ = writeln!(stdin, "{{\"type\":\"shutdown\"}}");
-                let _ = stdin.flush();
-            }
-            if let Ok(mut child) = worker.child.lock() {
-                let _ = child.try_wait();
-                if child.try_wait().ok().flatten().is_none() {
-                    let _ = child.kill();
+            if let Ok(mut process) = worker.process.lock() {
+                let _ = writeln!(process.stdin, "{{\"type\":\"shutdown\"}}");
+                let _ = process.stdin.flush();
+                let _ = process.child.try_wait();
+                if process.child.try_wait().ok().flatten().is_none() {
+                    let _ = process.child.kill();
                 }
-                let _ = child.wait();
+                let _ = process.child.wait();
             }
         }
     }
@@ -414,5 +476,51 @@ impl RasterizerBackend for BrowserFrameBackend {
             jpeg_quality: self.jpeg_quality,
             props,
         })
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn transport_failure_restarts_worker_and_retries_frame() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("dioxuscut-browser-restart-{nonce}"));
+        fs::create_dir_all(&root).unwrap();
+        let marker = root.join("first-request-seen");
+        let script = root.join("worker.sh");
+        fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' '{{\"type\":\"ready\",\"protocol\":1}}'\nread request || exit 0\nif [ ! -f '{marker}' ]; then touch '{marker}'; exit 0; fi\nprintf '%s\\n' '{{\"type\":\"frame\",\"frame\":3,\"width\":1,\"height\":1,\"rgba_base64\":\"AQIDBA==\"}}'\n",
+                marker = marker.display()
+            ),
+        )
+        .unwrap();
+
+        let backend = BrowserFrameBackend::new("/bin/sh", &script, "http://unused").unwrap();
+        let image = backend
+            .render_web_frame(&WebFrameRequest {
+                composition: Some("test".into()),
+                frame: 3,
+                fps: 30.0,
+                width: 1,
+                height: 1,
+                props: serde_json::json!({}),
+                assets: vec![],
+                timeline: vec![],
+                image_format: None,
+                jpeg_quality: None,
+            })
+            .unwrap();
+        assert_eq!(image.as_raw(), &[1, 2, 3, 4]);
+        drop(backend);
+        let _ = fs::remove_dir_all(root);
     }
 }
