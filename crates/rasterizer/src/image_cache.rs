@@ -34,14 +34,20 @@ impl ImageCache {
             other => other,
         })?;
 
-        // Keep cache misses serialized so parallel frame workers do not decode
-        // the same asset repeatedly during the first rendered batch.
-        let mut cache = self.decoded.lock().expect("image cache lock poisoned");
         let key = canonical.display().to_string();
-        if let Some(image) = cache.get(&key).cloned() {
+        if let Some(image) = self
+            .decoded
+            .lock()
+            .expect("image cache lock poisoned")
+            .get(&key)
+            .cloned()
+        {
             return Ok(image);
         }
 
+        // Decode outside the global cache lock so different assets can load in
+        // parallel. A second lookup below prevents replacing an image decoded
+        // concurrently for the same key.
         let decoded = image::open(&canonical)
             .map_err(|error| RasterError::ImageAsset {
                 path: canonical.display().to_string(),
@@ -49,8 +55,11 @@ impl ImageCache {
             })?
             .to_rgba8();
         let decoded = Arc::new(decoded);
-        cache.insert(key, Arc::clone(&decoded));
-        Ok(decoded)
+        let mut cache = self.decoded.lock().expect("image cache lock poisoned");
+        Ok(cache
+            .entry(key)
+            .or_insert_with(|| Arc::clone(&decoded))
+            .clone())
     }
 
     fn load_data_uri(&self, src: &str, data: &str) -> Result<Arc<RgbaImage>, RasterError> {
