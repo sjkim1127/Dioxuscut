@@ -81,7 +81,10 @@ pub use render::{
     PipeConfig, RenderCancellationToken, RenderControl, RenderProgress, StillImageFormat,
     VideoCodec,
 };
-pub use web::{WebFrameRequest, WebFrameResponse, WebWorkerMessage, WEB_WORKER_PROTOCOL_VERSION};
+pub use web::{
+    WebFrameRequest, WebFrameResponse, WebTimelineClip, WebWorkerMessage,
+    WEB_WORKER_PROTOCOL_VERSION,
+};
 pub use web_backend::BrowserFrameBackend;
 
 pub use gif_cache::{GifFrame, GifFrameCache, LoopBehavior};

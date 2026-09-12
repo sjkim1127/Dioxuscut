@@ -7,7 +7,8 @@ use dioxuscut_project::{JobStatus, JobStore, Project, RenderJob};
 use dioxuscut_rasterizer::{
     make_cancel_signal, render_still_fallible, render_web_to_ffmpeg_pipe_fallible,
     BackendCapabilities, BrowserFrameBackend, PipeConfig, RenderCancellationToken, RenderControl,
-    StillImageFormat, VideoCodec, WebFrameRequest, WebWorkerMessage, WEB_WORKER_PROTOCOL_VERSION,
+    StillImageFormat, VideoCodec, WebFrameRequest, WebTimelineClip, WebWorkerMessage,
+    WEB_WORKER_PROTOCOL_VERSION,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -212,6 +213,22 @@ fn start_render_job(
                         .assets
                         .iter()
                         .map(|asset| asset.path.clone())
+                        .collect(),
+                )
+                .map_err(|error| error.to_string())?;
+            backend
+                .set_timeline(
+                    project
+                        .tracks
+                        .iter()
+                        .flat_map(|track| track.clips.iter())
+                        .map(|clip| WebTimelineClip {
+                            id: clip.id.clone(),
+                            composition: clip.composition.clone(),
+                            start: clip.start,
+                            duration: clip.duration,
+                            props: clip.props.clone(),
+                        })
                         .collect(),
                 )
                 .map_err(|error| error.to_string())?;

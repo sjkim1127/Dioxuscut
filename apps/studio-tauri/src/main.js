@@ -88,11 +88,7 @@ export function listCompositions() {
 }
 
 // Explicit frame input keeps this scene deterministic for future exports.
-export async function renderFrame({ composition = 'three_preview', frame: nextFrame, fps = 30, props: inputProps = {}, assets = [] }) {
-  const props = inputProps && typeof inputProps === 'object' ? inputProps : {};
-  await preloadAssets(assets);
-  const customRender = compositions.get(composition);
-  if (customRender) return customRender({ frame: nextFrame, fps, props, assets });
+function renderDefaultFrame({ composition, frame: nextFrame, fps, props }) {
   frame = nextFrame;
   cube.rotation.x = nextFrame / Math.max(fps, 1) * 0.36;
   cube.rotation.y = nextFrame / Math.max(fps, 1) * 0.54;
@@ -100,6 +96,30 @@ export async function renderFrame({ composition = 'three_preview', frame: nextFr
   renderer.render(scene, camera);
   document.querySelector('#frame').textContent = `frame ${nextFrame}`;
   document.querySelector('#protocol').textContent = `composition ${composition}`;
+}
+
+export async function renderFrame({ composition = 'three_preview', frame: nextFrame, fps = 30, props: inputProps = {}, assets = [], timeline = [] }) {
+  const props = inputProps && typeof inputProps === 'object' ? inputProps : {};
+  await preloadAssets(assets);
+  if (timeline.length > 0) {
+    for (const clip of timeline) {
+      if (nextFrame < clip.start || nextFrame >= clip.start + clip.duration) continue;
+      const render = compositions.get(clip.composition) ??
+        (clip.composition === 'three_preview' ? renderDefaultFrame : undefined);
+      if (!render) throw new Error(`unknown browser composition: ${clip.composition}`);
+      await render({
+        composition: clip.composition,
+        frame: nextFrame - clip.start,
+        fps,
+        props: clip.props ?? {},
+        assets,
+      });
+    }
+    return;
+  }
+  const customRender = compositions.get(composition);
+  if (customRender) return customRender({ frame: nextFrame, fps, props, assets });
+  return renderDefaultFrame({ composition, frame: nextFrame, fps, props });
 }
 window.dioxuscut = { renderFrame, registerComposition, listCompositions };
 

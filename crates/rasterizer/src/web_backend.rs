@@ -4,7 +4,8 @@ use crate::backend::{BackendCapabilities, FrameConfig, RasterError, RasterizerBa
 use crate::frame_cache::{CacheMetrics, FrameCacheKey, FrameCacheManager};
 use crate::scene::Scene;
 use crate::web::{
-    WebFrameRequest, WebFrameResponse, WebWorkerMessage, WEB_WORKER_PROTOCOL_VERSION,
+    WebFrameRequest, WebFrameResponse, WebTimelineClip, WebWorkerMessage,
+    WEB_WORKER_PROTOCOL_VERSION,
 };
 use base64::Engine;
 use image::RgbaImage;
@@ -29,6 +30,7 @@ pub struct BrowserFrameBackend {
     next_worker: AtomicUsize,
     composition: Mutex<Option<String>>,
     assets: Mutex<Vec<String>>,
+    timeline: Mutex<Vec<WebTimelineClip>>,
     props: Mutex<serde_json::Value>,
     cache: FrameCacheManager,
 }
@@ -71,6 +73,7 @@ impl BrowserFrameBackend {
                     })
                     .unwrap_or_default(),
             ),
+            timeline: Mutex::new(vec![]),
             props: Mutex::new(serde_json::json!({})),
             cache: FrameCacheManager::default(),
         })
@@ -148,6 +151,15 @@ impl BrowserFrameBackend {
             .assets
             .lock()
             .map_err(|_| RasterError::Init("browser assets lock poisoned".into()))? = assets;
+        Ok(())
+    }
+
+    /// Configure the project timeline forwarded to browser compositions.
+    pub fn set_timeline(&self, timeline: Vec<WebTimelineClip>) -> Result<(), RasterError> {
+        *self
+            .timeline
+            .lock()
+            .map_err(|_| RasterError::Init("browser timeline lock poisoned".into()))? = timeline;
         Ok(())
     }
 
@@ -316,6 +328,11 @@ impl RasterizerBackend for BrowserFrameBackend {
                 .assets
                 .lock()
                 .map_err(|_| RasterError::Init("browser assets lock poisoned".into()))?
+                .clone(),
+            timeline: self
+                .timeline
+                .lock()
+                .map_err(|_| RasterError::Init("browser timeline lock poisoned".into()))?
                 .clone(),
             props,
         })

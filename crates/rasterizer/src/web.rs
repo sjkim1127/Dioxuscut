@@ -4,6 +4,17 @@ use serde::{Deserialize, Serialize};
 
 /// Deterministic request sent to a browser-backed renderer.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WebTimelineClip {
+    pub id: String,
+    pub composition: String,
+    pub start: u32,
+    pub duration: u32,
+    #[serde(default)]
+    pub props: serde_json::Value,
+}
+
+/// Deterministic request sent to a browser-backed renderer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WebFrameRequest {
     /// Composition selected by the host. Older workers may ignore this field.
     #[serde(default)]
@@ -17,6 +28,8 @@ pub struct WebFrameRequest {
     /// Host-provided local or URL assets that the browser composition may preload.
     #[serde(default)]
     pub assets: Vec<String>,
+    #[serde(default)]
+    pub timeline: Vec<WebTimelineClip>,
 }
 
 /// Result returned by a browser-backed renderer.
@@ -66,6 +79,7 @@ mod tests {
             height: 720,
             props: serde_json::json!({"seed": 7}),
             assets: vec![],
+            timeline: vec![],
         });
         let json = serde_json::to_string(&message).unwrap();
         assert_eq!(
