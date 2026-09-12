@@ -270,6 +270,7 @@ mod project_timeline_tests {
             .expect("timeline provides audio tracks");
         assert_eq!(tracks.len(), 1);
         assert_eq!(tracks[0].src, "later.wav");
+        assert!((tracks[0].timeline_start - 10.0 / 30.0).abs() < f64::EPSILON);
     }
 }
 
@@ -334,7 +335,14 @@ impl dioxuscut_composition::PreparedComposition for ProjectTimelinePrepared<'_> 
                 Some(tracks) => tracks,
                 None => prepared.render(0)?.audio_tracks(),
             };
-            tracks.extend(clip_tracks);
+            let clip_offset = clip.start as f64 / self.context.fps;
+            for mut track in clip_tracks {
+                track.timeline_start += clip_offset;
+                for (time, _) in &mut track.volume_keyframes {
+                    *time += clip_offset;
+                }
+                tracks.push(track);
+            }
         }
         Ok(Some(tracks))
     }
