@@ -125,7 +125,7 @@ fn start_render_job(
     id: String,
     output: String,
 ) -> Result<(), String> {
-    let project = {
+    let mut project = {
         let store = state
             .jobs
             .lock()
@@ -176,6 +176,10 @@ fn start_render_job(
         thread::spawn(move || {
             let props_path = std::env::temp_dir().join(format!("dioxuscut-{id}-props.json"));
             let result = (|| -> Result<(), String> {
+                let asset_cache_dir = std::env::temp_dir().join("dioxuscut-assets").join(&id);
+                project
+                    .materialize_remote_assets(&asset_cache_dir, 256 * 1024 * 1024)
+                    .map_err(|error| error.to_string())?;
                 std::fs::write(
                     &props_path,
                     serde_json::to_vec(&project.props).map_err(|e| e.to_string())?,
@@ -235,6 +239,8 @@ fn start_render_job(
                     .map_err(|e| e.to_string())
             })();
             let _ = std::fs::remove_file(&props_path);
+            let _ =
+                std::fs::remove_dir_all(std::env::temp_dir().join("dioxuscut-assets").join(&id));
             if let Ok(mut cancellations) = state_cancellations.lock() {
                 cancellations.remove(&id);
             }
