@@ -302,8 +302,7 @@ mod tests {
 
     #[test]
     fn test_image_dimensions() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../assets/logo.png");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/logo.png");
         let dimensions = get_image_dimensions(path).unwrap();
         assert!(dimensions.width > 0);
         assert!(dimensions.height > 0);
