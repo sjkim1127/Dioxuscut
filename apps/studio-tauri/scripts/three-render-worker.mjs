@@ -56,16 +56,24 @@ rl.on('line', (line) => { queue = queue.then(async () => {
   if (message.type !== 'render') return;
   try {
     const request = message;
+    let pageError;
+    const onPageError = (error) => { pageError = error; };
+    page.on('pageerror', onPageError);
     let lastError;
-    for (let attempt = 0; attempt <= frameRetries; attempt += 1) {
-      try {
-        await page.setViewportSize({ width: request.width, height: request.height });
-        await renderFrame(request);
-        lastError = undefined;
-        break;
-      } catch (error) {
-        lastError = error;
+    try {
+      for (let attempt = 0; attempt <= frameRetries; attempt += 1) {
+        try {
+          await page.setViewportSize({ width: request.width, height: request.height });
+          await renderFrame(request);
+          if (pageError) throw pageError;
+          lastError = undefined;
+          break;
+        } catch (error) {
+          lastError = error;
+        }
       }
+    } finally {
+      page.off('pageerror', onPageError);
     }
     if (lastError) throw lastError;
     const imageType = request.image_format === 'jpeg' ? 'jpeg' : 'png';
