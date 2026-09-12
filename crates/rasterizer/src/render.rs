@@ -1080,7 +1080,8 @@ fn invalid_audio(track: &AudioTrack, reason: &str) -> RasterError {
 
 fn active_audio_tracks(config: &PipeConfig) -> Vec<&AudioTrack> {
     let range_start = config.start_frame as f64 / config.fps;
-    let range_end = range_start + config.duration_in_frames as f64 / config.fps;
+    let output_fps = config.fps / config.frame_step as f64;
+    let range_end = range_start + config.duration_in_frames as f64 / output_fps;
     config
         .audio_tracks
         .iter()
@@ -1163,7 +1164,8 @@ fn build_audio_filter(config: &PipeConfig, tracks: &[&AudioTrack]) -> String {
     let labels = (0..tracks.len())
         .map(|index| format!("[a{index}]"))
         .collect::<String>();
-    let output_duration = config.duration_in_frames as f64 / config.fps;
+    let output_fps = config.fps / config.frame_step as f64;
+    let output_duration = config.duration_in_frames as f64 / output_fps;
     if tracks.len() == 1 {
         filters.push(format!(
             "{labels}apad,atrim=duration={output_duration:.9},asetpts=N/SR/TB[aout]"
@@ -1591,6 +1593,19 @@ mod tests {
         let args = build_pipe_ffmpeg_args(&video);
         assert!(args.windows(2).any(|pair| pair == ["-r", "15"]));
         assert!(validate_pipe_config(&video).is_ok());
+    }
+
+    #[test]
+    fn frame_step_preserves_sampled_video_duration_for_audio() {
+        let config = PipeConfig::new(64, 64, 30.0, 3, "out.mp4")
+            .with_codec(VideoCodec::H264)
+            .with_frame_step(2)
+            .with_audio_tracks([AudioTrack::new("music.wav")]);
+        let track = AudioTrack::new("music.wav");
+
+        assert_eq!(active_audio_tracks(&config).len(), 1);
+        let filter = build_audio_filter(&config, &[&track]);
+        assert!(filter.contains("atrim=duration=0.200000000"));
     }
 
     #[test]
