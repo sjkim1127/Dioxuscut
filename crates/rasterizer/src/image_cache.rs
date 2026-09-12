@@ -6,6 +6,35 @@ use image::RgbaImage;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
+fn rasterize_svg(bytes: &[u8], source: &str) -> Result<RgbaImage, RasterError> {
+    let tree =
+        resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default()).map_err(|error| {
+            RasterError::ImageAsset {
+                path: source.to_string(),
+                reason: format!("invalid SVG: {error}"),
+            }
+        })?;
+    let size = tree.size().to_int_size();
+    let mut pixmap =
+        resvg::tiny_skia::Pixmap::new(size.width(), size.height()).ok_or_else(|| {
+            RasterError::ImageAsset {
+                path: source.to_string(),
+                reason: "SVG has invalid or zero dimensions".into(),
+            }
+        })?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::identity(),
+        &mut pixmap.as_mut(),
+    );
+    RgbaImage::from_raw(size.width(), size.height(), pixmap.take()).ok_or_else(|| {
+        RasterError::ImageAsset {
+            path: source.to_string(),
+            reason: "failed to construct RGBA image from SVG".into(),
+        }
+    })
+}
+
 pub(crate) struct ImageCache {
     decoded: Mutex<ImageCacheState>,
     max_bytes: usize,
@@ -97,12 +126,23 @@ impl ImageCache {
         // Decode outside the global cache lock so different assets can load in
         // parallel. A second lookup below prevents replacing an image decoded
         // concurrently for the same key.
-        let decoded = image::open(&canonical)
-            .map_err(|error| RasterError::ImageAsset {
-                path: canonical.display().to_string(),
-                reason: error.to_string(),
-            })?
-            .to_rgba8();
+        let bytes = std::fs::read(&canonical).map_err(|error| RasterError::ImageAsset {
+            path: canonical.display().to_string(),
+            reason: error.to_string(),
+        })?;
+        let decoded = if canonical
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("svg"))
+        {
+            rasterize_svg(&bytes, &canonical.display().to_string())?
+        } else {
+            image::load_from_memory(&bytes)
+                .map_err(|error| RasterError::ImageAsset {
+                    path: canonical.display().to_string(),
+                    reason: error.to_string(),
+                })?
+                .to_rgba8()
+        };
         let decoded = Arc::new(decoded);
         let mut cache = self.decoded.lock().expect("image cache lock poisoned");
         Ok(cache.insert(key, decoded, self.max_bytes))
@@ -126,10 +166,15 @@ impl ImageCache {
         let mime = metadata
             .split(';')
             .next()
-            .filter(|value| matches!(*value, "image/png" | "image/jpeg" | "image/webp"))
+            .filter(|value| {
+                matches!(
+                    *value,
+                    "image/png" | "image/jpeg" | "image/webp" | "image/svg+xml"
+                )
+            })
             .ok_or_else(|| RasterError::ImageAsset {
                 path: src.to_string(),
-                reason: "only image/png, image/jpeg, and image/webp data URIs are supported".into(),
+                reason: "only PNG, JPEG, WebP, and base64 SVG data URIs are supported".into(),
             })?;
         if !metadata.split(';').any(|part| part == "base64") {
             return Err(RasterError::ImageAsset {
@@ -155,19 +200,23 @@ impl ImageCache {
                 reason: format!("data URI exceeds the {MAX_DATA_URI_BYTES} byte limit"),
             });
         }
-        let decoded = image::load_from_memory_with_format(
-            &bytes,
-            match mime {
-                "image/png" => image::ImageFormat::Png,
-                "image/jpeg" => image::ImageFormat::Jpeg,
-                _ => image::ImageFormat::WebP,
-            },
-        )
-        .map_err(|error| RasterError::ImageAsset {
-            path: src.to_string(),
-            reason: error.to_string(),
-        })?
-        .to_rgba8();
+        let decoded = if mime == "image/svg+xml" {
+            rasterize_svg(&bytes, src)?
+        } else {
+            image::load_from_memory_with_format(
+                &bytes,
+                match mime {
+                    "image/png" => image::ImageFormat::Png,
+                    "image/jpeg" => image::ImageFormat::Jpeg,
+                    _ => image::ImageFormat::WebP,
+                },
+            )
+            .map_err(|error| RasterError::ImageAsset {
+                path: src.to_string(),
+                reason: error.to_string(),
+            })?
+            .to_rgba8()
+        };
         let decoded = Arc::new(decoded);
         let mut cache = self.decoded.lock().expect("image cache lock poisoned");
         Ok(cache.insert(src.to_string(), decoded, self.max_bytes))
@@ -203,5 +252,14 @@ mod tests {
         assert_eq!(cache.len(), 1);
         let cached = cache.load(source).unwrap();
         assert!(std::sync::Arc::ptr_eq(&image, &cached));
+    }
+
+    #[test]
+    fn rasterizes_base64_svg_data_uri() {
+        let cache = ImageCache::default();
+        let source = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyIiBoZWlnaHQ9IjEiPjxyZWN0IHdpZHRoPSIyIiBoZWlnaHQ9IjEiIGZpbGw9InJlZCIvPjwvc3ZnPg==";
+        let image = cache.load(source).unwrap();
+        assert_eq!((image.width(), image.height()), (2, 1));
+        assert_eq!(image.get_pixel(0, 0).0, [255, 0, 0, 255]);
     }
 }
