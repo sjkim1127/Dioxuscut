@@ -344,6 +344,8 @@ same frame. GIF and still outputs do not accept audio tracks. AV1 selects
 
 Native high-performance video rendering for Python with zero Chromium/Puppeteer overhead:
 
+The native extension uses PyO3 0.29 with the stable Python 3.10 ABI3 target.
+
 ```bash
 pip install dioxuscut
 ```

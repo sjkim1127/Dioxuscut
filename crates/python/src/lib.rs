@@ -155,7 +155,7 @@ fn render_native(
     };
 
     // Release GIL while rendering in a dedicated Tokio runtime
-    let result = py.allow_threads(|| {
+    let result = py.detach(|| {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -324,11 +324,11 @@ fn static_file(path: &str) -> PyResult<String> {
 
 /// Probe video metadata including resolution, fps, duration, and aspect ratio.
 #[pyfunction]
-fn get_video_metadata(py: Python<'_>, path: &str) -> PyResult<PyObject> {
+fn get_video_metadata(py: Python<'_>, path: &str) -> PyResult<Py<PyAny>> {
     let meta = dioxuscut_media::get_video_metadata(path)
         .map_err(|e| PyValueError::new_err(format!("get_video_metadata error: {e}")))?;
 
-    let dict = pyo3::types::PyDict::new_bound(py);
+    let dict = pyo3::types::PyDict::new(py);
     dict.set_item("width", meta.width)?;
     dict.set_item("height", meta.height)?;
     dict.set_item("fps", meta.fps)?;
@@ -336,29 +336,29 @@ fn get_video_metadata(py: Python<'_>, path: &str) -> PyResult<PyObject> {
     dict.set_item("duration_in_frames", meta.duration_in_frames)?;
     dict.set_item("aspect_ratio", meta.aspect_ratio)?;
     dict.set_item("is_landscape", meta.is_landscape)?;
-    Ok(dict.into())
+    Ok(dict.unbind().into_any())
 }
 
 fn tokens_to_py_list(
     py: Python<'_>,
     tokens: &[dioxuscut_captions::CaptionToken],
-) -> PyResult<Vec<PyObject>> {
+) -> PyResult<Vec<Py<PyAny>>> {
     let mut list = Vec::new();
     for t in tokens {
-        let dict = pyo3::types::PyDict::new_bound(py);
+        let dict = pyo3::types::PyDict::new(py);
         dict.set_item("text", &t.text)?;
         dict.set_item("start_ms", t.start_ms)?;
         dict.set_item("end_ms", t.end_ms)?;
         dict.set_item("start", t.start_ms as f64 / 1000.0)?;
         dict.set_item("end", t.end_ms as f64 / 1000.0)?;
-        list.push(dict.into());
+        list.push(dict.unbind().into_any());
     }
     Ok(list)
 }
 
 /// Parse OpenAI / Faster-Whisper JSON into a list of word tokens.
 #[pyfunction]
-fn parse_whisper(py: Python<'_>, json_str: &str) -> PyResult<Vec<PyObject>> {
+fn parse_whisper(py: Python<'_>, json_str: &str) -> PyResult<Vec<Py<PyAny>>> {
     let tokens = dioxuscut_captions::parse_whisper_json(json_str)
         .map_err(|e| PyValueError::new_err(format!("Whisper parse error: {e}")))?;
     tokens_to_py_list(py, &tokens)
@@ -366,7 +366,7 @@ fn parse_whisper(py: Python<'_>, json_str: &str) -> PyResult<Vec<PyObject>> {
 
 /// Parse SRT subtitle file content into a list of word tokens.
 #[pyfunction]
-fn parse_srt(py: Python<'_>, srt_str: &str) -> PyResult<Vec<PyObject>> {
+fn parse_srt(py: Python<'_>, srt_str: &str) -> PyResult<Vec<Py<PyAny>>> {
     let tokens = dioxuscut_captions::parse_srt(srt_str)
         .map_err(|e| PyValueError::new_err(format!("SRT parse error: {e}")))?;
     tokens_to_py_list(py, &tokens)
@@ -374,7 +374,7 @@ fn parse_srt(py: Python<'_>, srt_str: &str) -> PyResult<Vec<PyObject>> {
 
 /// Parse WebVTT subtitle file content into a list of word tokens.
 #[pyfunction]
-fn parse_vtt(py: Python<'_>, vtt_str: &str) -> PyResult<Vec<PyObject>> {
+fn parse_vtt(py: Python<'_>, vtt_str: &str) -> PyResult<Vec<Py<PyAny>>> {
     let tokens = dioxuscut_captions::parse_vtt(vtt_str)
         .map_err(|e| PyValueError::new_err(format!("VTT parse error: {e}")))?;
     tokens_to_py_list(py, &tokens)
@@ -428,14 +428,14 @@ fn get_audio_spectrum(src: &str, time_secs: f64, n_bars: usize) -> PyResult<Vec<
 
 /// Compute the axis-aligned bounding box of an SVG path.
 #[pyfunction]
-fn get_bounding_box(py: Python<'_>, path: &str) -> PyResult<Option<PyObject>> {
+fn get_bounding_box(py: Python<'_>, path: &str) -> PyResult<Option<Py<PyAny>>> {
     if let Some(bbox) = dioxuscut_paths::get_bounding_box(path) {
-        let dict = pyo3::types::PyDict::new_bound(py);
+        let dict = pyo3::types::PyDict::new(py);
         dict.set_item("x", bbox.x)?;
         dict.set_item("y", bbox.y)?;
         dict.set_item("width", bbox.width)?;
         dict.set_item("height", bbox.height)?;
-        Ok(Some(dict.into()))
+        Ok(Some(dict.unbind().into_any()))
     } else {
         Ok(None)
     }
@@ -474,7 +474,7 @@ fn get_safe_area_insets(
     platform: &str,
     width: f32,
     height: f32,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let plat = match platform.to_lowercase().as_str() {
         "reels" | "instagram" => dioxuscut_composition::Platform::InstagramReels,
         "shorts" | "youtube" => dioxuscut_composition::Platform::YouTubeShorts,
@@ -483,7 +483,7 @@ fn get_safe_area_insets(
         _ => dioxuscut_composition::Platform::TikTok,
     };
     let insets = dioxuscut_composition::get_safe_area_insets(plat, width, height);
-    let dict = pyo3::types::PyDict::new_bound(py);
+    let dict = pyo3::types::PyDict::new(py);
     dict.set_item("top", insets.top)?;
     dict.set_item("bottom", insets.bottom)?;
     dict.set_item("left", insets.left)?;
@@ -493,7 +493,7 @@ fn get_safe_area_insets(
     dict.set_item("safe_y", y)?;
     dict.set_item("safe_width", w)?;
     dict.set_item("safe_height", h)?;
-    Ok(dict.into())
+    Ok(dict.unbind().into_any())
 }
 
 /// Calculate optimal font size to fit text within `max_width` and `max_height`.
