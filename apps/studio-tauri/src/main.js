@@ -248,7 +248,24 @@ async function syncCanvasImages(nextFrame) {
   await Promise.all([...elements].map(async (element) => {
     const source = element.dataset.src;
     if (!source) return;
-    const asset = await (preloadedAssets.get(source) ?? preloadAssets([source]).then(() => preloadedAssets.get(source)));
+    const retries = Math.max(0, Number(element.dataset.maxRetries ?? 2));
+    let asset;
+    let lastError;
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      try {
+        asset = await (preloadedAssets.get(source) ?? preloadAssets([source]).then(() => preloadedAssets.get(source)));
+        lastError = undefined;
+        break;
+      } catch (error) {
+        lastError = error;
+        preloadedAssets.delete(source);
+        if (attempt < retries) await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** attempt));
+      }
+    }
+    if (lastError) {
+      if (element.dataset.pauseWhenLoading === 'true') element.style.visibility = 'hidden';
+      throw lastError;
+    }
     const drawable = await asset;
     const width = Number(element.getAttribute('width')) || element.clientWidth || drawable.videoWidth || drawable.naturalWidth || 1;
     const height = Number(element.getAttribute('height')) || element.clientHeight || drawable.videoHeight || drawable.naturalHeight || 1;

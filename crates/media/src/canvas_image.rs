@@ -21,6 +21,12 @@ pub struct CanvasImageProps {
     pub class: Option<String>,
     #[props(default)]
     pub style: Option<String>,
+    /// Number of browser-side source load retries (default: 2).
+    #[props(default = 2)]
+    pub max_retries: u32,
+    /// Keep the canvas hidden until the source has loaded.
+    #[props(default = false)]
+    pub pause_when_loading: bool,
 }
 
 /// Render an image source on a canvas-capable surface.
@@ -47,6 +53,8 @@ pub fn CanvasImage(props: CanvasImageProps) -> Element {
             "data-dioxuscut-canvas-image": "true",
             "data-src": "{props.src}",
             "data-fit": "{props.fit.as_css()}",
+            "data-max-retries": "{props.max_retries}",
+            "data-pause-when-loading": "{props.pause_when_loading}",
         }
     }
 }
