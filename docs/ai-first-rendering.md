@@ -90,6 +90,9 @@ Use concurrency greater than one only after measuring the target composition;
 Chromium startup and WebGL resource contention can make a larger pool slower.
 
 For a headless readiness check, `dioxuscut serve` exposes `GET /health` as JSON.
+Tauri hosts additionally expose `list_browser_compositions`, which performs a
+worker handshake and returns the registered Browser composition IDs without
+requiring the Studio UI.
 
 For render automation, set `DIOXUSCUT_JSON=1`. Successful and failed `render`
 commands then emit one machine-readable result line on stdout. Human tracing
