@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Project {
     pub version: u32,
     pub composition: String,
@@ -21,6 +22,7 @@ pub struct Project {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectSettings {
     pub width: u32,
     pub height: u32,
@@ -40,6 +42,7 @@ pub enum BackendKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct AssetRef {
     pub id: String,
     pub path: String,
@@ -63,6 +66,7 @@ pub enum AssetKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Track {
     pub id: String,
     #[serde(default)]
@@ -70,6 +74,7 @@ pub struct Track {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Clip {
     pub id: String,
     pub composition: String,
@@ -340,6 +345,16 @@ mod tests {
             Project::from_json_str(&value.to_string()),
             Err(ProjectError::UnsupportedVersion(2))
         );
+    }
+
+    #[test]
+    fn project_json_rejects_unknown_fields() {
+        let mut value = serde_json::to_value(project()).unwrap();
+        value["unexpected"] = serde_json::json!(true);
+        assert!(matches!(
+            Project::from_json_str(&value.to_string()),
+            Err(ProjectError::Json(_))
+        ));
     }
     #[test]
     fn job_store_validates_and_tracks_progress() {
