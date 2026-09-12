@@ -139,6 +139,11 @@ fn save_project(path: String, project: Project) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn validate_project(source: String) -> Result<Project, String> {
+    Project::from_json_str(&source).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn get_render_job(
     state: tauri::State<'_, AppState>,
     id: String,
@@ -261,6 +266,7 @@ fn main() {
             start_render_job,
             load_project,
             save_project,
+            validate_project,
             get_render_job,
             list_render_jobs,
             update_render_job,
