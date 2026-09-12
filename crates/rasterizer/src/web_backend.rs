@@ -16,6 +16,9 @@ use std::sync::Mutex;
 
 struct BrowserWorker {
     child: Mutex<Child>,
+    /// A worker processes one request at a time; protect the full
+    /// write/read transaction so concurrent host threads cannot steal replies.
+    request: Mutex<()>,
     stdin: Mutex<ChildStdin>,
     stdout: Mutex<BufReader<ChildStdout>>,
 }
@@ -109,6 +112,7 @@ impl BrowserWorker {
         }
         Ok(Self {
             child: Mutex::new(child),
+            request: Mutex::new(()),
             stdin: Mutex::new(stdin),
             stdout: Mutex::new(stdout),
         })
@@ -164,6 +168,10 @@ impl BrowserFrameBackend {
             })?;
         let worker =
             &self.workers[self.next_worker.fetch_add(1, Ordering::Relaxed) % self.workers.len()];
+        let _request = worker
+            .request
+            .lock()
+            .map_err(|_| RasterError::Init("browser worker request lock poisoned".into()))?;
         let mut stdin = worker
             .stdin
             .lock()
