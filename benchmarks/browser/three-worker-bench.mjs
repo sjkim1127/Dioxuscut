@@ -13,6 +13,11 @@ const concurrency = Math.max(1, Number(process.env.WORKERS ?? 1));
 const output = process.env.OUTPUT;
 const node = process.env.DIOXUSCUT_BROWSER_NODE ?? process.execPath;
 const browser = process.env.CHROME_PATH;
+const imageFormat = process.env.DIOXUSCUT_BROWSER_IMAGE_FORMAT;
+const jpegQuality = Number(process.env.DIOXUSCUT_BROWSER_JPEG_QUALITY ?? 90);
+const transparent = ['1', 'true', 'yes'].includes(
+  (process.env.DIOXUSCUT_BROWSER_TRANSPARENT ?? '').trim().toLowerCase(),
+);
 
 function spawnWorker() {
   return new Promise((resolve, reject) => {
@@ -41,7 +46,12 @@ function spawnWorker() {
     const waitReady = () => ready ? Promise.resolve() : new Promise((r, j) => setTimeout(() => waitReady().then(r, j), 5));
     const request = (frame) => new Promise((resolveFrame, rejectFrame) => {
       pending.set(frame, {resolve: resolveFrame, reject: rejectFrame});
-      child.stdin.write(JSON.stringify({type: 'render', composition: 'three_preview', frame, fps: 30, width: 1280, height: 720, props: {}}) + '\n');
+      child.stdin.write(JSON.stringify({
+        type: 'render', composition: 'three_preview', frame, fps: 30,
+        width: 1280, height: 720, props: {},
+        ...(imageFormat === 'jpeg' ? {image_format: 'jpeg', jpeg_quality: jpegQuality} : {}),
+        ...(transparent ? {transparent: true} : {}),
+      }) + '\n');
     });
     (async () => {
       await waitReady();
@@ -73,6 +83,6 @@ try {
   for (const worker of workers) worker.close();
 }
 const sorted = [...samples].sort((a, b) => a - b);
-const report = {backend: 'chromium-three-worker', url, frames, width: 1280, height: 720, repeats, workers: concurrency, samples_ms: samples, median_ms: sorted[Math.floor(sorted.length / 2)], fps_equivalent: frames / (sorted[Math.floor(sorted.length / 2)] / 1000), node: process.version, platform: process.platform, arch: process.arch};
+const report = {backend: 'chromium-three-worker', url, frames, width: 1280, height: 720, repeats, workers: concurrency, image_format: imageFormat ?? 'png', jpeg_quality: imageFormat === 'jpeg' ? jpegQuality : null, transparent, samples_ms: samples, median_ms: sorted[Math.floor(sorted.length / 2)], fps_equivalent: frames / (sorted[Math.floor(sorted.length / 2)] / 1000), node: process.version, platform: process.platform, arch: process.arch};
 if (output) writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`);
 console.log(JSON.stringify(report, null, 2));
