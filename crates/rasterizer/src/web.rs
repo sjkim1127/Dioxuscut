@@ -114,4 +114,12 @@ mod tests {
         assert!(matches!(parsed, WebWorkerMessage::Frame(response)
             if response.png_base64.is_none() && response.rgba_base64.as_deref() == Some("AQIDBA==")));
     }
+
+    #[test]
+    fn frame_response_accepts_jpeg_transport() {
+        let message = r#"{"type":"frame","frame":3,"width":1,"height":1,"jpeg_base64":"AQIDBA=="}"#;
+        let parsed: WebWorkerMessage = serde_json::from_str(message).unwrap();
+        assert!(matches!(parsed, WebWorkerMessage::Frame(response)
+            if response.jpeg_base64.as_deref() == Some("AQIDBA==")));
+    }
 }
