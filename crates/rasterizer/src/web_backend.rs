@@ -262,6 +262,27 @@ impl BrowserFrameBackend {
         self
     }
 
+    /// Configure the browser screenshot format for this backend.
+    ///
+    /// `png` preserves lossless output and alpha; `jpeg` can reduce transport
+    /// time and memory for opaque video previews. Invalid values are ignored
+    /// and leave the current format unchanged.
+    pub fn with_image_format(mut self, format: impl Into<String>) -> Self {
+        let format = format.into().to_ascii_lowercase();
+        if matches!(format.as_str(), "png" | "jpeg") {
+            self.image_format = Some(format);
+        }
+        self
+    }
+
+    /// Configure JPEG quality for this backend (1..=100).
+    pub fn with_jpeg_quality(mut self, quality: u8) -> Self {
+        if (1..=100).contains(&quality) {
+            self.jpeg_quality = Some(quality);
+        }
+        self
+    }
+
     /// Configure the decoded browser-frame cache budget in bytes.
     ///
     /// The default is 512 MiB. Embedders can lower it when the browser worker
