@@ -326,10 +326,12 @@ document.querySelector('#save-project').addEventListener('click', async () => {
 document.querySelector('#submit-render').addEventListener('click', async () => {
   try {
     const id = await invoke('submit_project', { project });
+    const output = `/tmp/dioxuscut-${id}.mp4`;
+    await invoke('start_render_job', { id, output });
     currentJobId = id;
     document.querySelector('#cancel-render').disabled = false;
     document.querySelector('#cancel-render').dataset.jobId = id;
-    showMessage(`${id} queued`);
+    showMessage(`${id} rendering → ${output}`);
     await refreshJob(id);
     await refreshJobList();
   } catch (error) { showMessage(`queue error: ${error}`); }
