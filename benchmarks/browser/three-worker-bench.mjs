@@ -2,12 +2,14 @@
 import {spawn} from 'node:child_process';
 import {performance} from 'node:perf_hooks';
 import {createInterface} from 'node:readline';
+import {writeFileSync} from 'node:fs';
 
 const root = new URL('../../', import.meta.url);
 const worker = new URL('../../apps/studio-tauri/scripts/three-render-worker.mjs', import.meta.url);
 const url = process.env.DIOXUSCUT_BROWSER_URL ?? 'http://127.0.0.1:1421';
 const frames = Number(process.env.FRAMES ?? 180);
 const repeats = Number(process.env.REPEATS ?? 3);
+const output = process.env.OUTPUT;
 const node = process.env.DIOXUSCUT_BROWSER_NODE ?? process.execPath;
 const browser = process.env.CHROME_PATH;
 
@@ -59,4 +61,6 @@ function run() {
 
 const samples = await run();
 const sorted = [...samples].sort((a, b) => a - b);
-console.log(JSON.stringify({backend: 'chromium-three-worker', url, frames, width: 1280, height: 720, repeats, samples_ms: samples, median_ms: sorted[Math.floor(sorted.length / 2)], fps_equivalent: frames / (sorted[Math.floor(sorted.length / 2)] / 1000)}, null, 2));
+const report = {backend: 'chromium-three-worker', url, frames, width: 1280, height: 720, repeats, samples_ms: samples, median_ms: sorted[Math.floor(sorted.length / 2)], fps_equivalent: frames / (sorted[Math.floor(sorted.length / 2)] / 1000), node: process.version, platform: process.platform, arch: process.arch};
+if (output) writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`);
+console.log(JSON.stringify(report, null, 2));
