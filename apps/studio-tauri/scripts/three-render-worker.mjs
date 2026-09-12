@@ -24,8 +24,16 @@ const renderFrame = (request) => new Promise((resolve, reject) => {
     frameTimeoutMs,
   );
   page.evaluate((value) => window.dioxuscut.renderFrame(value), request)
-    .then(resolve, reject)
-    .finally(() => clearTimeout(timer));
+    .then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
 });
 
 const browser = await chromium.launch({ executablePath, headless: true });
