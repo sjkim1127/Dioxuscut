@@ -103,18 +103,39 @@ impl BrowserFrameBackend {
                 frame,
                 width,
                 height,
+                png_base64,
                 rgba_base64,
             })) if frame == request.frame => {
-                let bytes = base64::engine::general_purpose::STANDARD
-                    .decode(rgba_base64)
-                    .map_err(|e| RasterError::Frame {
+                if let Some(encoded) = png_base64 {
+                    let bytes = base64::engine::general_purpose::STANDARD
+                        .decode(encoded)
+                        .map_err(|e| RasterError::Frame {
+                            frame,
+                            reason: e.to_string(),
+                        })?;
+                    image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)
+                        .map(|image| image.into_rgba8())
+                        .map_err(|e| RasterError::Frame {
+                            frame,
+                            reason: e.to_string(),
+                        })
+                } else if let Some(encoded) = rgba_base64 {
+                    let bytes = base64::engine::general_purpose::STANDARD
+                        .decode(encoded)
+                        .map_err(|e| RasterError::Frame {
+                            frame,
+                            reason: e.to_string(),
+                        })?;
+                    RgbaImage::from_raw(width, height, bytes).ok_or_else(|| RasterError::Frame {
                         frame,
-                        reason: e.to_string(),
-                    })?;
-                RgbaImage::from_raw(width, height, bytes).ok_or_else(|| RasterError::Frame {
-                    frame,
-                    reason: "RGBA payload length does not match dimensions".into(),
-                })
+                        reason: "RGBA payload length does not match dimensions".into(),
+                    })
+                } else {
+                    Err(RasterError::Frame {
+                        frame,
+                        reason: "frame response has no image payload".into(),
+                    })
+                }
             }
             Ok(WebWorkerMessage::Error { frame, message }) => Err(RasterError::Frame {
                 frame: frame.unwrap_or(request.frame),

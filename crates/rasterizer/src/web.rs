@@ -17,9 +17,14 @@ pub struct WebFrameRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WebFrameResponse {
     pub frame: u32,
-    pub rgba_base64: String,
     pub width: u32,
     pub height: u32,
+    /// Preferred transport: the browser's encoded PNG screenshot.
+    #[serde(default)]
+    pub png_base64: Option<String>,
+    /// Legacy transport retained for older workers.
+    #[serde(default)]
+    pub rgba_base64: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -61,5 +66,13 @@ mod tests {
         })
         .unwrap();
         assert_eq!(json, r#"{"type":"ready","protocol":1}"#);
+    }
+
+    #[test]
+    fn frame_response_accepts_legacy_rgba_transport() {
+        let message = r#"{"type":"frame","frame":3,"width":1,"height":1,"rgba_base64":"AQIDBA=="}"#;
+        let parsed: WebWorkerMessage = serde_json::from_str(message).unwrap();
+        assert!(matches!(parsed, WebWorkerMessage::Frame(response)
+            if response.png_base64.is_none() && response.rgba_base64.as_deref() == Some("AQIDBA==")));
     }
 }

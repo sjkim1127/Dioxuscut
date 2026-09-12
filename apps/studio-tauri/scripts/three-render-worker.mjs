@@ -1,6 +1,5 @@
 import { createInterface } from 'node:readline';
 import { Buffer } from 'node:buffer';
-import { PNG } from 'pngjs';
 import { chromium } from 'playwright-core';
 
 const args = new Map(process.argv.slice(2).flatMap((arg) => {
@@ -26,10 +25,11 @@ rl.on('line', (line) => { queue = queue.then(async () => {
   if (message.type !== 'render') return;
   try {
     const request = message;
+    await page.setViewportSize({ width: request.width, height: request.height });
     await page.evaluate((value) => window.dioxuscut?.renderFrame(value), request);
-    const png = PNG.sync.read(await page.screenshot({ type: 'png' }));
-    write({ type: 'frame', frame: request.frame, width: png.width, height: png.height,
-      rgba_base64: Buffer.from(png.data).toString('base64') });
+    const screenshot = await page.screenshot({ type: 'png' });
+    write({ type: 'frame', frame: request.frame, width: request.width, height: request.height,
+      png_base64: Buffer.from(screenshot).toString('base64') });
   } catch (error) {
     write({ type: 'error', frame: message.frame ?? null, message: String(error) });
   }
