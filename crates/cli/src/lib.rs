@@ -754,6 +754,15 @@ pub struct RenderRequest {
 }
 
 impl RenderRequest {
+    /// Returns the concurrency selected for a render job.
+    ///
+    /// Keeping this policy on the request makes CLI, Tauri, and embedded
+    /// callers agree on the same lower bound while allowing a backend to
+    /// provide its own capacity (for example, the number of browser workers).
+    pub fn effective_concurrency(&self, backend_capacity: usize) -> usize {
+        self.concurrency.unwrap_or(backend_capacity.max(1)).max(1)
+    }
+
     /// Determines the active MediaSecurityPolicy.
     ///
     /// - If `permissive` is true, returns `MediaSecurityPolicy::Permissive`.
@@ -789,6 +798,46 @@ impl RenderRequest {
             return dioxuscut_rasterizer::MediaSecurityPolicy::sandboxed(roots);
         }
         dioxuscut_rasterizer::MediaSecurityPolicy::Permissive
+    }
+}
+
+#[cfg(test)]
+mod render_request_tests {
+    use super::*;
+
+    fn request(concurrency: Option<usize>) -> RenderRequest {
+        RenderRequest {
+            composition: Some("test".into()),
+            script: None,
+            props: None,
+            output: "out.mp4".into(),
+            audio: vec![],
+            width: 320,
+            height: 180,
+            scale: 1.0,
+            fps: 30.0,
+            duration: 1,
+            backend: RenderBackend::Native,
+            codec: RenderCodec::H264,
+            frame_start: 0,
+            frame_end: None,
+            frame_step: 1,
+            concurrency,
+            timeout_seconds: None,
+            crf: 23,
+            preset: "medium".into(),
+            hw_accel: dioxuscut_rasterizer::HwAccel::Auto,
+            sandbox_roots: vec![],
+            permissive: false,
+        }
+    }
+
+    #[test]
+    fn effective_concurrency_uses_request_then_backend_capacity() {
+        assert_eq!(request(None).effective_concurrency(0), 1);
+        assert_eq!(request(None).effective_concurrency(4), 4);
+        assert_eq!(request(Some(3)).effective_concurrency(8), 3);
+        assert_eq!(request(Some(0)).effective_concurrency(8), 1);
     }
 }
 
@@ -1228,11 +1277,13 @@ pub async fn execute_render_command_with_registry_and_control(
                     &request.output,
                 )
                 .with_scale(request.scale)
-                .with_concurrency(request.concurrency.unwrap_or_else(|| {
-                    std::thread::available_parallelism()
-                        .map(|n| n.get())
-                        .unwrap_or(4)
-                }))
+                .with_concurrency(
+                    request.effective_concurrency(
+                        std::thread::available_parallelism()
+                            .map(|n| n.get())
+                            .unwrap_or(4),
+                    ),
+                )
                 .with_frame_start(frame_start)
                 .with_frame_step(request.frame_step)
                 .with_codec(request.codec.video_codec().expect("video codec validated"))
@@ -1264,14 +1315,11 @@ pub async fn execute_render_command_with_registry_and_control(
             })?;
             let url = std::env::var("DIOXUSCUT_BROWSER_URL")
                 .unwrap_or_else(|_| "http://localhost:1420".to_string());
-            let concurrency = request
-                .concurrency
-                .or_else(|| {
-                    std::env::var("DIOXUSCUT_BROWSER_CONCURRENCY")
-                        .ok()
-                        .and_then(|value| value.parse::<usize>().ok())
-                })
+            let browser_capacity = std::env::var("DIOXUSCUT_BROWSER_CONCURRENCY")
+                .ok()
+                .and_then(|value| value.parse::<usize>().ok())
                 .unwrap_or(1);
+            let concurrency = request.effective_concurrency(browser_capacity);
             let node = std::env::var_os("DIOXUSCUT_BROWSER_NODE").unwrap_or_else(|| "node".into());
             let rasterizer = BrowserFrameBackend::with_concurrency(node, worker, url, concurrency)
                 .map_err(|error| anyhow::anyhow!("Browser backend init failed: {error}"))?
@@ -1313,7 +1361,7 @@ pub async fn execute_render_command_with_registry_and_control(
                     &request.output,
                 )
                 .with_scale(request.scale)
-                .with_concurrency(request.concurrency.unwrap_or(rasterizer.worker_count()))
+                .with_concurrency(request.effective_concurrency(rasterizer.worker_count()))
                 .with_frame_start(frame_start)
                 .with_frame_step(request.frame_step)
                 .with_codec(request.codec.video_codec().expect("video codec validated"))
@@ -1379,11 +1427,13 @@ pub async fn execute_render_command_with_registry_and_control(
                         &request.output,
                     )
                     .with_scale(request.scale)
-                    .with_concurrency(request.concurrency.unwrap_or_else(|| {
-                        std::thread::available_parallelism()
-                            .map(|n| n.get())
-                            .unwrap_or(4)
-                    }))
+                    .with_concurrency(
+                        request.effective_concurrency(
+                            std::thread::available_parallelism()
+                                .map(|n| n.get())
+                                .unwrap_or(4),
+                        ),
+                    )
                     .with_frame_start(frame_start)
                     .with_frame_step(request.frame_step)
                     .with_codec(request.codec.video_codec().expect("video codec validated"))
