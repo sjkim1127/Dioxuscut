@@ -35,6 +35,9 @@ pub struct WebFrameRequest {
     pub image_format: Option<String>,
     #[serde(default)]
     pub jpeg_quality: Option<u8>,
+    /// Preserve alpha for PNG screenshots instead of compositing a page background.
+    #[serde(default)]
+    pub transparent: bool,
 }
 
 /// Result returned by a browser-backed renderer.
@@ -89,6 +92,7 @@ mod tests {
             timeline: vec![],
             image_format: None,
             jpeg_quality: None,
+            transparent: false,
         });
         let json = serde_json::to_string(&message).unwrap();
         assert_eq!(

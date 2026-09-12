@@ -85,6 +85,7 @@ rl.on('line', (line) => { queue = queue.then(async () => {
     if (lastError) throw lastError;
     const imageType = request.image_format === 'jpeg' ? 'jpeg' : 'png';
     const screenshot = await page.screenshot({ type: imageType,
+      omitBackground: imageType === 'png' && request.transparent === true,
       quality: imageType === 'jpeg' ? (request.jpeg_quality ?? 90) : undefined });
     write({ type: 'frame', frame: request.frame, width: request.width, height: request.height,
       ...(imageType === 'png'

@@ -45,6 +45,7 @@ pub struct BrowserFrameBackend {
     timeline: Mutex<Vec<WebTimelineClip>>,
     image_format: Option<String>,
     jpeg_quality: Option<u8>,
+    transparent: bool,
     props: Mutex<serde_json::Value>,
     cache: FrameCacheManager,
 }
@@ -100,6 +101,14 @@ impl BrowserFrameBackend {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .filter(|v: &u8| (1..=100).contains(v)),
+            transparent: std::env::var("DIOXUSCUT_BROWSER_TRANSPARENT")
+                .ok()
+                .is_some_and(|value| {
+                    matches!(
+                        value.trim().to_ascii_lowercase().as_str(),
+                        "1" | "true" | "yes"
+                    )
+                }),
             props: Mutex::new(serde_json::json!({})),
             cache: FrameCacheManager::default(),
         })
@@ -302,6 +311,7 @@ impl BrowserFrameBackend {
             "timeline": &request.timeline,
             "image_format": &request.image_format,
             "jpeg_quality": request.jpeg_quality,
+            "transparent": request.transparent,
         });
         let cache_key = FrameCacheKey::from_props(
             composition.as_deref().unwrap_or("browser"),
@@ -500,6 +510,7 @@ impl RasterizerBackend for BrowserFrameBackend {
                 .clone(),
             image_format: self.image_format.clone(),
             jpeg_quality: self.jpeg_quality,
+            transparent: self.transparent,
             props,
         })
     }
@@ -543,6 +554,7 @@ mod tests {
                 timeline: vec![],
                 image_format: None,
                 jpeg_quality: None,
+                transparent: false,
             })
             .unwrap();
         assert_eq!(image.as_raw(), &[1, 2, 3, 4]);
