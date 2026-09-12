@@ -37,6 +37,15 @@ dioxuscut validate-project project.dioxuscut.json
 This performs the same strict Rust validation used by Tauri, including schema
 version, dimensions, timing, backend, and unknown-field checks.
 
+Render the validated project directly:
+
+```sh
+DIOXUSCUT_JSON=1 dioxuscut render-project project.dioxuscut.json --output out.mp4
+```
+
+`render-project` maps the project backend to the shared renderer and emits the
+same machine-readable success/error result as `render`.
+
 ## Job lifecycle
 
 1. Submit the project with `submit_project` and retain the returned job id.
