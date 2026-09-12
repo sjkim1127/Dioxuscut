@@ -20,6 +20,35 @@ pub use migrate::{transpile_remotion, MigrationStats, MigrationTarget};
 #[cfg(feature = "rhai")]
 pub use rhai_runtime::{RhaiComposition, SceneBuilder};
 
+/// Browser workers own the actual composition runtime. This placeholder keeps
+/// the shared render pipeline's native validation stage from rejecting a
+/// browser-only composition ID that is not registered in the Rust registry.
+struct BrowserComposition {
+    id: String,
+}
+
+struct BrowserPreparedComposition;
+
+impl dioxuscut_composition::PreparedComposition for BrowserPreparedComposition {
+    fn render(&self, _frame: u32) -> Result<dioxuscut_rasterizer::Scene, CompositionError> {
+        Ok(dioxuscut_rasterizer::Scene::new())
+    }
+}
+
+impl Composition for BrowserComposition {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn prepare(
+        &self,
+        _props: &serde_json::Value,
+        _context: NativeCompositionContext,
+    ) -> Result<Box<dyn dioxuscut_composition::PreparedComposition + '_>, CompositionError> {
+        Ok(Box::new(BrowserPreparedComposition))
+    }
+}
+
 use clap::{Parser, Subcommand, ValueEnum};
 use std::fs;
 use std::path::PathBuf;
@@ -659,15 +688,30 @@ pub async fn execute_render_command_with_registry_and_control(
         .map(RhaiComposition::from_file)
         .transpose()?;
 
+    let browser_fallback = BrowserComposition {
+        id: request
+            .composition
+            .clone()
+            .unwrap_or_else(|| "BrowserComposition".into()),
+    };
+
     #[cfg(feature = "rhai")]
     let composition: &dyn Composition = match script_composition.as_ref() {
         Some(composition) => composition,
-        None => registry.get(
-            request
-                .composition
-                .as_deref()
-                .expect("validated native composition ID"),
-        )?,
+        None => registry
+            .get(
+                request
+                    .composition
+                    .as_deref()
+                    .expect("validated native composition ID"),
+            )
+            .or_else(|error| {
+                if request.backend == RenderBackend::Browser {
+                    Ok(&browser_fallback as &dyn Composition)
+                } else {
+                    Err(error)
+                }
+            })?,
     };
 
     #[cfg(not(feature = "rhai"))]
@@ -678,12 +722,20 @@ pub async fn execute_render_command_with_registry_and_control(
                  cargo build -p dioxuscut-cli --features rhai"
             );
         }
-        registry.get(
-            request
-                .composition
-                .as_deref()
-                .expect("validated native composition ID"),
-        )?
+        registry
+            .get(
+                request
+                    .composition
+                    .as_deref()
+                    .expect("validated native composition ID"),
+            )
+            .or_else(|error| {
+                if request.backend == RenderBackend::Browser {
+                    Ok(&browser_fallback as &dyn Composition)
+                } else {
+                    Err(error)
+                }
+            })?
     };
 
     let prepared = composition.prepare(&props, context)?;
