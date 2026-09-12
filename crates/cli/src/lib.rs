@@ -947,6 +947,7 @@ pub async fn execute_render_command_with_registry_and_control(
     registry: &CompositionRegistry,
     control: dioxuscut_rasterizer::RenderControl,
 ) -> anyhow::Result<()> {
+    let render_started = std::time::Instant::now();
     validate_composition_source(request.composition.as_deref(), request.script.as_ref())?;
     validate_render_params_for_codec(
         request.composition.as_deref().unwrap_or("RhaiScript"),
@@ -1307,6 +1308,7 @@ pub async fn execute_render_command_with_registry_and_control(
                 "frame_start": frame_start,
                 "frame_end": frame_end,
                 "frames": output_frame_count,
+                "elapsed_ms": render_started.elapsed().as_secs_f64() * 1000.0,
             })
         );
     }
