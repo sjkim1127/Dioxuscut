@@ -28,6 +28,7 @@ fn request(output: &Path, codec: RenderCodec) -> RenderRequest {
         audio: Vec::new(),
         width: 65,
         height: 49,
+        scale: 1.0,
         fps: 30.0,
         duration: 20,
         backend: RenderBackend::Native,

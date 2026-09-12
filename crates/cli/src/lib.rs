@@ -247,6 +247,10 @@ pub enum ValidationError {
     AudioNotSupported(String),
     #[error("Timeout must be greater than zero seconds")]
     InvalidTimeout,
+    #[error("Invalid scale: {0}; expected a finite value greater than 0")]
+    InvalidScale(String),
+    #[error("Scale is currently supported for video output only")]
+    ScaleNotSupportedForStill,
     #[error("Invalid CRF {value} for {codec}; expected {range}")]
     InvalidCrf {
         codec: String,
@@ -368,6 +372,10 @@ pub enum Commands {
         /// Resolution height.
         #[arg(long, default_value_t = 1080)]
         height: u32,
+
+        /// Output scale applied after logical composition rendering.
+        #[arg(long, default_value_t = 1.0)]
+        scale: f64,
 
         /// Frames per second.
         #[arg(long, default_value_t = 30.0)]
@@ -536,6 +544,7 @@ pub struct RenderRequest {
     pub audio: Vec<PathBuf>,
     pub width: u32,
     pub height: u32,
+    pub scale: f64,
     pub fps: f64,
     pub duration: u32,
     pub backend: RenderBackend,
@@ -672,6 +681,12 @@ fn validate_render_params_for_codec(
 }
 
 fn validate_render_options(request: &RenderRequest) -> Result<(u32, u32), ValidationError> {
+    if !request.scale.is_finite() || request.scale <= 0.0 {
+        return Err(ValidationError::InvalidScale(request.scale.to_string()));
+    }
+    if request.scale != 1.0 && request.codec.still_format().is_some() {
+        return Err(ValidationError::ScaleNotSupportedForStill);
+    }
     if request.frame_step == 0 {
         return Err(ValidationError::InvalidFrameStep(request.frame_step));
     }
@@ -1000,6 +1015,7 @@ pub async fn execute_render_command_with_registry_and_control(
                     output_frame_count,
                     &request.output,
                 )
+                .with_scale(request.scale)
                 .with_concurrency(request.concurrency.unwrap_or_else(|| {
                     std::thread::available_parallelism()
                         .map(|n| n.get())
@@ -1068,6 +1084,7 @@ pub async fn execute_render_command_with_registry_and_control(
                     output_frame_count,
                     &request.output,
                 )
+                .with_scale(request.scale)
                 .with_concurrency(request.concurrency.unwrap_or(rasterizer.worker_count()))
                 .with_frame_start(frame_start)
                 .with_frame_step(request.frame_step)
@@ -1115,6 +1132,7 @@ pub async fn execute_render_command_with_registry_and_control(
                         output_frame_count,
                         &request.output,
                     )
+                    .with_scale(request.scale)
                     .with_concurrency(request.concurrency.unwrap_or_else(|| {
                         std::thread::available_parallelism()
                             .map(|n| n.get())

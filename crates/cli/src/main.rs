@@ -34,6 +34,7 @@ async fn main() -> anyhow::Result<()> {
             audio,
             width,
             height,
+            scale,
             fps,
             duration,
             backend,
@@ -57,6 +58,7 @@ async fn main() -> anyhow::Result<()> {
                 audio: audio.clone(),
                 width: *width,
                 height: *height,
+                scale: *scale,
                 fps: *fps,
                 duration: *duration,
                 backend: *backend,
@@ -174,6 +176,7 @@ async fn main() -> anyhow::Result<()> {
                 audio: dioxuscut_cli::project_audio_assets(&project),
                 width: project.settings.width,
                 height: project.settings.height,
+                scale: 1.0,
                 fps: project.settings.fps,
                 duration: project.settings.duration,
                 backend: match project.settings.backend {

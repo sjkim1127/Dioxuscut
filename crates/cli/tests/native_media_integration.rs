@@ -196,6 +196,7 @@ async fn rhai_media_nodes_flow_through_the_cli_renderer() {
         audio: Vec::new(),
         width: 64,
         height: 64,
+        scale: 1.0,
         fps: 5.0,
         duration: 5,
         backend: RenderBackend::Native,

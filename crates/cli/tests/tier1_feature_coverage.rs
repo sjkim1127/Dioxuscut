@@ -35,6 +35,7 @@ fn test_cli_flag_defaults() {
             sandbox_roots,
             permissive,
             concurrency: _,
+            scale: _,
         } => {
             assert_eq!(composition, Some("HelloWorld".into()));
             assert_eq!(script, None);
@@ -108,6 +109,7 @@ fn test_cli_flag_custom_values() {
             sandbox_roots,
             permissive,
             concurrency: _,
+            scale: _,
         } => {
             assert_eq!(composition, Some("CustomComposition".into()));
             assert_eq!(script, None);
@@ -154,6 +156,8 @@ fn test_cli_parses_codec_range_quality_and_timeout() {
         "28",
         "--preset",
         "medium",
+        "--scale",
+        "1.5",
     ])
     .expect("Failed to parse render controls");
 
@@ -165,6 +169,7 @@ fn test_cli_parses_codec_range_quality_and_timeout() {
             timeout_seconds,
             crf,
             preset,
+            scale,
             ..
         } => {
             assert_eq!(codec, RenderCodec::Av1);
@@ -173,6 +178,7 @@ fn test_cli_parses_codec_range_quality_and_timeout() {
             assert_eq!(timeout_seconds, Some(90));
             assert_eq!(crf, 28);
             assert_eq!(preset, "medium");
+            assert_eq!(scale, 1.5);
         }
         _ => panic!("Expected Commands::Render"),
     }

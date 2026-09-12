@@ -39,6 +39,7 @@ async fn test_tier4_real_world_acceptance_scenario() {
         audio: Vec::new(),
         width: 1280,
         height: 720,
+        scale: 1.0,
         fps: 30.0,
         duration: 60,
         backend: RenderBackend::Native,
