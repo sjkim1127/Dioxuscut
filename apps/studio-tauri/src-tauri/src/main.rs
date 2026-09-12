@@ -46,6 +46,14 @@ fn project_video_codec(path: &std::path::Path) -> VideoCodec {
     }
 }
 
+fn browser_frame_cache_bytes() -> usize {
+    std::env::var("DIOXUSCUT_FRAME_CACHE_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(dioxuscut_rasterizer::DEFAULT_MAX_CACHE_BYTES)
+}
+
 fn project_still_format(path: &std::path::Path) -> Option<StillImageFormat> {
     match path
         .extension()
@@ -300,7 +308,8 @@ fn start_render_job(
                 .ok_or_else(|| "browser rendering URL is unavailable".to_string())?;
             let node = std::env::var_os("DIOXUSCUT_BROWSER_NODE").unwrap_or_else(|| "node".into());
             let backend = BrowserFrameBackend::with_concurrency(node, worker, url, concurrency)
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| error.to_string())?
+                .with_frame_cache_bytes(browser_frame_cache_bytes());
             backend
                 .set_composition(&project.composition)
                 .map_err(|error| error.to_string())?;
@@ -564,7 +573,8 @@ fn list_browser_compositions() -> Result<Vec<String>, String> {
         .unwrap_or_else(|_| "http://localhost:1420".to_string());
     let node = std::env::var_os("DIOXUSCUT_BROWSER_NODE").unwrap_or_else(|| "node".into());
     let backend = BrowserFrameBackend::with_concurrency(node, worker, url, 1)
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| error.to_string())?
+        .with_frame_cache_bytes(browser_frame_cache_bytes());
     Ok(backend.compositions())
 }
 
