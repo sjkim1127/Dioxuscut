@@ -53,6 +53,10 @@ pub fn Video(props: VideoProps) -> Element {
     }
     let time_in_seconds = props.start_from
         + (timeline_time - props.start_at).max(0.0) * props.playback_rate.max(0.0);
+    let duration_attr = props
+        .end_at
+        .map(|end| (end - props.start_at).max(0.0).to_string())
+        .unwrap_or_default();
 
     let base_style = "width: 100%; height: 100%; object-fit: cover;";
     let style = match &props.style {
@@ -69,6 +73,11 @@ pub fn Video(props: VideoProps) -> Element {
             // `data-time` is the native Scene contract; retain Remotion's
             // metadata for browser-side consumers as well.
             "data-time": "{time_in_seconds}",
+            "data-start-from": "{props.start_from}",
+            "data-timeline-start": "{props.start_at}",
+            "data-duration": "{duration_attr}",
+            "data-volume": "{props.muted.then_some(0.0).unwrap_or(props.volume)}",
+            "data-playback-rate": "{props.playback_rate}",
             // Data attributes carry rendering metadata
             "data-remotion-seek": "{time_in_seconds}",
             "data-remotion-volume": "{props.volume}",
