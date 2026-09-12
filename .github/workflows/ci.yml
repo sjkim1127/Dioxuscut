@@ -11,6 +11,24 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  wasm:
+    name: Web (wasm32)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check Dioxus Web core
+        run: cargo check --locked -p dioxuscut-core --features web --target wasm32-unknown-unknown
+
   # ── 1. Code Formatting & Clippy Lints ─────────────────────────────────────
   fmt_clippy:
     name: Code Quality (Fmt & Clippy)
