@@ -72,12 +72,12 @@ pub use dioxuscut_composition::{
 // Typography, layout & rasterizer primitives
 pub use dioxuscut_rasterizer::{
     create_rounded_text_box, create_rounded_text_box_from_measurements, fill_text_box, fit_text,
-    fit_text_on_n_lines, layout_text_box, make_cancel_signal, measure_text_width,
-    measure_text_width_with_font, AudioTrack, BlendMode, CancelSignal, ClipRegion, Color,
-    FitTextOnNLinesOptions, FontCache, FrameConfig, GifFrame, GifFrameCache, GradientStop,
-    ImageFit, LayoutError, LoopBehavior, MaskMode, PositionedTextLine, RasterError,
-    RasterizerBackend, RenderCancellationToken, RenderControl, RenderProgress,
-    RoundedTextBoxOptions, Scene, SceneFilter, SceneNode, SceneShadow, TextAlign, TextBox,
-    TextBoxLayout, TextFitResult, TextHorizontalAlign, TextLineDimension, TextOverflow,
+    fit_text_on_n_lines, get_lottie_metadata, layout_text_box, make_cancel_signal,
+    measure_text_width, measure_text_width_with_font, AudioTrack, BlendMode, CancelSignal,
+    ClipRegion, Color, FitTextOnNLinesOptions, FontCache, FrameConfig, GifFrame, GifFrameCache,
+    GradientStop, ImageFit, LayoutError, LoopBehavior, LottieMetadata, MaskMode,
+    PositionedTextLine, RasterError, RasterizerBackend, RenderCancellationToken, RenderControl,
+    RenderProgress, RoundedTextBoxOptions, Scene, SceneFilter, SceneNode, SceneShadow, TextAlign,
+    TextBox, TextBoxLayout, TextFitResult, TextHorizontalAlign, TextLineDimension, TextOverflow,
     TextVerticalAlign, TinySkiaBackend, Transform2D,
 };
