@@ -31,7 +31,9 @@ Schema is available at `schemas/dioxuscut-project-v1.schema.json`.
 }
 ```
 
-The same `Project` model is shared by Dioxus, Tauri, and CLI integrations.
+The same `Project` model is shared by Dioxus, Tauri, and CLI integrations. Tauri
+honors the project backend (`native`, `gpu`, or `browser`) instead of replacing
+it with a host-specific default.
 Set `settings.concurrency` to a positive worker count when a project needs
 reproducible parallelism; omit it for host-selected defaults.
 

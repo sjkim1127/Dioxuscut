@@ -109,7 +109,7 @@ fn start_render_job(
     } else {
         render_frame_count
     };
-    if backend_kind == dioxuscut_project::BackendKind::Native {
+    if backend_kind != dioxuscut_project::BackendKind::Browser {
         let state_jobs = Arc::clone(&state.jobs);
         let state_cancellations = Arc::clone(&state.cancellations);
         let cancellation = make_cancel_signal();
@@ -136,7 +136,11 @@ fn start_render_job(
                     height: project.settings.height,
                     fps: project.settings.fps,
                     duration: project.settings.duration,
-                    backend: RenderBackend::Native,
+                    backend: match project.settings.backend {
+                        dioxuscut_project::BackendKind::Native => RenderBackend::Native,
+                        dioxuscut_project::BackendKind::Gpu => RenderBackend::Gpu,
+                        dioxuscut_project::BackendKind::Browser => unreachable!(),
+                    },
                     codec: project_render_codec(&output_path),
                     frame_start: project.settings.frame_start.unwrap_or(0),
                     frame_end: project.settings.frame_end,
