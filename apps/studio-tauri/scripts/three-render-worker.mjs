@@ -9,11 +9,18 @@ const args = new Map(process.argv.slice(2).flatMap((arg) => {
 const url = args.get('url') ?? 'http://localhost:1420';
 const executablePath = args.get('browser') ?? process.env.CHROME_PATH ??
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const configuredFrameTimeoutMs = Number(args.get('frame-timeout-ms') ?? process.env.DIOXUSCUT_BROWSER_FRAME_TIMEOUT_MS ?? 30000);
+const frameTimeoutMs = Number.isFinite(configuredFrameTimeoutMs) && configuredFrameTimeoutMs > 0
+  ? configuredFrameTimeoutMs
+  : 30000;
 const write = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 
 const browser = await chromium.launch({ executablePath, headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
 await page.goto(url, { waitUntil: 'networkidle' });
+await page.waitForFunction(() => typeof window.dioxuscut?.renderFrame === 'function', {
+  timeout: frameTimeoutMs,
+});
 write({ type: 'ready', protocol: 1 });
 
 const rl = createInterface({ input: process.stdin, terminal: false });
@@ -26,7 +33,13 @@ rl.on('line', (line) => { queue = queue.then(async () => {
   try {
     const request = message;
     await page.setViewportSize({ width: request.width, height: request.height });
-    await page.evaluate((value) => window.dioxuscut?.renderFrame(value), request);
+    await Promise.race([
+      page.evaluate((value) => window.dioxuscut.renderFrame(value), request),
+      new Promise((_, reject) => setTimeout(
+        () => reject(new Error(`renderFrame timed out after ${frameTimeoutMs}ms`)),
+        frameTimeoutMs,
+      )),
+    ]);
     const screenshot = await page.screenshot({ type: 'png' });
     write({ type: 'frame', frame: request.frame, width: request.width, height: request.height,
       png_base64: Buffer.from(screenshot).toString('base64') });
