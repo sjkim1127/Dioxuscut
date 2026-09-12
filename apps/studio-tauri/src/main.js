@@ -109,7 +109,22 @@ async function refreshJobList() {
     const item = document.createElement('div');
     item.className = 'job-item';
     const progress = `${job.completed_frames}/${job.project.settings.duration}`;
-    item.textContent = `${job.id} · ${job.status} · ${progress}${job.error ? ` · ${job.error}` : ''}`;
+    const label = document.createElement('span');
+    label.textContent = `${job.id} · ${job.status} · ${progress}${job.error ? ` · ${job.error}` : ''}`;
+    item.append(label);
+    if (['failed', 'cancelled'].includes(job.status)) {
+      const retry = document.createElement('button');
+      retry.className = 'retry-job';
+      retry.textContent = 'Retry';
+      retry.addEventListener('click', async () => {
+        try {
+          currentJobId = await invoke('retry_render_job', { id: job.id });
+          showMessage(`${currentJobId} queued`);
+          await refreshJobList();
+        } catch (error) { showMessage(`retry error: ${error}`); }
+      });
+      item.append(' ', retry);
+    }
     return item;
   }));
 }

@@ -278,6 +278,20 @@ impl JobStore {
         job.status = JobStatus::Cancelled;
         Ok(())
     }
+
+    pub fn retry(&mut self, id: &str) -> Result<String, ProjectError> {
+        let project = self
+            .jobs
+            .get(id)
+            .ok_or_else(|| ProjectError::JobNotFound(id.to_string()))?;
+        if !matches!(project.status, JobStatus::Failed | JobStatus::Cancelled) {
+            return Err(ProjectError::InvalidJobTransition {
+                from: project.status.clone(),
+                to: JobStatus::Queued,
+            });
+        }
+        self.submit(project.project.clone())
+    }
 }
 
 #[cfg(test)]
@@ -375,5 +389,16 @@ mod tests {
             jobs.iter().map(|job| job.id.as_str()).collect::<Vec<_>>(),
             vec![first.as_str(), second.as_str()]
         );
+    }
+
+    #[test]
+    fn retry_creates_a_fresh_queued_job() {
+        let mut store = JobStore::default();
+        let original = store.submit(project()).unwrap();
+        store.cancel(&original).unwrap();
+        let retry = store.retry(&original).unwrap();
+        assert_eq!(retry, "job-2");
+        assert_eq!(store.get(&retry).unwrap().status, JobStatus::Queued);
+        assert_eq!(store.get(&retry).unwrap().project, project());
     }
 }
