@@ -31,6 +31,12 @@ Schema is available at `schemas/dioxuscut-project-v1.schema.json`.
 
 The same `Project` model is shared by Dioxus, Tauri, and CLI integrations.
 
+Discover Native composition IDs without starting a UI:
+
+```sh
+DIOXUSCUT_JSON=1 dioxuscut list-compositions
+```
+
 Validate a project before submitting it:
 
 ```sh

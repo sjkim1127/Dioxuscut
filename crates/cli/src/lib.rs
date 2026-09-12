@@ -262,6 +262,9 @@ pub enum Commands {
         permissive: bool,
     },
 
+    /// List compositions available to the native registry.
+    ListCompositions,
+
     /// Validate a versioned Dioxuscut project file without rendering.
     ValidateProject {
         /// Path to the `.dioxuscut.json` project file.

@@ -132,6 +132,23 @@ async fn main() -> anyhow::Result<()> {
                 stats.loops_converted
             );
         }
+        Commands::ListCompositions => {
+            let compositions = dioxuscut_cli::built_in_registry()
+                .ids()
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            if std::env::var_os("DIOXUSCUT_JSON").is_some() {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "compositions": compositions})
+                );
+            } else {
+                for composition in compositions {
+                    println!("{composition}");
+                }
+            }
+        }
         Commands::ValidateProject { input } => {
             let project = dioxuscut_project::Project::load(input)
                 .map_err(|error| anyhow::anyhow!("Project validation failed: {error}"))?;
