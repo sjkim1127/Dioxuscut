@@ -45,6 +45,8 @@ pub struct ResolvedStyle {
     pub background: Option<Color>,
     /// A supported CSS linear-gradient background: angle and color stops.
     pub background_gradient: Option<(f32, Vec<GradientStop>)>,
+    /// A centered CSS radial-gradient background represented in normalized coordinates.
+    pub background_radial_gradient: Option<(f32, f32, f32, Vec<GradientStop>)>,
     /// Supported CSS transform subset: translate, scale, and rotate.
     pub transform: Transform2D,
     pub border_color: Option<Color>,
@@ -72,6 +74,7 @@ impl Default for ResolvedStyle {
             color: Color::BLACK,
             background: None,
             background_gradient: None,
+            background_radial_gradient: None,
             transform: Transform2D::default(),
             border_color: None,
             border_width: 0.0,
@@ -457,10 +460,12 @@ pub(crate) fn apply_declarations(style: &mut ResolvedStyle, declarations: &[(Str
             "background" => {
                 style.background = Color::from_css(value);
                 style.background_gradient = parse_linear_gradient(value);
+                style.background_radial_gradient = parse_radial_gradient(value);
             }
             "background-color" => style.background = Color::from_css(value),
             "background-image" => {
                 style.background_gradient = parse_linear_gradient(value);
+                style.background_radial_gradient = parse_radial_gradient(value);
             }
             "transform" => {
                 if let Some(transform) = parse_transform(value) {
@@ -841,6 +846,41 @@ fn parse_linear_gradient(value: &str) -> Option<(f32, Vec<GradientStop>)> {
     ))
 }
 
+fn parse_radial_gradient(value: &str) -> Option<(f32, f32, f32, Vec<GradientStop>)> {
+    let contents = value
+        .trim()
+        .strip_prefix("radial-gradient(")?
+        .strip_suffix(')')?;
+    let mut parts = split_css_arguments(contents).into_iter();
+    let first = parts.next()?;
+    let first_is_hint = first.eq_ignore_ascii_case("circle")
+        || first.eq_ignore_ascii_case("ellipse")
+        || first.starts_with("circle ")
+        || first.starts_with("ellipse ");
+    let mut stop_values = if first_is_hint {
+        parts.collect::<Vec<_>>()
+    } else {
+        std::iter::once(first).chain(parts).collect::<Vec<_>>()
+    };
+    if stop_values.len() < 2 {
+        return None;
+    }
+    let parsed = stop_values
+        .drain(..)
+        .map(parse_gradient_stop)
+        .collect::<Option<Vec<_>>>()?;
+    let last = (parsed.len() - 1) as f32;
+    let stops = parsed
+        .into_iter()
+        .enumerate()
+        .map(|(index, (color, position))| GradientStop {
+            position: position.unwrap_or(index as f32 / last),
+            color,
+        })
+        .collect();
+    Some((0.5, 0.5, 0.5, stops))
+}
+
 fn parse_gradient_stop(value: &str) -> Option<(Color, Option<f32>)> {
     let value = value.trim();
     let mut fields = value.rsplitn(2, char::is_whitespace);
@@ -1014,6 +1054,23 @@ mod tests {
         let (_, stops) = style.background_gradient.expect("gradient");
         assert_eq!(stops[0].color, Color::rgba(255, 0, 0, 128));
         assert_eq!(stops[1].color, Color::rgb(0, 0, 255));
+    }
+
+    #[test]
+    fn parses_radial_gradient_background() {
+        let stylesheet =
+            Stylesheet::parse(".hero { background: radial-gradient(circle, white, blue); }")
+                .unwrap();
+        let mut element = NativeElement {
+            tag: "div".into(),
+            ..Default::default()
+        };
+        element.attributes.insert("class".into(), "hero".into());
+        let style = stylesheet.resolve(&element, None);
+        let (cx, cy, radius, stops) = style.background_radial_gradient.expect("radial gradient");
+        assert_eq!((cx, cy, radius), (0.5, 0.5, 0.5));
+        assert_eq!(stops.len(), 2);
+        assert_eq!(stops[0].color, Color::WHITE);
     }
 
     #[test]

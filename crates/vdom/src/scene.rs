@@ -160,7 +160,14 @@ impl SceneLayout<'_> {
             NativeNodeKind::Text(content) => emit_text(content, x, y, width, height, &record.style),
             NativeNodeKind::Element(element) => {
                 let mut nodes = Vec::new();
-                if let Some((angle_deg, stops)) = &record.style.background_gradient {
+                if let Some((cx, cy, radius, stops)) = &record.style.background_radial_gradient {
+                    nodes.push(SceneNode::RadialGradient {
+                        cx: x + width * *cx,
+                        cy: y + height * *cy,
+                        r: width.max(height) * *radius,
+                        stops: stops.clone(),
+                    });
+                } else if let Some((angle_deg, stops)) = &record.style.background_gradient {
                     nodes.push(SceneNode::LinearGradient {
                         x,
                         y,
