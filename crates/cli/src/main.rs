@@ -156,7 +156,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Commands::ValidateProject { input } => {
-            let mut project = dioxuscut_project::Project::load(input)
+            let project = dioxuscut_project::Project::load(input)
                 .map_err(|error| anyhow::anyhow!("Project validation failed: {error}"))?;
             if let Some(parent) = input.parent() {
                 project.validate_asset_files(parent)?;
