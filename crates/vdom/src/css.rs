@@ -50,7 +50,7 @@ pub struct ResolvedStyle {
     /// Supported CSS transform subset: translate, scale, and rotate.
     pub transform: Transform2D,
     /// Transform origin as normalized coordinates within the element's box.
-    pub transform_origin: (f32, f32),
+    pub transform_origin: (TransformOriginValue, TransformOriginValue),
     pub border_color: Option<Color>,
     pub border_width: f32,
     pub border_radius: f32,
@@ -79,7 +79,7 @@ impl Default for ResolvedStyle {
             background_gradient: None,
             background_radial_gradient: None,
             transform: Transform2D::default(),
-            transform_origin: (0.5, 0.5),
+            transform_origin: (TransformOriginValue::percent(0.5), TransformOriginValue::percent(0.5)),
             border_color: None,
             border_width: 0.0,
             border_radius: 0.0,
@@ -94,6 +94,26 @@ impl Default for ResolvedStyle {
             overflow_hidden: false,
             object_fit: ImageFit::Cover,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TransformOriginValue {
+    pub fraction: f32,
+    pub pixels: f32,
+}
+
+impl TransformOriginValue {
+    const fn percent(fraction: f32) -> Self {
+        Self { fraction, pixels: 0.0 }
+    }
+
+    const fn pixels(pixels: f32) -> Self {
+        Self { fraction: 0.0, pixels }
+    }
+
+    pub(crate) fn resolve(self, size: f32) -> f32 {
+        size * self.fraction + self.pixels
     }
 }
 
@@ -1003,27 +1023,28 @@ fn parse_transform(value: &str) -> Option<Transform2D> {
         .then(|| Transform2D::make_transform(translate, scale, rotate))
 }
 
-fn parse_transform_origin(value: &str) -> Option<(f32, f32)> {
+fn parse_transform_origin(value: &str) -> Option<(TransformOriginValue, TransformOriginValue)> {
     let args = value.split_whitespace().collect::<Vec<_>>();
     let x = parse_origin_component(args.first().copied()?, true)?;
     let y = args
         .get(1)
         .and_then(|value| parse_origin_component(value, false))
-        .unwrap_or(0.5);
+        .unwrap_or(TransformOriginValue::percent(0.5));
     Some((x, y))
 }
 
-fn parse_origin_component(value: &str, horizontal: bool) -> Option<f32> {
+fn parse_origin_component(value: &str, horizontal: bool) -> Option<TransformOriginValue> {
     match value.to_ascii_lowercase().as_str() {
-        "left" if horizontal => Some(0.0),
-        "center" => Some(0.5),
-        "right" if horizontal => Some(1.0),
-        "top" if !horizontal => Some(0.0),
-        "bottom" if !horizontal => Some(1.0),
+        "left" if horizontal => Some(TransformOriginValue::percent(0.0)),
+        "center" => Some(TransformOriginValue::percent(0.5)),
+        "right" if horizontal => Some(TransformOriginValue::percent(1.0)),
+        "top" if !horizontal => Some(TransformOriginValue::percent(0.0)),
+        "bottom" if !horizontal => Some(TransformOriginValue::percent(1.0)),
         _ => value
             .strip_suffix('%')
             .and_then(|value| value.parse::<f32>().ok())
-            .map(|value| value / 100.0),
+            .map(|value| TransformOriginValue::percent(value / 100.0))
+            .or_else(|| parse_px(value).map(TransformOriginValue::pixels)),
     }
 }
 
@@ -1256,7 +1277,8 @@ mod tests {
             },
             None,
         );
-        assert_eq!(hero.transform_origin, (0.0, 0.25));
+        assert_eq!(hero.transform_origin.0.resolve(100.0), 0.0);
+        assert_eq!(hero.transform_origin.1.resolve(100.0), 25.0);
 
         let center = stylesheet.resolve(
             &NativeElement {
@@ -1267,7 +1289,21 @@ mod tests {
             },
             None,
         );
-        assert_eq!(center.transform_origin, (0.5, 1.0));
+        assert_eq!(center.transform_origin.0.resolve(100.0), 50.0);
+        assert_eq!(center.transform_origin.1.resolve(100.0), 100.0);
+
+        let px = Stylesheet::parse(".px { transform-origin: 12px 8px; }").unwrap();
+        let style = px.resolve(
+            &NativeElement {
+                tag: "div".into(),
+                attributes: [("class".into(), "px".into())].into_iter().collect(),
+                namespace: None,
+                ..Default::default()
+            },
+            None,
+        );
+        assert_eq!(style.transform_origin.0.resolve(100.0), 12.0);
+        assert_eq!(style.transform_origin.1.resolve(100.0), 8.0);
     }
 
     #[test]

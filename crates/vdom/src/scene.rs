@@ -281,14 +281,14 @@ impl SceneLayout<'_> {
 
 fn transform_with_origin(
     transform: Transform2D,
-    origin: (f32, f32),
+    origin: (crate::css::TransformOriginValue, crate::css::TransformOriginValue),
     x: f32,
     y: f32,
     width: f32,
     height: f32,
 ) -> Transform2D {
-    let ox = x + width * origin.0;
-    let oy = y + height * origin.1;
+    let ox = x + origin.0.resolve(width);
+    let oy = y + origin.1.resolve(height);
     let radians = transform.rotate_deg.to_radians();
     let (sin, cos) = radians.sin_cos();
     let mx = transform.scale_x * cos;
