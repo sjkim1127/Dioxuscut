@@ -156,7 +156,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Commands::ValidateProject { input } => {
-            let project = dioxuscut_project::Project::load(input)
+            let mut project = dioxuscut_project::Project::load(input)
                 .map_err(|error| anyhow::anyhow!("Project validation failed: {error}"))?;
             if let Some(parent) = input.parent() {
                 project.validate_asset_files(parent)?;
@@ -164,11 +164,12 @@ async fn main() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&project)?);
         }
         Commands::RenderProject { input, output } => {
-            let project = dioxuscut_project::Project::load(input)
+            let mut project = dioxuscut_project::Project::load(input)
                 .map_err(|error| anyhow::anyhow!("Project validation failed: {error}"))?;
             if project.settings.backend != dioxuscut_project::BackendKind::Browser {
                 if let Some(parent) = input.parent() {
                     project.validate_asset_files(parent)?;
+                    project.resolve_local_asset_paths(parent);
                 }
             }
             let props_path = std::env::temp_dir().join(format!(

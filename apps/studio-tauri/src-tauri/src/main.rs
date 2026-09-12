@@ -416,11 +416,7 @@ fn load_project(path: String) -> Result<Project, String> {
     project
         .validate_asset_files(base_dir)
         .map_err(|error| error.to_string())?;
-    for asset in &mut project.assets {
-        if !asset.path.contains("://") && !asset.path.starts_with("data:") {
-            asset.path = base_dir.join(&asset.path).to_string_lossy().into_owned();
-        }
-    }
+    project.resolve_local_asset_paths(base_dir);
     Ok(project)
 }
 

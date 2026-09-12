@@ -292,6 +292,44 @@ impl Project {
         Ok(())
     }
 
+    /// Resolve local manifest paths and matching prop values from one project directory.
+    pub fn resolve_local_asset_paths(&mut self, base_dir: impl AsRef<std::path::Path>) {
+        let base_dir = base_dir.as_ref();
+        let replacements: Vec<(String, String)> = self
+            .assets
+            .iter_mut()
+            .filter(|asset| !asset.path.contains("://") && !asset.path.starts_with("data:"))
+            .map(|asset| {
+                let original = asset.path.clone();
+                let resolved = base_dir.join(&original).to_string_lossy().into_owned();
+                asset.path = resolved.clone();
+                (original, resolved)
+            })
+            .collect();
+
+        fn rewrite(value: &mut serde_json::Value, replacements: &[(String, String)]) {
+            match value {
+                serde_json::Value::String(text) => {
+                    if let Some((_, resolved)) =
+                        replacements.iter().find(|(original, _)| original == text)
+                    {
+                        *text = resolved.clone();
+                    }
+                }
+                serde_json::Value::Array(values) => values
+                    .iter_mut()
+                    .for_each(|value| rewrite(value, replacements)),
+                serde_json::Value::Object(values) => values
+                    .values_mut()
+                    .for_each(|value| rewrite(value, replacements)),
+                serde_json::Value::Null
+                | serde_json::Value::Bool(_)
+                | serde_json::Value::Number(_) => {}
+            }
+        }
+        rewrite(&mut self.props, &replacements);
+    }
+
     pub fn load(path: impl AsRef<std::path::Path>) -> Result<Self, ProjectError> {
         let source =
             std::fs::read_to_string(path).map_err(|error| ProjectError::File(error.to_string()))?;
@@ -537,6 +575,24 @@ mod tests {
             Err(ProjectError::AssetHashMismatch { .. })
         ));
         std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn project_resolves_manifest_paths_inside_nested_props() {
+        let mut p = project();
+        p.assets = vec![AssetRef {
+            id: "poster".into(),
+            path: "assets/poster.png".into(),
+            kind: AssetKind::Image,
+            sha256: None,
+        }];
+        p.props = serde_json::json!({"layers": [{"src": "assets/poster.png"}]});
+        p.resolve_local_asset_paths("/tmp/project");
+        assert_eq!(p.assets[0].path, "/tmp/project/assets/poster.png");
+        assert_eq!(
+            p.props["layers"][0]["src"],
+            "/tmp/project/assets/poster.png"
+        );
     }
     #[test]
     fn project_json_loader_validates_schema() {
