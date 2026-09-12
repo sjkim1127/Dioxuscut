@@ -36,7 +36,12 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use dioxuscut_rasterizer::{MediaSecurityPolicy, TinySkiaBackend};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Deserialize;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    net::SocketAddr,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tokio::sync::broadcast;
 use tracing::{error, info, warn};
 
@@ -79,6 +84,14 @@ struct AppState {
     /// Sender side of the broadcast channel.  Receivers get new PNG frames.
     tx: broadcast::Sender<Arc<FrameMsg>>,
     config: Arc<ServeConfig>,
+    frame_cache: Arc<Mutex<Option<CachedFrame>>>,
+}
+
+#[derive(Clone)]
+struct CachedFrame {
+    frame: u32,
+    source_stamp: u128,
+    png: Arc<Vec<u8>>,
 }
 
 /// A rendered frame pushed to all connected WebSocket clients.
@@ -97,6 +110,7 @@ struct FrameMsg {
 /// Run the serve loop.  Never returns under normal operation.
 pub async fn run(config: ServeConfig) -> anyhow::Result<()> {
     let config = Arc::new(config);
+    let frame_cache = Arc::new(Mutex::new(None));
     let (tx, _) = broadcast::channel::<Arc<FrameMsg>>(CHANNEL_CAPACITY);
 
     // Render the initial frame immediately so the page is never blank.
@@ -108,6 +122,7 @@ pub async fn run(config: ServeConfig) -> anyhow::Result<()> {
     let state = AppState {
         tx,
         config: config.clone(),
+        frame_cache,
     };
 
     let app = Router::new()
@@ -154,14 +169,16 @@ async fn frame_handler(
 ) -> impl IntoResponse {
     let frame = query.frame.unwrap_or(state.config.default_frame);
     let config = state.config.clone();
-    let result = tokio::task::spawn_blocking(move || render_frame(&config, frame)).await;
+    let frame_cache = state.frame_cache.clone();
+    let result =
+        tokio::task::spawn_blocking(move || cached_frame(&config, frame, &frame_cache)).await;
     match result {
         Ok(Ok(png)) => Json(serde_json::json!({
             "type": "frame",
             "frame": frame,
             "width": state.config.width,
             "height": state.config.height,
-            "png_base64": BASE64.encode(png),
+            "png_base64": BASE64.encode(&*png),
         }))
         .into_response(),
         Ok(Err(error)) => (
@@ -202,6 +219,41 @@ fn render_and_broadcast(tx: &broadcast::Sender<Arc<FrameMsg>>, config: &ServeCon
             error!(frame, error = %e, "Render failed");
         }
     }
+}
+
+fn source_stamp(config: &ServeConfig) -> u128 {
+    let stamp = |path: &PathBuf| {
+        std::fs::metadata(path)
+            .and_then(|metadata| metadata.modified())
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |duration| duration.as_nanos())
+    };
+    stamp(&config.script) ^ config.props.as_ref().map_or(0, stamp)
+}
+
+fn cached_frame(
+    config: &ServeConfig,
+    frame: u32,
+    cache: &Mutex<Option<CachedFrame>>,
+) -> anyhow::Result<Arc<Vec<u8>>> {
+    let stamp = source_stamp(config);
+    if let Ok(guard) = cache.lock() {
+        if let Some(cached) = guard.as_ref() {
+            if cached.frame == frame && cached.source_stamp == stamp {
+                return Ok(cached.png.clone());
+            }
+        }
+    }
+    let png = Arc::new(render_frame(config, frame)?);
+    if let Ok(mut guard) = cache.lock() {
+        *guard = Some(CachedFrame {
+            frame,
+            source_stamp: stamp,
+            png: png.clone(),
+        });
+    }
+    Ok(png)
 }
 
 /// Render a single composition frame → raw PNG bytes.
@@ -371,8 +423,9 @@ async fn ws_handler(
     let frame = query.frame.unwrap_or(state.config.default_frame);
     let config = state.config.clone();
     let tx = state.tx.clone();
+    let frame_cache = state.frame_cache.clone();
 
-    ws.on_upgrade(move |socket| handle_socket(socket, tx, config, frame))
+    ws.on_upgrade(move |socket| handle_socket(socket, tx, config, frame, frame_cache))
 }
 
 /// Handle an individual WebSocket connection.
@@ -381,13 +434,14 @@ async fn handle_socket(
     tx: broadcast::Sender<Arc<FrameMsg>>,
     config: Arc<ServeConfig>,
     requested_frame: u32,
+    frame_cache: Arc<Mutex<Option<CachedFrame>>>,
 ) {
     let mut rx = tx.subscribe();
 
     // Send the current frame immediately on connect (render synchronously).
-    match render_frame(&config, requested_frame) {
+    match cached_frame(&config, requested_frame, &frame_cache) {
         Ok(png_bytes) => {
-            let png_b64 = BASE64.encode(&png_bytes);
+            let png_b64 = BASE64.encode(&*png_bytes);
             let payload = serde_json::json!({
                 "type": "frame",
                 "data": png_b64,
