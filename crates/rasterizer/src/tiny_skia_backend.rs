@@ -1498,62 +1498,70 @@ fn box_blur(pixmap: &mut Pixmap, radius: usize) {
     let source = pixmap.data().to_vec();
     let mut horizontal = vec![0_u8; source.len()];
 
-    for y in 0..height {
-        let mut sums = [0_u32; 4];
-        for x in 0..=radius.min(width - 1) {
-            let index = (y * width + x) * 4;
-            for channel in 0..4 {
-                sums[channel] += u32::from(source[index + channel]);
-            }
-        }
-        for x in 0..width {
-            let index = (y * width + x) * 4;
-            for channel in 0..4 {
-                horizontal[index + channel] = (sums[channel] / kernel) as u8;
-            }
-            if x >= radius {
-                let remove = (y * width + x - radius) * 4;
+    horizontal
+        .par_chunks_exact_mut(width * 4)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let mut sums = [0_u32; 4];
+            for x in 0..=radius.min(width - 1) {
+                let index = (y * width + x) * 4;
                 for channel in 0..4 {
-                    sums[channel] -= u32::from(source[remove + channel]);
+                    sums[channel] += u32::from(source[index + channel]);
                 }
             }
-            if x + radius + 1 < width {
-                let add = (y * width + x + radius + 1) * 4;
+            for x in 0..width {
+                let offset = x * 4;
                 for channel in 0..4 {
-                    sums[channel] += u32::from(source[add + channel]);
+                    row[offset + channel] = (sums[channel] / kernel) as u8;
+                }
+                if x >= radius {
+                    let remove = (y * width + x - radius) * 4;
+                    for channel in 0..4 {
+                        sums[channel] -= u32::from(source[remove + channel]);
+                    }
+                }
+                if x + radius + 1 < width {
+                    let add = (y * width + x + radius + 1) * 4;
+                    for channel in 0..4 {
+                        sums[channel] += u32::from(source[add + channel]);
+                    }
                 }
             }
-        }
-    }
+        });
 
     let output = pixmap.data_mut();
-    for x in 0..width {
-        let mut sums = [0_u32; 4];
-        for y in 0..=radius.min(height - 1) {
-            let index = (y * width + x) * 4;
-            for channel in 0..4 {
-                sums[channel] += u32::from(horizontal[index + channel]);
-            }
-        }
-        for y in 0..height {
-            let index = (y * width + x) * 4;
-            for channel in 0..4 {
-                output[index + channel] = (sums[channel] / kernel) as u8;
-            }
-            if y >= radius {
-                let remove = ((y - radius) * width + x) * 4;
+    output
+        .par_chunks_exact_mut(width * 4)
+        .enumerate()
+        .for_each(|(y, row)| {
+            for x in 0..width {
+                let mut sums = [0_u32; 4];
+                let start_y = y.saturating_sub(radius);
+                let end_y = y.saturating_add(radius).min(height - 1);
+                for sample_y in start_y..=end_y {
+                    let index = (sample_y * width + x) * 4;
+                    for channel in 0..4 {
+                        sums[channel] += u32::from(horizontal[index + channel]);
+                    }
+                }
+                let offset = x * 4;
                 for channel in 0..4 {
-                    sums[channel] -= u32::from(horizontal[remove + channel]);
+                    row[offset + channel] = (sums[channel] / kernel) as u8;
+                }
+                if y >= radius {
+                    let remove = ((y - radius) * width + x) * 4;
+                    for channel in 0..4 {
+                        sums[channel] -= u32::from(horizontal[remove + channel]);
+                    }
+                }
+                if y + radius + 1 < height {
+                    let add = (y + radius + 1) * width + x;
+                    for channel in 0..4 {
+                        sums[channel] += u32::from(horizontal[add + channel]);
+                    }
                 }
             }
-            if y + radius + 1 < height {
-                let add = ((y + radius + 1) * width + x) * 4;
-                for channel in 0..4 {
-                    sums[channel] += u32::from(horizontal[add + channel]);
-                }
-            }
-        }
-    }
+        });
 }
 
 #[allow(clippy::too_many_arguments)]
