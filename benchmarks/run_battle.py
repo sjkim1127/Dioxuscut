@@ -123,6 +123,8 @@ def main():
         if paired_render
         else "not available"
     )
+    remotion_memory_note = "not measured"
+    remotion_concurrency_note = "not measured"
 
     report_content = f"""# ⚔️ Remotion vs Dioxuscut: 3-Axis Benchmark Battle Report
 
@@ -137,8 +139,8 @@ Remotion requires Node.js and Chromium renderer/GPU child processes, while Dioxu
 
 | Workload | Remotion (Chromium 4 Workers) | **Dioxuscut (tiny-skia 4 Threads)** | Difference / Advantage |
 |:---|:---:|:---:|:---:|
-| **720p Spring Scene Peak RAM** | ~1,850 MB | **{d_720p_peak} MB** | **🔥 {round(1850 / max(1, d_720p_peak), 1)}x Less RAM** |
-| **1080p Cyberpunk VFX Peak RAM**| ~2,400 MB | **{d_cyber_peak} MB** | **🔥 {round(2400 / max(1, d_cyber_peak), 1)}x Less RAM** |
+| **720p Spring Scene Peak RAM** | {remotion_memory_note} | **{d_720p_peak} MB** | **no memory ratio claim** |
+| **1080p Cyberpunk VFX Peak RAM**| {remotion_memory_note} | **{d_cyber_peak} MB** | **no memory ratio claim** |
 | **720p Spring Scene Render Duration** | {paired_remotion_time} | **{d_720p_time} s** | **{paired_speedup} paired speedup when measured** |
 | **1080p VFX Render Duration** | not measured by this harness | **{d_cyber_time} s** | **no speedup claim** |
 
@@ -148,9 +150,9 @@ How many video renders can run concurrently on a single standard server before c
 
 | Server Specs | Remotion Concurrency | **Dioxuscut Concurrency** | Scale Multiplier |
 |:---|:---:|:---:|:---:|
-| **4GB RAM Server** (Usable: 3GB) | **1 concurrent render** (High OOM risk) | **{dioxuscut_720p_mem['concurrency_capacity']['server_4gb_ram']} concurrent renders** | **🔥 {dioxuscut_720p_mem['concurrency_capacity']['server_4gb_ram']}x Capacity** |
-| **8GB RAM Server** (Usable: 7GB) | **3 concurrent renders** | **{dioxuscut_720p_mem['concurrency_capacity']['server_8gb_ram']} concurrent renders** | **🔥 {round(dioxuscut_720p_mem['concurrency_capacity']['server_8gb_ram'] / 3, 1)}x Capacity** |
-| **16GB RAM Server** (Usable: 15GB) | **7 concurrent renders** | **{dioxuscut_720p_mem['concurrency_capacity']['server_16gb_ram']} concurrent renders** | **🔥 {round(dioxuscut_720p_mem['concurrency_capacity']['server_16gb_ram'] / 7, 1)}x Capacity** |
+| **4GB RAM Server** (Usable: 3GB) | {remotion_concurrency_note} | **{dioxuscut_720p_mem['concurrency_capacity']['server_4gb_ram']} concurrent renders** | **not comparable** |
+| **8GB RAM Server** (Usable: 7GB) | {remotion_concurrency_note} | **{dioxuscut_720p_mem['concurrency_capacity']['server_8gb_ram']} concurrent renders** | **not comparable** |
+| **16GB RAM Server** (Usable: 15GB) | {remotion_concurrency_note} | **{dioxuscut_720p_mem['concurrency_capacity']['server_16gb_ram']} concurrent renders** | **not comparable** |
 
 ---
 
