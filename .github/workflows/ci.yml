@@ -105,3 +105,29 @@ jobs:
 
       - name: Run All Workspace Tests
         run: cargo test --locked --workspace --exclude dioxuscut-python
+
+  # ── 3. Tauri app bundle and bundled browser worker ────────────────────────
+  tauri_app_bundle:
+    name: Tauri macOS app bundle
+    runs-on: macos-latest
+    needs: [fmt_clippy]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install JavaScript dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: apps/studio-tauri
+
+      - name: Build Tauri app bundle
+        run: npm run tauri -- build --debug --bundles app
+        working-directory: apps/studio-tauri
+
+      - name: Verify bundled browser worker
+        run: test -f "target/debug/bundle/macos/Dioxuscut Studio.app/Contents/Resources/_up_/scripts/three-render-worker.mjs"
