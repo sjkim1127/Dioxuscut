@@ -2,11 +2,14 @@
 
 use dioxuscut_project::{JobStatus, JobStore, Project, RenderJob};
 use dioxuscut_rasterizer::{
-    BackendCapabilities, WebFrameRequest, WebWorkerMessage, WEB_WORKER_PROTOCOL_VERSION,
+    render_web_to_ffmpeg_pipe_fallible, BackendCapabilities, BrowserFrameBackend, PipeConfig,
+    RenderControl, VideoCodec, WebFrameRequest, WebWorkerMessage, WEB_WORKER_PROTOCOL_VERSION,
 };
-use std::sync::Mutex;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
-struct AppState(Mutex<JobStore>);
+struct AppState(Arc<Mutex<JobStore>>);
 
 #[tauri::command]
 fn submit_project(state: tauri::State<'_, AppState>, project: Project) -> Result<String, String> {
@@ -16,6 +19,83 @@ fn submit_project(state: tauri::State<'_, AppState>, project: Project) -> Result
         .map_err(|_| "job store lock poisoned".to_string())?
         .submit(project)
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn start_render_job(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    output: String,
+) -> Result<(), String> {
+    let project = {
+        let mut store = state
+            .0
+            .lock()
+            .map_err(|_| "job store lock poisoned".to_string())?;
+        let job = store
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| format!("render job '{id}' was not found"))?;
+        store
+            .try_update(&id, JobStatus::Preparing, 0)
+            .map_err(|error| error.to_string())?;
+        job.project
+    };
+    if project.settings.backend != dioxuscut_project::BackendKind::Browser {
+        return Err("Tauri executor currently supports browser backend jobs only".into());
+    }
+    let worker = std::env::var_os("DIOXUSCUT_BROWSER_WORKER")
+        .ok_or_else(|| "Browser backend requires DIOXUSCUT_BROWSER_WORKER".to_string())?;
+    let url = std::env::var("DIOXUSCUT_BROWSER_URL")
+        .unwrap_or_else(|_| "http://localhost:1420".to_string());
+    let concurrency = std::env::var("DIOXUSCUT_BROWSER_CONCURRENCY")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(1);
+    let state = Arc::clone(&state.0);
+    thread::spawn(move || {
+        let result = (|| -> Result<(), String> {
+            let backend = BrowserFrameBackend::with_concurrency("node", worker, url, concurrency)
+                .map_err(|error| error.to_string())?;
+            let state_for_progress = Arc::clone(&state);
+            let progress_id = id.clone();
+            let control = RenderControl::new().with_progress(move |progress| {
+                if let Ok(mut store) = state_for_progress.lock() {
+                    let _ = store.try_update(
+                        &progress_id,
+                        JobStatus::Rendering,
+                        progress.completed_frames,
+                    );
+                }
+            });
+            let config = PipeConfig::new(
+                project.settings.width,
+                project.settings.height,
+                project.settings.fps,
+                project.settings.duration,
+                PathBuf::from(output),
+            )
+            .with_codec(VideoCodec::H264)
+            .with_control(control);
+            render_web_to_ffmpeg_pipe_fallible(&backend, &config, project.props.clone())
+                .map_err(|error| error.to_string())?;
+            let mut store = state
+                .lock()
+                .map_err(|_| "job store lock poisoned".to_string())?;
+            store
+                .try_update(&id, JobStatus::Encoding, project.settings.duration)
+                .map_err(|error| error.to_string())?;
+            store
+                .try_update(&id, JobStatus::Completed, project.settings.duration)
+                .map_err(|error| error.to_string())
+        })();
+        if let Err(error) = result {
+            if let Ok(mut store) = state.lock() {
+                let _ = store.fail(&id, error);
+            }
+        }
+    });
+    Ok(())
 }
 
 #[tauri::command]
@@ -134,12 +214,13 @@ fn web_worker_protocol() -> serde_json::Value {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(AppState(Mutex::new(JobStore::default())))
+        .manage(AppState(Arc::new(Mutex::new(JobStore::default()))))
         .invoke_handler(tauri::generate_handler![
             backend_capabilities,
             web_worker_protocol,
             validate_frame_request,
             submit_project,
+            start_render_job,
             load_project,
             save_project,
             get_render_job,
