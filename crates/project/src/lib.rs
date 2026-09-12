@@ -662,6 +662,32 @@ mod tests {
         std::fs::remove_dir_all(base).unwrap();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn project_asset_files_reject_symlink_escape() {
+        use std::os::unix::fs::symlink;
+        let base =
+            std::env::temp_dir().join(format!("dioxuscut-project-symlink-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let outside = base.with_file_name(format!("dioxuscut-outside-{}", std::process::id()));
+        std::fs::write(&outside, b"outside").unwrap();
+        symlink(&outside, base.join("linked.bin")).unwrap();
+        let mut p = project();
+        p.assets = vec![AssetRef {
+            id: "linked".into(),
+            path: "linked.bin".into(),
+            kind: AssetKind::Other,
+            sha256: None,
+        }];
+        assert_eq!(
+            p.validate_asset_files(&base),
+            Err(ProjectError::AssetOutsideProject("linked".into()))
+        );
+        std::fs::remove_file(base.join("linked.bin")).unwrap();
+        std::fs::remove_dir_all(base).unwrap();
+        std::fs::remove_file(outside).unwrap();
+    }
+
     #[test]
     fn project_resolves_manifest_paths_inside_nested_props() {
         let mut p = project();
