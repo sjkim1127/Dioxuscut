@@ -31,6 +31,8 @@ pub struct BrowserFrameBackend {
     composition: Mutex<Option<String>>,
     assets: Mutex<Vec<String>>,
     timeline: Mutex<Vec<WebTimelineClip>>,
+    image_format: Option<String>,
+    jpeg_quality: Option<u8>,
     props: Mutex<serde_json::Value>,
     cache: FrameCacheManager,
 }
@@ -79,6 +81,8 @@ impl BrowserFrameBackend {
                     .and_then(|value| serde_json::from_str(&value).ok())
                     .unwrap_or_default(),
             ),
+            image_format: std::env::var("DIOXUSCUT_BROWSER_IMAGE_FORMAT").ok().filter(|v| v == "png" || v == "jpeg"),
+            jpeg_quality: std::env::var("DIOXUSCUT_BROWSER_JPEG_QUALITY").ok().and_then(|v| v.parse().ok()).filter(|v: &u8| (1..=100).contains(v)),
             props: Mutex::new(serde_json::json!({})),
             cache: FrameCacheManager::default(),
         })
@@ -246,9 +250,10 @@ impl BrowserFrameBackend {
                 width,
                 height,
                 png_base64,
+                jpeg_base64,
                 rgba_base64,
             })) if frame == request.frame => {
-                if let Some(encoded) = png_base64 {
+                if let Some(encoded) = png_base64.or(jpeg_base64) {
                     let bytes = base64::engine::general_purpose::STANDARD
                         .decode(encoded)
                         .map_err(|e| RasterError::Frame {
@@ -350,6 +355,8 @@ impl RasterizerBackend for BrowserFrameBackend {
                 .lock()
                 .map_err(|_| RasterError::Init("browser timeline lock poisoned".into()))?
                 .clone(),
+            image_format: self.image_format.clone(),
+            jpeg_quality: self.jpeg_quality,
             props,
         })
     }

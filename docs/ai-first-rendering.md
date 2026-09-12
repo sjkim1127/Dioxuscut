@@ -84,6 +84,9 @@ export DIOXUSCUT_BROWSER_CONCURRENCY=4
 export DIOXUSCUT_BROWSER_FRAME_TIMEOUT_MS=30000
 # Optional: retry a failed frame (default: 1 retry).
 export DIOXUSCUT_BROWSER_FRAME_RETRIES=1
+# Optional: lower-latency lossy browser capture for opaque video workloads.
+export DIOXUSCUT_BROWSER_IMAGE_FORMAT=jpeg
+export DIOXUSCUT_BROWSER_JPEG_QUALITY=90
 ```
 
 The browser host exposes `window.dioxuscut.registerComposition(id, render)` and
@@ -97,6 +100,10 @@ streaming pipeline schedules different frames across the pool while preserving
 output order. Use concurrency greater than one only after measuring the target
 composition; Chromium startup and WebGL resource contention can make a larger
 pool slower.
+
+PNG remains the default and is recommended for transparent or pixel-sensitive
+stills. JPEG capture reduces browser-to-Rust payload size for opaque video
+frames; FFmpeg still performs the final codec encoding.
 
 For a headless readiness check, `dioxuscut serve` exposes `GET /health` as JSON.
 Tauri hosts additionally expose `list_browser_compositions`, which performs a

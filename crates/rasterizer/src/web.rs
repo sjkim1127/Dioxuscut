@@ -30,6 +30,11 @@ pub struct WebFrameRequest {
     pub assets: Vec<String>,
     #[serde(default)]
     pub timeline: Vec<WebTimelineClip>,
+    /// Browser screenshot transport. Defaults to PNG for lossless compatibility.
+    #[serde(default)]
+    pub image_format: Option<String>,
+    #[serde(default)]
+    pub jpeg_quality: Option<u8>,
 }
 
 /// Result returned by a browser-backed renderer.
@@ -41,6 +46,8 @@ pub struct WebFrameResponse {
     /// Preferred transport: the browser's encoded PNG screenshot.
     #[serde(default)]
     pub png_base64: Option<String>,
+    #[serde(default)]
+    pub jpeg_base64: Option<String>,
     /// Legacy transport retained for older workers.
     #[serde(default)]
     pub rgba_base64: Option<String>,
@@ -80,6 +87,8 @@ mod tests {
             props: serde_json::json!({"seed": 7}),
             assets: vec![],
             timeline: vec![],
+            image_format: None,
+            jpeg_quality: None,
         });
         let json = serde_json::to_string(&message).unwrap();
         assert_eq!(
