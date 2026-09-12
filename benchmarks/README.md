@@ -91,6 +91,15 @@ To measure the persistent Three.js/Chromium transport under the same 1280x720,
 node benchmarks/browser/three-worker-bench.mjs
 ```
 
+Set `OUTPUT=benchmarks/browser-result.json` to persist the raw Chromium worker
+sample report. The worker marks headless pages so the Studio preview loop cannot
+race an explicit frame request. Validate browser media seeking and timeline
+visibility with:
+
+```bash
+node benchmarks/browser/media-sync-smoke.mjs
+```
+
 The measured M4 Pro batch produced a 10.951s median (16.44 fps equivalent),
 compared with 11.041s for the paired Remotion export. This is approximately
 1.01x, or parity; it is not comparable to the native 5.04x result because the
