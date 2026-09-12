@@ -106,6 +106,13 @@ fn test_render_scene_with_lottie() {
     let lottie_path = temp_dir.join("test_pulse.json");
     std::fs::write(&lottie_path, lottie_json).unwrap();
 
+    let metadata = dioxuscut_rasterizer::get_lottie_metadata(&lottie_path)
+        .expect("Lottie metadata should load");
+    assert_eq!(metadata.width, 100.0);
+    assert_eq!(metadata.height, 100.0);
+    assert_eq!(metadata.frame_rate, 30.0);
+    assert_eq!(metadata.duration_in_frames, 60.0);
+
     let backend = TinySkiaBackend::new();
     let mut scene = Scene::new();
 

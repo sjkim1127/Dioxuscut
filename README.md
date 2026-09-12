@@ -71,7 +71,7 @@ Native compositions share one `Scene` contract between preview and export. `Vdom
 |---|---|
 | `dioxuscut-animation` | Interpolation, easing, springs, and color interpolation |
 | `dioxuscut-composition` | Shared native composition contract, registry, and built-in composition |
-| `dioxuscut-core` | Dioxus composition timeline, sequence, freeze, and hooks |
+| `dioxuscut-core` | Dioxus composition timeline, sequence, freeze, Lottie, and hooks |
 | `dioxuscut-media` | Dioxus image, video, and audio elements for preview |
 | `dioxuscut-player` | Interactive player, controls, and native Scene preview adapter |
 | `dioxuscut-shapes` | Procedural SVG shapes |
