@@ -144,6 +144,14 @@ fn validate_project(source: String) -> Result<Project, String> {
 }
 
 #[tauri::command]
+fn project_schema() -> Result<serde_json::Value, String> {
+    serde_json::from_str(include_str!(
+        "../../../../schemas/dioxuscut-project-v1.schema.json"
+    ))
+    .map_err(|error| format!("embedded project schema is invalid: {error}"))
+}
+
+#[tauri::command]
 fn get_render_job(
     state: tauri::State<'_, AppState>,
     id: String,
@@ -267,6 +275,7 @@ fn main() {
             load_project,
             save_project,
             validate_project,
+            project_schema,
             get_render_job,
             list_render_jobs,
             update_render_job,
