@@ -222,7 +222,18 @@ impl SceneLayout<'_> {
                         mask: None,
                         mask_mode: MaskMode::Alpha,
                         filters: Vec::new(),
-                        shadow: None,
+                        shadow: record.style.box_shadow.clone(),
+                        children: nodes,
+                    }])
+                } else if let Some(shadow) = record.style.box_shadow.clone() {
+                    Ok(vec![SceneNode::Layer {
+                        opacity: record.style.opacity,
+                        blend_mode: BlendMode::Normal,
+                        clip: None,
+                        mask: None,
+                        mask_mode: MaskMode::Alpha,
+                        filters: Vec::new(),
+                        shadow: Some(shadow),
                         children: nodes,
                     }])
                 } else if record.style.opacity < 1.0 {

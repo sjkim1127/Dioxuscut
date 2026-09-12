@@ -50,6 +50,7 @@ pub struct ResolvedStyle {
     pub border_color: Option<Color>,
     pub border_width: f32,
     pub border_radius: f32,
+    pub box_shadow: Option<dioxuscut_rasterizer::SceneShadow>,
     pub font_size: f32,
     pub font_weight: u16,
     pub font_sources: Vec<String>,
@@ -74,6 +75,7 @@ impl Default for ResolvedStyle {
             border_color: None,
             border_width: 0.0,
             border_radius: 0.0,
+            box_shadow: None,
             font_size: 16.0,
             font_weight: 400,
             font_sources: Vec::new(),
@@ -494,6 +496,7 @@ pub(crate) fn apply_declarations(style: &mut ResolvedStyle, declarations: &[(Str
                 };
             }
             "border-radius" => style.border_radius = parse_px(value).unwrap_or(0.0).max(0.0),
+            "box-shadow" => style.box_shadow = parse_box_shadow(value),
             "font-size" => style.font_size = parse_px(value).unwrap_or(style.font_size).max(1.0),
             "font-weight" => {
                 style.font_weight = match value.as_str() {
@@ -559,6 +562,32 @@ pub(crate) fn apply_declarations(style: &mut ResolvedStyle, declarations: &[(Str
             _ => {}
         }
     }
+}
+
+fn parse_box_shadow(value: &str) -> Option<dioxuscut_rasterizer::SceneShadow> {
+    let parts = css_values(value);
+    if parts.iter().any(|part| part.eq_ignore_ascii_case("inset")) {
+        return None;
+    }
+    let lengths = parts
+        .iter()
+        .filter_map(|part| parse_px(part))
+        .collect::<Vec<_>>();
+    if lengths.len() < 2 {
+        return None;
+    }
+    let color = if let Some(start) = value.find("rgba(").or_else(|| value.find("rgb(")) {
+        let end = value[start..].find(')')? + start + 1;
+        Color::from_css(&value[start..end])?
+    } else {
+        parts.iter().find_map(|part| Color::from_css(part))?
+    };
+    Some(dioxuscut_rasterizer::SceneShadow {
+        offset_x: lengths[0],
+        offset_y: lengths[1],
+        blur_sigma: lengths.get(2).copied().unwrap_or(0.0).max(0.0),
+        color,
+    })
 }
 
 fn css_values(value: &str) -> Vec<&str> {
@@ -1026,5 +1055,23 @@ mod tests {
         assert_eq!(style.transform.ty, 8.0);
         assert_eq!(style.transform.scale_x, 2.0);
         assert_eq!(style.transform.scale_y, 0.5);
+    }
+
+    #[test]
+    fn parses_box_shadow_for_native_layer() {
+        let stylesheet =
+            Stylesheet::parse(".hero { box-shadow: 4px 6px 8px rgba(10, 20, 30, 0.5); }").unwrap();
+        let mut element = NativeElement {
+            tag: "div".into(),
+            ..Default::default()
+        };
+        element.attributes.insert("class".into(), "hero".into());
+        let style = stylesheet.resolve(&element, None);
+        let shadow = style.box_shadow.expect("box shadow");
+        assert_eq!(
+            (shadow.offset_x, shadow.offset_y, shadow.blur_sigma),
+            (4.0, 6.0, 8.0)
+        );
+        assert_eq!(shadow.color, Color::rgba(10, 20, 30, 128));
     }
 }
