@@ -2081,6 +2081,7 @@ name = "dioxuscut-studio-tauri"
 version = "0.2.0-alpha.1"
 dependencies = [
  "dioxuscut-composition",
+ "dioxuscut-project",
  "dioxuscut-rasterizer",
  "serde",
  "serde_json",

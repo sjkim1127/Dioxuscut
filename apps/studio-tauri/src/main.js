@@ -7,7 +7,7 @@ app.innerHTML = `
   <main class="studio">
     <header><h1>Dioxuscut Studio</h1><span id="backend">connecting…</span></header>
     <section class="preview"><canvas id="preview-canvas"></canvas></section>
-    <footer><span id="frame">frame 0</span><span id="protocol">worker protocol…</span></footer>
+    <footer><span id="frame">frame 0</span><span id="protocol">worker protocol…</span><span id="job">job store…</span></footer>
   </main>`;
 
 const canvas = document.querySelector('#preview-canvas');
@@ -65,3 +65,14 @@ Promise.all([invoke('backend_capabilities'), invoke('web_worker_protocol')])
 invoke('validate_frame_request', {
   request: { frame: 0, fps: 30, width: 1280, height: 720, props: {} },
 }).catch((error) => { document.querySelector('#protocol').textContent = `protocol error: ${error}`; });
+
+invoke('submit_project', { project: {
+  version: 1, composition: 'three_preview',
+  settings: { width: 1280, height: 720, fps: 30, duration: 150, backend: 'browser' },
+  props: { color: '#6c63ff' }, assets: [], tracks: [],
+}}).then((id) => {
+  document.querySelector('#job').textContent = `${id} · queued`;
+  return invoke('get_render_job', { id });
+}).then((job) => {
+  if (job) document.querySelector('#job').textContent = `${job.id} · ${job.status}`;
+}).catch((error) => { document.querySelector('#job').textContent = `job error: ${error}`; });

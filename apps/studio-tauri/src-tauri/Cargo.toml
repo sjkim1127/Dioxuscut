@@ -13,6 +13,7 @@ serde_json = { workspace = true }
 tauri = { version = "2", features = [] }
 dioxuscut-composition = { workspace = true }
 dioxuscut-rasterizer = { workspace = true }
+dioxuscut-project = { workspace = true }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

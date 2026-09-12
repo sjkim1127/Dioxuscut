@@ -100,6 +100,7 @@ dioxuscut-noise       = { version = "0.2.0-alpha.1", path = "crates/noise" }
 dioxuscut-rasterizer  = { version = "0.2.0-alpha.1", path = "crates/rasterizer" }
 dioxuscut-vdom        = { version = "0.2.0-alpha.1", path = "crates/vdom" }
 dioxuscut-charts      = { version = "0.2.0-alpha.1", path = "crates/charts" }
+dioxuscut-project     = { version = "0.2.0-alpha.1", path = "crates/project" }
 
 
 
