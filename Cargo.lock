@@ -1991,6 +1991,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dioxuscut-project"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "dioxuscut-python"
 version = "0.2.0-alpha.1"
 dependencies = [

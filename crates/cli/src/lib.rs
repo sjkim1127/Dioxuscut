@@ -690,7 +690,7 @@ pub async fn execute_render_command_with_registry_and_control(
         codec = ?request.codec,
         frame_start,
         frame_end,
-        "Starting browser-free native render"
+        "Starting render"
     );
 
     let security_policy = request.effective_security_policy();

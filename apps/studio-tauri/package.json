@@ -2,7 +2,7 @@
   "name": "dioxuscut-studio-tauri",
   "private": true,
   "type": "module",
-  "scripts": { "dev": "vite --host 0.0.0.0", "build": "vite build", "tauri": "tauri", "worker": "node scripts/three-render-worker.mjs" },
+  "scripts": { "dev": "vite --host 0.0.0.0 --port 1420", "build": "vite build", "tauri": "tauri", "worker": "node scripts/three-render-worker.mjs" },
   "dependencies": { "@tauri-apps/api": "^2.0.0", "pngjs": "^7.0.0", "three": "^0.179.0" },
   "optionalDependencies": { "playwright-core": "^1.55.0" },
   "devDependencies": { "@tauri-apps/cli": "^2.0.0", "vite": "^6.0.0" }
