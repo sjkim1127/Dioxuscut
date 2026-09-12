@@ -175,6 +175,13 @@ For Remotion-style asynchronous readiness, a composition may call
 propagates the reason to the CLI/Tauri job. A cancelled render is not captured
 as a partially prepared frame.
 
+Browser hosts also expose `window.dioxuscut.registerLottieAdapter(adapter)`.
+An adapter implements `render(element, state)` and may use `lottie-web` or
+another renderer; `state` includes the source, frame, FPS, time, playback rate,
+and loop behavior. This keeps the Rust protocol independent of a particular
+JavaScript animation library while allowing Dioxus Lottie elements to render
+in the Chromium compatibility backend.
+
 Each worker owns one Chromium page and serializes its own requests; the shared
 streaming pipeline schedules different frames across the pool while preserving
 output order. Use concurrency greater than one only after measuring the target

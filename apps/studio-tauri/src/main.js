@@ -45,6 +45,7 @@ scene.add(cube);
 const compositions = new Map();
 const preloadedAssets = new Map();
 const renderGates = new Map();
+let lottieAdapter = null;
 let nextRenderGate = 1;
 let renderGateError = null;
 
@@ -120,6 +121,15 @@ export function registerComposition(id, render) {
   compositions.set(id, render);
 }
 
+// Optional browser ecosystem adapter. The core worker stays independent from
+// lottie-web while applications can reuse any Lottie-compatible renderer.
+export function registerLottieAdapter(adapter) {
+  if (!adapter || typeof adapter.render !== 'function') {
+    throw new TypeError('registerLottieAdapter expects an object with render()');
+  }
+  lottieAdapter = adapter;
+}
+
 export function listCompositions() {
   return [...new Set(['three_preview', ...compositions.keys()])];
 }
@@ -170,6 +180,19 @@ async function syncMediaElements({ frame: nextFrame, fps }) {
   await Promise.all(pendingSeeks);
 }
 
+async function syncLottieElements({ frame: nextFrame, fps }) {
+  if (!lottieAdapter) return;
+  const elements = document.querySelectorAll('[data-dioxuscut-lottie]');
+  await Promise.all([...elements].map((element) => lottieAdapter.render(element, {
+    src: element.dataset.dioxuscutLottie,
+    frame: nextFrame,
+    fps,
+    time: Number(element.dataset.time ?? 0),
+    playbackRate: Number(element.dataset.playbackRate ?? 1),
+    loopBehavior: element.dataset.loop ?? 'Loop',
+  })));
+}
+
 export async function renderFrame({ composition = 'three_preview', frame: nextFrame, fps = 30, props: inputProps = {}, assets = [], timeline = [] }) {
   const props = inputProps && typeof inputProps === 'object' ? inputProps : {};
   // A cancelled gate belongs to the current frame only. Reset it before the
@@ -195,6 +218,7 @@ export async function renderFrame({ composition = 'three_preview', frame: nextFr
       });
     }
     await syncMediaElements({ frame: nextFrame, fps });
+    await syncLottieElements({ frame: nextFrame, fps });
     await waitForRenderGates();
     return;
   }
@@ -202,11 +226,13 @@ export async function renderFrame({ composition = 'three_preview', frame: nextFr
   if (customRender) {
     const result = await customRender({ frame: nextFrame, fps, props, assets });
     await syncMediaElements({ frame: nextFrame, fps });
+    await syncLottieElements({ frame: nextFrame, fps });
     await waitForRenderGates();
     return result;
   }
   const result = renderDefaultFrame({ composition, frame: nextFrame, fps, props });
   await syncMediaElements({ frame: nextFrame, fps });
+  await syncLottieElements({ frame: nextFrame, fps });
   await waitForRenderGates();
   return result;
 }
@@ -217,6 +243,7 @@ window.dioxuscut = {
   delayRender,
   continueRender,
   cancelRender,
+  registerLottieAdapter,
 };
 
 function resize() {
