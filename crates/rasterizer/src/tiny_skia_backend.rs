@@ -564,6 +564,11 @@ fn render_node(
                     "layer and inherited opacity must be finite".into(),
                 ));
             }
+            if opacity <= 0.0 || *layer_opacity <= 0.0 {
+                // A fully transparent layer cannot affect the destination;
+                // avoid evaluating children or allocating compositing surfaces.
+                return Ok(());
+            }
             if filters.is_empty()
                 && shadow.is_none()
                 && clip.is_none()
@@ -2344,6 +2349,28 @@ mod tests {
         );
 
         assert_eq!(direct, layered);
+    }
+
+    #[test]
+    fn transparent_layer_does_not_render_children() {
+        let layer = SceneNode::Layer {
+            opacity: 0.0,
+            blend_mode: BlendMode::Normal,
+            clip: None,
+            mask: None,
+            mask_mode: MaskMode::Alpha,
+            filters: vec![SceneFilter::Blur { sigma: 20.0 }],
+            shadow: Some(SceneShadow {
+                offset_x: 10.0,
+                offset_y: 10.0,
+                blur_sigma: 5.0,
+                color: Color::WHITE,
+            }),
+            children: vec![solid_rect(Color::WHITE, 0.0, 0.0, 40.0, 32.0)],
+        };
+        let image = render(&Scene { nodes: vec![layer] }, 40, 32);
+
+        assert!(image.pixels().all(|pixel| pixel[3] == 0));
     }
 
     #[test]
