@@ -727,27 +727,49 @@ fn parse_linear_gradient(value: &str) -> Option<(f32, Vec<GradientStop>)> {
         return None;
     }
     let last = (stops.len() - 1) as f32;
-    let has_positions = stops.iter().any(|(_, position)| position.is_some());
-    let positions = if has_positions {
-        let mut positions = Vec::with_capacity(stops.len());
-        for (index, (_, position)) in stops.iter().enumerate() {
-            positions.push(position.unwrap_or(index as f32 / last));
-        }
-        positions
+    let mut positions: Vec<Option<f32>> = stops.iter().map(|(_, position)| *position).collect();
+    if positions.iter().all(Option::is_none) {
+        positions = (0..stops.len())
+            .map(|index| Some(index as f32 / last))
+            .collect();
     } else {
-        (0..stops.len()).map(|index| index as f32 / last).collect()
-    };
+        positions[0].get_or_insert(0.0);
+        let last_index = positions.len() - 1;
+        positions[last_index].get_or_insert(1.0);
+        let mut index = 0;
+        while index < positions.len() {
+            if positions[index].is_some() {
+                index += 1;
+                continue;
+            }
+            let start = index - 1;
+            let end = (index..positions.len())
+                .find(|candidate| positions[*candidate].is_some())
+                .unwrap_or(positions.len() - 1);
+            let start_position = positions[start]?;
+            let end_position = positions[end]?;
+            let span = (end - start) as f32;
+            for (offset, position) in positions[start + 1..end].iter_mut().enumerate() {
+                *position = Some(
+                    start_position + (end_position - start_position) * (offset as f32 + 1.0) / span,
+                );
+            }
+            index = end;
+        }
+    }
     Some((
         angle_deg,
         stops
             .into_iter()
             .map(|(color, _)| color)
             .enumerate()
-            .map(|(index, color)| GradientStop {
-                position: positions[index],
-                color,
+            .map(|(index, color)| {
+                Some(GradientStop {
+                    position: positions[index]?,
+                    color,
+                })
             })
-            .collect(),
+            .collect::<Option<Vec<_>>>()?,
     ))
 }
 
@@ -953,6 +975,21 @@ mod tests {
         let (_, stops) = style.background_gradient.expect("gradient");
         assert!((stops[0].position - 0.1).abs() < f32::EPSILON);
         assert!((stops[1].position - 0.9).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn interpolates_unpositioned_gradient_stops() {
+        let stylesheet =
+            Stylesheet::parse(".hero { background: linear-gradient(red 10%, green, blue 90%); }")
+                .unwrap();
+        let mut element = NativeElement {
+            tag: "div".into(),
+            ..Default::default()
+        };
+        element.attributes.insert("class".into(), "hero".into());
+        let style = stylesheet.resolve(&element, None);
+        let (_, stops) = style.background_gradient.expect("gradient");
+        assert!((stops[1].position - 0.5).abs() < f32::EPSILON);
     }
 
     #[test]
