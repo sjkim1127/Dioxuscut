@@ -53,6 +53,8 @@ try {
         canvasImage.dataset.dioxuscutCanvasImage = 'true';
         canvasImage.dataset.src = canvasAsset;
         canvasImage.dataset.fit = 'contain';
+        canvasImage.dataset.maxRetries = '2';
+        canvasImage.dataset.pauseWhenLoading = 'true';
         canvasImage.setAttribute('width', '1');
         canvasImage.setAttribute('height', '1');
         document.body.append(canvasImage);
@@ -83,6 +85,8 @@ try {
       lottieSvg: Boolean(lottie.querySelector('svg')),
       lottieFrame: lottie.dataset.frame,
       canvasPixel: [...document.querySelector('[data-dioxuscut-canvas-image-smoke]').getContext('2d').getImageData(0, 0, 1, 1).data],
+      canvasRetries: document.querySelector('[data-dioxuscut-canvas-image-smoke]').dataset.maxRetries,
+      canvasPause: document.querySelector('[data-dioxuscut-canvas-image-smoke]').dataset.pauseWhenLoading,
     };
   }, { jsonAsset, canvasAsset });
 
@@ -98,6 +102,8 @@ try {
   assert(result.lottieSvg, 'Lottie adapter did not create an SVG');
   assert(result.lottieFrame === '40', `unexpected Lottie frame: ${result.lottieFrame}`);
   assert(result.canvasPixel[3] > 0, `CanvasImage was not rasterized: ${result.canvasPixel}`);
+  assert(result.canvasRetries === '2', `unexpected CanvasImage retries: ${result.canvasRetries}`);
+  assert(result.canvasPause === 'true', 'CanvasImage loading policy was not preserved');
   console.log('browser media sync smoke: passed');
 } finally {
   await browser.close();
