@@ -65,7 +65,21 @@ async fn main() -> anyhow::Result<()> {
             });
             let result = execute_render_command_with_control(&request, control).await;
             signal_task.abort();
-            result?;
+            if let Err(error) = result {
+                if std::env::var_os("DIOXUSCUT_JSON").is_some() {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "ok": false,
+                            "error": error.to_string(),
+                            "output": request.output,
+                            "backend": format!("{:?}", request.backend).to_ascii_lowercase(),
+                            "codec": format!("{:?}", request.codec).to_ascii_lowercase(),
+                        })
+                    );
+                }
+                return Err(error);
+            }
         }
         Commands::Migrate {
             input,
