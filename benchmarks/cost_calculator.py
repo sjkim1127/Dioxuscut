@@ -90,19 +90,17 @@ def calculate_scenario(
 
 def format_markdown_table(res10k: Dict[str, Any], res100k: Dict[str, Any]) -> str:
     md = []
-    md.append("### 💰 AWS Lambda Serverless Cost Battle (Remotion vs Dioxuscut)\n")
-    md.append("| Metric | Remotion (Chromium) | **Dioxuscut (Native)** | Advantage / Savings |")
+    md.append("### 💰 AWS Lambda Serverless Cost Model (Assumption-Based)\n")
+    md.append("| Metric | Remotion model | **Dioxuscut model** | Status |")
     md.append("|:---|:---:|:---:|:---:|")
-    md.append(f"| **Container Size** | ~1,850 MB | **~35 MB** | **🔥 52x Smaller** |")
-    md.append(f"| **Allocated Memory** | 3,072 MB | **512 MB** | **🔥 6x Less Memory** |")
-    md.append(f"| **Cold Start Duration** | ~4.50 s | **~0.10 s** | **🔥 45x Faster Start** |")
-    md.append(f"| **Avg Render Time** | {res10k['remotion']['render_sec']} s | **{res10k['dioxuscut']['render_sec']} s** | **🔥 {res10k['comparison']['time_speedup_factor']}x Faster** |")
+    md.append("| **Allocated memory / render time** | configured inputs | **configured inputs** | model input, not measured infrastructure |")
+    md.append(f"| **Avg Render Time** | {res10k['remotion']['render_sec']} s | **{res10k['dioxuscut']['render_sec']} s** | model input |")
     md.append("| --- | --- | --- | --- |")
-    md.append(f"| **10,000 Videos Cost** | **${res10k['remotion']['total_cost_usd']}** | **${res10k['dioxuscut']['total_cost_usd']}** | **🔥 -{res10k['comparison']['cost_reduction_percent']}% (${res10k['comparison']['cost_savings_usd']} 절감)** |")
-    md.append(f"| **10,000 Videos Time** | {res10k['remotion']['wallclock_hours']} hrs | **{res10k['dioxuscut']['wallclock_hours']} hrs** | **{res10k['comparison']['time_speedup_factor']}x 배속 단축** |")
+    md.append(f"| **10,000 Videos Cost** | **${res10k['remotion']['total_cost_usd']}** | **${res10k['dioxuscut']['total_cost_usd']}** | model output only |")
+    md.append(f"| **10,000 Videos Time** | {res10k['remotion']['wallclock_hours']} hrs | **{res10k['dioxuscut']['wallclock_hours']} hrs** | model output only |")
     md.append("| --- | --- | --- | --- |")
-    md.append(f"| **100,000 Videos Cost** | **${res100k['remotion']['total_cost_usd']}** | **${res100k['dioxuscut']['total_cost_usd']}** | **🔥 -{res100k['comparison']['cost_reduction_percent']}% (${res100k['comparison']['cost_savings_usd']} 절감)** |")
-    md.append(f"| **100,000 Videos Time** | {res100k['remotion']['wallclock_hours']} hrs | **{res100k['dioxuscut']['wallclock_hours']} hrs** | **{res100k['comparison']['time_speedup_factor']}x 배속 단축** |")
+    md.append(f"| **100,000 Videos Cost** | **${res100k['remotion']['total_cost_usd']}** | **${res100k['dioxuscut']['total_cost_usd']}** | model output only |")
+    md.append(f"| **100,000 Videos Time** | {res100k['remotion']['wallclock_hours']} hrs | **{res100k['dioxuscut']['wallclock_hours']} hrs** | model output only |")
     return "\n".join(md)
 
 

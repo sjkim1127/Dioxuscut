@@ -4,53 +4,71 @@
     "/Users/sjkim1127/Dioxuscut/target/native_bench.mp4"
   ],
   "exit_code": 0,
-  "duration_sec": 0.347,
-  "peak_rss_mb": 405.94,
-  "avg_rss_mb": 186.17,
-  "sample_count": 6,
+  "duration_sec": 0.572,
+  "peak_rss_mb": 143.72,
+  "avg_rss_mb": 106.94,
+  "sample_count": 9,
   "concurrency_capacity": {
-    "server_4gb_ram": 7,
-    "server_8gb_ram": 17,
-    "server_16gb_ram": 37
+    "server_4gb_ram": 21,
+    "server_8gb_ram": 49,
+    "server_16gb_ram": 106
   },
   "timeline": [
     {
-      "time_sec": 0.006,
-      "rss_mb": 0.36,
-      "vms_mb": 400455.8,
+      "time_sec": 0.005,
+      "rss_mb": 0.09,
+      "vms_mb": 400458.48,
       "process_count": 1
     },
     {
-      "time_sec": 0.065,
-      "rss_mb": 43.55,
-      "vms_mb": 850284.36,
+      "time_sec": 0.067,
+      "rss_mb": 76.8,
+      "vms_mb": 850467.53,
       "process_count": 2
     },
     {
-      "time_sec": 0.124,
-      "rss_mb": 235.42,
-      "vms_mb": 850591.97,
+      "time_sec": 0.13,
+      "rss_mb": 134.58,
+      "vms_mb": 850564.75,
       "process_count": 2
     },
     {
-      "time_sec": 0.178,
-      "rss_mb": 398.89,
-      "vms_mb": 850647.38,
+      "time_sec": 0.185,
+      "rss_mb": 143.53,
+      "vms_mb": 850573.59,
       "process_count": 2
     },
     {
-      "time_sec": 0.234,
-      "rss_mb": 405.94,
-      "vms_mb": 850647.38,
+      "time_sec": 0.25,
+      "rss_mb": 143.55,
+      "vms_mb": 850573.59,
       "process_count": 2
     },
     {
-      "time_sec": 0.293,
-      "rss_mb": 32.86,
-      "vms_mb": 425140.73,
+      "time_sec": 0.315,
+      "rss_mb": 143.61,
+      "vms_mb": 850573.59,
+      "process_count": 2
+    },
+    {
+      "time_sec": 0.38,
+      "rss_mb": 143.64,
+      "vms_mb": 850573.59,
+      "process_count": 2
+    },
+    {
+      "time_sec": 0.446,
+      "rss_mb": 143.72,
+      "vms_mb": 850573.59,
+      "process_count": 2
+    },
+    {
+      "time_sec": 0.511,
+      "rss_mb": 32.92,
+      "vms_mb": 425134.55,
       "process_count": 2
     }
   ],
-  "stdout": "{\"render_ms\":287.576625}\n",
+  "stdout": "{\"render_ms\":508.90774999999996}\n",
   "stderr": ""
 }

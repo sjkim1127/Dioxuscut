@@ -1,6 +1,6 @@
 # ⚔️ Remotion vs Dioxuscut: 3-Axis Benchmark Battle Report
 
-**Generated**: 2026-09-10 23:13:27  
+**Generated**: 2026-09-13 07:21:32
 **Platform**: macOS (Apple Silicon)
 
 ---
@@ -11,10 +11,10 @@ Remotion requires Node.js and Chromium renderer/GPU child processes, while Dioxu
 
 | Workload | Remotion (Chromium 4 Workers) | **Dioxuscut (tiny-skia 4 Threads)** | Difference / Advantage |
 |:---|:---:|:---:|:---:|
-| **720p Spring Scene Peak RAM** | ~1,850 MB | **405.94 MB** | **🔥 4.6x Less RAM** |
-| **1080p Cyberpunk VFX Peak RAM**| ~2,400 MB | **993.98 MB** | **🔥 2.4x Less RAM** |
-| **720p Render Duration** | 11.04 s | **0.347 s** | **🔥 31.8x Faster** |
-| **1080p VFX Render Duration** | ~19.50 s | **3.086 s** | **🔥 6.3x Faster** |
+| **720p Spring Scene Peak RAM** | not measured | **143.72 MB** | **no memory ratio claim** |
+| **1080p Cyberpunk VFX Peak RAM**| not measured | **286.69 MB** | **no memory ratio claim** |
+| **720p Spring Scene Render Duration** | 10.125 s | **0.572 s** | **18.66x paired speedup when measured** |
+| **1080p VFX Render Duration** | not measured by this harness | **8.541 s** | **no speedup claim** |
 
 ### 🖥️ Concurrency Capacity on Common Cloud Servers (Available RAM)
 
@@ -22,9 +22,9 @@ How many video renders can run concurrently on a single standard server before c
 
 | Server Specs | Remotion Concurrency | **Dioxuscut Concurrency** | Scale Multiplier |
 |:---|:---:|:---:|:---:|
-| **4GB RAM Server** (Usable: 3GB) | **1 concurrent render** (High OOM risk) | **7 concurrent renders** | **🔥 7x Capacity** |
-| **8GB RAM Server** (Usable: 7GB) | **3 concurrent renders** | **17 concurrent renders** | **🔥 5.7x Capacity** |
-| **16GB RAM Server** (Usable: 15GB) | **7 concurrent renders** | **37 concurrent renders** | **🔥 5.3x Capacity** |
+| **4GB RAM Server** (Usable: 3GB) | not measured | **21 concurrent renders** | **not comparable** |
+| **8GB RAM Server** (Usable: 7GB) | not measured | **49 concurrent renders** | **not comparable** |
+| **16GB RAM Server** (Usable: 15GB) | not measured | **106 concurrent renders** | **not comparable** |
 
 ---
 
@@ -38,30 +38,28 @@ Features exercised:
 - Animated procedural neon laser grid
 
 **Dioxuscut 1080p Result**:
-- Duration: **3.086s** (180 frames @ 30fps)
-- Average Throughput: **58.3 FPS**
-- Peak Memory: **993.98 MB** (Completely immune to browser GC spikes)
+- Duration: **8.541s** (180 frames @ 30fps)
+- Average Throughput: **21.1 FPS**
+- Peak Memory: **286.69 MB** (Completely immune to browser GC spikes)
 
 ---
 
-## 💰 Round 3: Serverless / Cloud Cost & Docker Footprint
+## 💰 Round 3: Serverless / Cloud Cost Model (Assumption-Based)
 
 Calculated using official AWS Lambda pricing ($0.0000133334/GB-s on ARM64 Graviton) across batch production runs:
 
-| Metric | Remotion (Chromium) | **Dioxuscut (Native)** | Advantage / Savings |
+| Metric | Remotion model | **Dioxuscut model** | Status |
 |:---|:---:|:---:|:---:|
-| **Docker Container Size** | ~1,850 MB | **~35 MB** | **🔥 52x Smaller** |
-| **Lambda Memory Needed** | 3,072 MB | **512 MB** | **🔥 6x Less Memory** |
-| **Cold Start Latency** | ~4.50 s | **~0.10 s** | **🔥 45x Faster** |
-| **10,000 Videos Cost** | **$4.6** | **$0.15** | **🔥 -96.8% ($4.45 Saved)** |
-| **10,000 Videos Wallclock** | 31.92 hrs | **6.11 hrs** | **5.22x Faster** |
-| **100,000 Videos Cost** | **$45.98** | **$1.49** | **🔥 -96.8% ($44.49 Saved)** |
-| **100,000 Videos Wallclock** | 319.17 hrs | **61.11 hrs** | **5.22x Faster** |
+| **Allocated memory / render time** | configured inputs | **configured inputs** | model input, not measured infrastructure |
+| **10,000 Videos Cost** | **$4.6** | **$0.15** | model output only |
+| **10,000 Videos Wallclock** | 31.92 hrs | **6.11 hrs** | model output only |
+| **100,000 Videos Cost** | **$45.98** | **$1.49** | model output only |
+| **100,000 Videos Wallclock** | 319.17 hrs | **61.11 hrs** | model output only |
 
 ---
 
 ## 🏆 Final Verdict
 
-1. **Efficiency**: Dioxuscut uses **2.4x to 4.6x less memory** than Remotion (cutting peak RAM by over 75%), rendering OOM errors virtually impossible on standard cloud instances.
-2. **Speed**: Dioxuscut renders **5x faster** on 720p and 1080p complex VFX workloads.
-3. **Economics**: In mass video generation scenarios, Dioxuscut slashes AWS infrastructure costs by **over 96%**.
+1. **Efficiency**: Dioxuscut's native RSS is measured here; Remotion RSS requires a matching profile before a memory multiplier can be claimed.
+2. **Speed**: only paired workloads with recorded timings receive a speedup claim; the 1080p VFX result is reported without an unsupported Remotion comparison.
+3. **Economics**: cost figures remain model assumptions from `cost_calculator.py`; container size, cold start, and Remotion infrastructure RSS are not measured by this harness.

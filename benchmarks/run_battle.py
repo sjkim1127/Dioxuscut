@@ -128,7 +128,7 @@ def main():
 
     report_content = f"""# ⚔️ Remotion vs Dioxuscut: 3-Axis Benchmark Battle Report
 
-**Generated**: {time.strftime('%Y-%m-%d %H:%M:%S')}  
+**Generated**: {time.strftime('%Y-%m-%d %H:%M:%S')}
 **Platform**: {dioxuscut_720p_mem.get('platform', 'macOS')} ({dioxuscut_cyberpunk_mem.get('cpu', 'Apple Silicon')})
 
 ---
@@ -172,19 +172,17 @@ Features exercised:
 
 ---
 
-## 💰 Round 3: Serverless / Cloud Cost & Docker Footprint
+## 💰 Round 3: Serverless / Cloud Cost Model (Assumption-Based)
 
 Calculated using official AWS Lambda pricing ($0.0000133334/GB-s on ARM64 Graviton) across batch production runs:
 
-| Metric | Remotion (Chromium) | **Dioxuscut (Native)** | Advantage / Savings |
+| Metric | Remotion model | **Dioxuscut model** | Status |
 |:---|:---:|:---:|:---:|
-| **Docker Container Size** | ~1,850 MB | **~35 MB** | **🔥 52x Smaller** |
-| **Lambda Memory Needed** | 3,072 MB | **512 MB** | **🔥 6x Less Memory** |
-| **Cold Start Latency** | ~4.50 s | **~0.10 s** | **🔥 45x Faster** |
-| **10,000 Videos Cost** | **${scenario_10k['remotion']['total_cost_usd']}** | **${scenario_10k['dioxuscut']['total_cost_usd']}** | **🔥 -{scenario_10k['comparison']['cost_reduction_percent']}% (${scenario_10k['comparison']['cost_savings_usd']} Saved)** |
-| **10,000 Videos Wallclock** | {scenario_10k['remotion']['wallclock_hours']} hrs | **{scenario_10k['dioxuscut']['wallclock_hours']} hrs** | **{scenario_10k['comparison']['time_speedup_factor']}x Faster** |
-| **100,000 Videos Cost** | **${scenario_100k['remotion']['total_cost_usd']}** | **${scenario_100k['dioxuscut']['total_cost_usd']}** | **🔥 -{scenario_100k['comparison']['cost_reduction_percent']}% (${scenario_100k['comparison']['cost_savings_usd']} Saved)** |
-| **100,000 Videos Wallclock** | {scenario_100k['remotion']['wallclock_hours']} hrs | **{scenario_100k['dioxuscut']['wallclock_hours']} hrs** | **{scenario_100k['comparison']['time_speedup_factor']}x Faster** |
+| **Allocated memory / render time** | configured inputs | **configured inputs** | model input, not measured infrastructure |
+| **10,000 Videos Cost** | **${scenario_10k['remotion']['total_cost_usd']}** | **${scenario_10k['dioxuscut']['total_cost_usd']}** | model output only |
+| **10,000 Videos Wallclock** | {scenario_10k['remotion']['wallclock_hours']} hrs | **{scenario_10k['dioxuscut']['wallclock_hours']} hrs** | model output only |
+| **100,000 Videos Cost** | **${scenario_100k['remotion']['total_cost_usd']}** | **${scenario_100k['dioxuscut']['total_cost_usd']}** | model output only |
+| **100,000 Videos Wallclock** | {scenario_100k['remotion']['wallclock_hours']} hrs | **{scenario_100k['dioxuscut']['wallclock_hours']} hrs** | model output only |
 
 ---
 
@@ -192,7 +190,7 @@ Calculated using official AWS Lambda pricing ($0.0000133334/GB-s on ARM64 Gravit
 
 1. **Efficiency**: Dioxuscut's native RSS is measured here; Remotion RSS requires a matching profile before a memory multiplier can be claimed.
 2. **Speed**: only paired workloads with recorded timings receive a speedup claim; the 1080p VFX result is reported without an unsupported Remotion comparison.
-3. **Economics**: cost figures remain model assumptions from `cost_calculator.py`, not production billing measurements.
+3. **Economics**: cost figures remain model assumptions from `cost_calculator.py`; container size, cold start, and Remotion infrastructure RSS are not measured by this harness.
 """
 
     with open(report_file, "w", encoding="utf-8") as f:
