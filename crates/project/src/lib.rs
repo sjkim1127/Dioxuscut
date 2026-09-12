@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::Read;
 use thiserror::Error;
 
@@ -373,6 +374,7 @@ impl Project {
     /// Download remote HTTP(S) assets into `cache_dir` and rewrite the project
     /// to use the downloaded local files. This is opt-in so Browser projects
     /// can continue to let Chromium fetch remote media directly.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn materialize_remote_assets(
         &mut self,
         cache_dir: impl AsRef<std::path::Path>,
