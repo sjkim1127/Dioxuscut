@@ -45,6 +45,7 @@ const compositions = new Map();
 const preloadedAssets = new Map();
 const renderGates = new Map();
 let nextRenderGate = 1;
+let renderGateError = null;
 
 function delayRender(reason = 'render gate') {
   const handle = nextRenderGate++;
@@ -66,15 +67,16 @@ function continueRender(handle) {
 }
 
 function cancelRender(handle, reason = 'render cancelled') {
-  const gate = renderGates.get(handle);
-  if (!gate) return;
+  if (!renderGates.has(handle)) return;
   renderGates.delete(handle);
-  gate.reject(new Error(String(reason)));
+  renderGateError = new Error(String(reason));
 }
 
 async function waitForRenderGates() {
+  if (renderGateError) throw renderGateError;
   while (renderGates.size > 0) {
     await Promise.all([...renderGates.values()].map((gate) => gate.promise));
+    if (renderGateError) throw renderGateError;
   }
 }
 async function preloadAssets(assets = []) {
