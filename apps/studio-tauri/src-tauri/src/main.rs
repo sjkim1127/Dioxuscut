@@ -1,5 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use dioxuscut_cli::{
+    execute_render_command_with_control, RenderBackend, RenderCodec, RenderRequest,
+};
 use dioxuscut_project::{JobStatus, JobStore, Project, RenderJob};
 use dioxuscut_rasterizer::{
     make_cancel_signal, render_web_to_ffmpeg_pipe_fallible, BackendCapabilities,
@@ -43,8 +46,72 @@ fn start_render_job(
             .ok_or_else(|| format!("render job '{id}' was not found"))?
             .project
     };
-    if project.settings.backend != dioxuscut_project::BackendKind::Browser {
-        return Err("Tauri executor currently supports browser backend jobs only".into());
+    let backend_kind = project.settings.backend;
+    if backend_kind == dioxuscut_project::BackendKind::Native {
+        let state_jobs = Arc::clone(&state.jobs);
+        let state_cancellations = Arc::clone(&state.cancellations);
+        let cancellation = make_cancel_signal();
+        state_cancellations
+            .lock()
+            .map_err(|_| "cancellation store lock poisoned".to_string())?
+            .insert(id.clone(), cancellation.clone());
+        thread::spawn(move || {
+            let props_path = std::env::temp_dir().join(format!("dioxuscut-{id}-props.json"));
+            let result = (|| -> Result<(), String> {
+                std::fs::write(
+                    &props_path,
+                    serde_json::to_vec(&project.props).map_err(|e| e.to_string())?,
+                )
+                .map_err(|e| e.to_string())?;
+                let request = RenderRequest {
+                    composition: Some(project.composition.clone()),
+                    script: None,
+                    props: Some(props_path.clone()),
+                    output: PathBuf::from(output),
+                    audio: vec![],
+                    width: project.settings.width,
+                    height: project.settings.height,
+                    fps: project.settings.fps,
+                    duration: project.settings.duration,
+                    backend: RenderBackend::Native,
+                    codec: RenderCodec::H264,
+                    frame_start: 0,
+                    frame_end: None,
+                    timeout_seconds: None,
+                    crf: 18,
+                    preset: "fast".into(),
+                    hw_accel: dioxuscut_rasterizer::HwAccel::Auto,
+                    sandbox_roots: vec![],
+                    permissive: true,
+                };
+                let control = RenderControl::new().with_cancellation(cancellation);
+                tokio::runtime::Runtime::new()
+                    .map_err(|e| e.to_string())?
+                    .block_on(execute_render_command_with_control(&request, control))
+                    .map_err(|e| e.to_string())
+            })();
+            let _ = std::fs::remove_file(&props_path);
+            if let Ok(mut cancellations) = state_cancellations.lock() {
+                cancellations.remove(&id);
+            }
+            if let Err(error) = result {
+                if let Ok(mut store) = state_jobs.lock() {
+                    if store
+                        .get(&id)
+                        .is_some_and(|job| job.status != JobStatus::Cancelled)
+                    {
+                        let _ = store.fail(&id, error);
+                    }
+                }
+            } else if let Ok(mut store) = state_jobs.lock() {
+                let frames = project.settings.duration;
+                let _ = store.try_update(&id, JobStatus::Preparing, 0);
+                let _ = store.try_update(&id, JobStatus::Rendering, frames);
+                let _ = store.try_update(&id, JobStatus::Encoding, frames);
+                let _ = store.try_update(&id, JobStatus::Completed, frames);
+            }
+        });
+        return Ok(());
     }
     let worker = std::env::var_os("DIOXUSCUT_BROWSER_WORKER")
         .ok_or_else(|| "Browser backend requires DIOXUSCUT_BROWSER_WORKER".to_string())?;
