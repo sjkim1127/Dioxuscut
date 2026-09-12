@@ -100,6 +100,7 @@ export DIOXUSCUT_BROWSER_WORKER=$PWD/apps/studio-tauri/scripts/three-render-work
 export DIOXUSCUT_BROWSER_NODE=node
 # Optional: load an AI-generated/browser composition module after the app loads.
 export DIOXUSCUT_BROWSER_COMPOSITION_MODULE=http://localhost:1420/src/compositions/demo.js
+# Optional during development: use an already-running composition server.
 export DIOXUSCUT_BROWSER_URL=http://localhost:1420
 export DIOXUSCUT_BROWSER_CONCURRENCY=4
 # Optional: fail readiness or an async renderFrame() that exceeds this limit.
@@ -110,6 +111,11 @@ export DIOXUSCUT_BROWSER_FRAME_RETRIES=1
 export DIOXUSCUT_BROWSER_IMAGE_FORMAT=jpeg
 export DIOXUSCUT_BROWSER_JPEG_QUALITY=90
 ```
+
+When the packaged Tauri app runs without `DIOXUSCUT_BROWSER_URL`, the host
+serves its bundled `dist` directory from a dynamic loopback port and points the
+Chromium workers at that server. Production browser rendering therefore does
+not require a separately running Vite or Dioxus development server.
 
 The browser host exposes `window.dioxuscut.registerComposition(id, render)` and
 `window.dioxuscut.listCompositions()`;
