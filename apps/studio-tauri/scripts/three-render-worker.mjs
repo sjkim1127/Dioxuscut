@@ -14,7 +14,12 @@ const configuredFrameTimeoutMs = Number(args.get('frame-timeout-ms') ?? process.
 const frameTimeoutMs = Number.isFinite(configuredFrameTimeoutMs) && configuredFrameTimeoutMs > 0
   ? configuredFrameTimeoutMs
   : 30000;
-const configuredFrameRetries = Number(args.get('frame-retries') ?? process.env.DIOXUSCUT_BROWSER_FRAME_RETRIES ?? 1);
+const configuredFrameRetries = Number(
+  args.get('frame-retries')
+    ?? process.env.DIOXUSCUT_BROWSER_TRANSPORT_RETRIES
+    ?? process.env.DIOXUSCUT_BROWSER_FRAME_RETRIES
+    ?? 1,
+);
 const frameRetries = Number.isInteger(configuredFrameRetries) && configuredFrameRetries >= 0
   ? configuredFrameRetries
   : 1;
