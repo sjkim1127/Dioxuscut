@@ -9,11 +9,12 @@ const worker = new URL('../../apps/studio-tauri/scripts/three-render-worker.mjs'
 const url = process.env.DIOXUSCUT_BROWSER_URL ?? 'http://127.0.0.1:1421';
 const frames = Number(process.env.FRAMES ?? 180);
 const repeats = Number(process.env.REPEATS ?? 3);
+const concurrency = Math.max(1, Number(process.env.WORKERS ?? 1));
 const output = process.env.OUTPUT;
 const node = process.env.DIOXUSCUT_BROWSER_NODE ?? process.execPath;
 const browser = process.env.CHROME_PATH;
 
-function run() {
+function spawnWorker() {
   return new Promise((resolve, reject) => {
     const args = [worker.pathname, `--url=${url}`];
     if (browser) args.push(`--browser=${browser}`);
@@ -45,22 +46,33 @@ function run() {
     (async () => {
       await waitReady();
       if (failed) throw failed;
-      const measure = async () => {
-        const start = performance.now();
-        for (let frame = 0; frame < frames; frame++) await request(frame);
-        return performance.now() - start;
-      };
-      await measure();
-      const samples = [];
-      for (let i = 0; i < repeats; i++) samples.push(await measure());
-      child.stdin.end(JSON.stringify({type: 'shutdown'}) + '\n');
-      resolve(samples);
+      resolve({
+        request,
+        close: () => child.stdin.end(JSON.stringify({type: 'shutdown'}) + '\n'),
+      });
     })().catch((error) => { child.kill(); reject(error); });
   });
 }
 
-const samples = await run();
+const workers = await Promise.all(Array.from({length: concurrency}, () => spawnWorker()));
+const measure = async () => {
+  const start = performance.now();
+  for (let first = 0; first < frames; first += workers.length) {
+    await Promise.all(workers.map((worker, index) => {
+      const frame = first + index;
+      return frame < frames ? worker.request(frame) : Promise.resolve();
+    }));
+  }
+  return performance.now() - start;
+};
+await measure();
+const samples = [];
+try {
+  for (let i = 0; i < repeats; i++) samples.push(await measure());
+} finally {
+  for (const worker of workers) worker.close();
+}
 const sorted = [...samples].sort((a, b) => a - b);
-const report = {backend: 'chromium-three-worker', url, frames, width: 1280, height: 720, repeats, samples_ms: samples, median_ms: sorted[Math.floor(sorted.length / 2)], fps_equivalent: frames / (sorted[Math.floor(sorted.length / 2)] / 1000), node: process.version, platform: process.platform, arch: process.arch};
+const report = {backend: 'chromium-three-worker', url, frames, width: 1280, height: 720, repeats, workers: concurrency, samples_ms: samples, median_ms: sorted[Math.floor(sorted.length / 2)], fps_equivalent: frames / (sorted[Math.floor(sorted.length / 2)] / 1000), node: process.version, platform: process.platform, arch: process.arch};
 if (output) writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`);
 console.log(JSON.stringify(report, null, 2));

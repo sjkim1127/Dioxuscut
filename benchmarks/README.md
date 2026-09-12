@@ -91,6 +91,9 @@ To measure the persistent Three.js/Chromium transport under the same 1280x720,
 node benchmarks/browser/three-worker-bench.mjs
 ```
 
+Set `WORKERS=2` or `WORKERS=4` to measure persistent Chromium worker scaling;
+each worker owns an isolated page and receives a different frame in each batch.
+
 Set `OUTPUT=benchmarks/browser-result.json` to persist the raw Chromium worker
 sample report. The worker marks headless pages so the Studio preview loop cannot
 race an explicit frame request. Validate browser media seeking and timeline
