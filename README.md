@@ -424,7 +424,7 @@ written into workflow files.
 ## Current limitations
 
 - `dioxuscut-vdom` translates an explicit DOM/CSS subset, not a browser engine. Complex selectors, intrinsic browser layout, canvas/WebGL, DOM APIs, events, animations, and advanced paint effects still require direct Scene APIs or further adapter work. Basic CSS linear/radial gradients, translate/scale/rotate transforms, borders, non-inset `box-shadow`, common pixel filters (including `drop-shadow`), and `mix-blend-mode` are supported.
-- Native video and audio sources are local files, while image nodes additionally accept base64 `data:image/png`, `data:image/jpeg`, and `data:image/webp` sources up to 32 MiB. Remote URLs remain unsupported by native rendering.
+- Native video and audio sources are local files, while image nodes additionally accept base64 `data:image/png`, `data:image/jpeg`, and `data:image/webp` sources up to 32 MiB. Project renders can opt into downloading HTTP(S) assets with `--asset-cache-dir`; direct remote URLs are still not opened by the rasterizer itself.
 - Video frames use cached FFprobe stream metadata, up to four persistent FFmpeg decoder sources, fixed-output-FPS sampling for VFR input, and a 128 MiB frame LRU. Backward or large forward seeks restart only the affected decoder.
 - Audio declarations are taken from frame zero and must be static for the render.
 - `SceneLayer` supports rectangular or SVG-path clips, alpha or luminance masks, twelve blend modes, ordered blur/brightness/grayscale/opacity filters, and drop shadows. These effects use CPU offscreen surfaces for export and SVG/CSS equivalents for Player preview.
