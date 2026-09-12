@@ -132,7 +132,10 @@ PNG remains the default and is recommended for transparent or pixel-sensitive
 stills. JPEG capture reduces browser-to-Rust payload size for opaque video
 frames; FFmpeg still performs the final codec encoding.
 
-For a headless readiness check, `dioxuscut serve` exposes `GET /health` as JSON.
+For headless automation, `dioxuscut serve` exposes `GET /health` and
+`GET /frame?frame=N` as JSON. The latter returns the rendered PNG as
+`png_base64` together with its frame and dimensions, so an agent can inspect or
+store a frame without opening the preview UI.
 Tauri hosts additionally expose `list_browser_compositions`, which performs a
 worker handshake and returns the registered Browser composition IDs without
 requiring the Studio UI.

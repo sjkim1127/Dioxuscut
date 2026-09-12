@@ -113,6 +113,7 @@ pub async fn run(config: ServeConfig) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/", get(index_handler))
         .route("/health", get(health_handler))
+        .route("/frame", get(frame_handler))
         .route("/ws", get(ws_handler))
         .with_state(state);
 
@@ -140,6 +141,37 @@ async fn health_handler(State(state): State<AppState>) -> impl IntoResponse {
         "height": state.config.height,
         "fps": state.config.fps,
     }))
+}
+
+#[derive(Debug, Deserialize)]
+struct FrameQuery {
+    frame: Option<u32>,
+}
+
+async fn frame_handler(
+    State(state): State<AppState>,
+    Query(query): Query<FrameQuery>,
+) -> impl IntoResponse {
+    let frame = query.frame.unwrap_or(state.config.default_frame);
+    match render_frame(&state.config, frame) {
+        Ok(png) => Json(serde_json::json!({
+            "type": "frame",
+            "frame": frame,
+            "width": state.config.width,
+            "height": state.config.height,
+            "png_base64": BASE64.encode(png),
+        }))
+        .into_response(),
+        Err(error) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "type": "error",
+                "frame": frame,
+                "message": error.to_string(),
+            })),
+        )
+            .into_response(),
+    }
 }
 
 // ──────────────────────────────────────────────────────────────
