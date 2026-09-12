@@ -857,6 +857,27 @@ fn parse_radial_gradient(value: &str) -> Option<(f32, f32, f32, Vec<GradientStop
         || first.eq_ignore_ascii_case("ellipse")
         || first.starts_with("circle ")
         || first.starts_with("ellipse ");
+    let (cx, cy) = if let Some(position) = first.split_once(" at ").map(|(_, p)| p) {
+        let coordinates = position.split_whitespace().collect::<Vec<_>>();
+        if coordinates.len() == 2 {
+            (
+                coordinates[0]
+                    .strip_suffix('%')
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .map(|v| (v / 100.0).clamp(0.0, 1.0))
+                    .unwrap_or(0.5),
+                coordinates[1]
+                    .strip_suffix('%')
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .map(|v| (v / 100.0).clamp(0.0, 1.0))
+                    .unwrap_or(0.5),
+            )
+        } else {
+            (0.5, 0.5)
+        }
+    } else {
+        (0.5, 0.5)
+    };
     let mut stop_values = if first_is_hint {
         parts.collect::<Vec<_>>()
     } else {
@@ -878,7 +899,7 @@ fn parse_radial_gradient(value: &str) -> Option<(f32, f32, f32, Vec<GradientStop
             color,
         })
         .collect();
-    Some((0.5, 0.5, 0.5, stops))
+    Some((cx, cy, 0.5, stops))
 }
 
 fn parse_gradient_stop(value: &str) -> Option<(Color, Option<f32>)> {
@@ -1058,9 +1079,10 @@ mod tests {
 
     #[test]
     fn parses_radial_gradient_background() {
-        let stylesheet =
-            Stylesheet::parse(".hero { background: radial-gradient(circle, white, blue); }")
-                .unwrap();
+        let stylesheet = Stylesheet::parse(
+            ".hero { background: radial-gradient(circle at 30% 40%, white, blue); }",
+        )
+        .unwrap();
         let mut element = NativeElement {
             tag: "div".into(),
             ..Default::default()
@@ -1068,7 +1090,7 @@ mod tests {
         element.attributes.insert("class".into(), "hero".into());
         let style = stylesheet.resolve(&element, None);
         let (cx, cy, radius, stops) = style.background_radial_gradient.expect("radial gradient");
-        assert_eq!((cx, cy, radius), (0.5, 0.5, 0.5));
+        assert_eq!((cx, cy, radius), (0.3, 0.4, 0.5));
         assert_eq!(stops.len(), 2);
         assert_eq!(stops[0].color, Color::WHITE);
     }
