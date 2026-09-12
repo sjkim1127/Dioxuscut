@@ -74,13 +74,12 @@ Valid progress states are `queued`, `preparing`, `rendering`, `encoding`,
 
 ## Browser backend
 
-The CLI and Tauri host use the persistent worker protocol. Configure the
-worker with:
+The CLI and Tauri host use a persistent worker pool. Configure the pool with:
 
 ```sh
 export DIOXUSCUT_BROWSER_WORKER=$PWD/apps/studio-tauri/scripts/three-render-worker.mjs
 export DIOXUSCUT_BROWSER_URL=http://localhost:1420
-export DIOXUSCUT_BROWSER_CONCURRENCY=1
+export DIOXUSCUT_BROWSER_CONCURRENCY=4
 # Optional: fail readiness or an async renderFrame() that exceeds this limit.
 export DIOXUSCUT_BROWSER_FRAME_TIMEOUT_MS=30000
 # Optional: retry a failed frame (default: 1 retry).
@@ -93,8 +92,11 @@ Three.js or React Three Fiber adapters can register composition-specific frame
 functions without changing the Rust protocol. The function receives
 `{frame, fps, props}` and may return a Promise for asynchronous asset loading.
 
-Use concurrency greater than one only after measuring the target composition;
-Chromium startup and WebGL resource contention can make a larger pool slower.
+Each worker owns one Chromium page and serializes its own requests; the shared
+streaming pipeline schedules different frames across the pool while preserving
+output order. Use concurrency greater than one only after measuring the target
+composition; Chromium startup and WebGL resource contention can make a larger
+pool slower.
 
 For a headless readiness check, `dioxuscut serve` exposes `GET /health` as JSON.
 Tauri hosts additionally expose `list_browser_compositions`, which performs a

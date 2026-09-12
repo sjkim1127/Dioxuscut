@@ -22,7 +22,8 @@ The repository also contains Dioxus timeline, media, shape, transition, player, 
 - Native scene graph with rectangles, circles, paths, shaped text, local raster images, decoded video frames, audio tracks, gradients, and transformed groups.
 - CPU rendering through `tiny-skia`.
 - Experimental GPU rendering through `wgpu` for rectangles, circles, tessellated paths, strokes, transformed groups, and gradients with up to 16 stops; text, media, and composited layers retain whole-frame CPU fallback for correctness.
-- Bounded-memory parallel frame rendering into an FFmpeg stdin pipe.
+- Bounded-memory parallel frame rendering into an FFmpeg stdin pipe, including
+  persistent Chromium workers for Browser compositions.
 - Cached FFprobe metadata and persistent, bounded FFmpeg rawvideo decoder sessions.
 - Registry-based Rust compositions and optional sandboxed Rhai compositions, both with JSON props.
 - Shared native composition contract for CLI export and Dioxus Player/Studio preview.
