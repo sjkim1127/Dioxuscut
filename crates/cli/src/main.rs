@@ -166,11 +166,9 @@ async fn main() -> anyhow::Result<()> {
         Commands::RenderProject { input, output } => {
             let mut project = dioxuscut_project::Project::load(input)
                 .map_err(|error| anyhow::anyhow!("Project validation failed: {error}"))?;
-            if project.settings.backend != dioxuscut_project::BackendKind::Browser {
-                if let Some(parent) = input.parent() {
-                    project.validate_asset_files(parent)?;
-                    project.resolve_local_asset_paths(parent);
-                }
+            if let Some(parent) = input.parent() {
+                project.validate_asset_files(parent)?;
+                project.resolve_local_asset_paths(parent);
             }
             let props_path = std::env::temp_dir().join(format!(
                 "dioxuscut-project-props-{}.json",
