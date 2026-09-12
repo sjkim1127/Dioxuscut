@@ -29,6 +29,7 @@ struct SceneLayout<'a> {
     stylesheet: &'a Stylesheet,
     tree: TaffyTree<MeasureContext>,
     records: HashMap<NodeKey, LayoutRecord>,
+    selector_ancestors: Vec<NativeElement>,
 }
 
 pub(crate) fn dom_to_scene(
@@ -42,6 +43,7 @@ pub(crate) fn dom_to_scene(
         stylesheet,
         tree: TaffyTree::new(),
         records: HashMap::new(),
+        selector_ancestors: Vec::new(),
     };
     let root_style = ResolvedStyle::default();
     let root_children = dom.node(dom.root)?.children.clone();
@@ -120,13 +122,19 @@ impl SceneLayout<'_> {
                 Ok(Some(node))
             }
             NativeNodeKind::Element(element) => {
-                let style = self.stylesheet.resolve(element, parent_style);
+                let style = self.stylesheet.resolve_with_ancestors(
+                    element,
+                    parent_style,
+                    &self.selector_ancestors,
+                );
+                self.selector_ancestors.push(element.clone());
                 let mut children = Vec::with_capacity(native.children.len());
                 for child in &native.children {
                     if let Some(node) = self.build(*child, Some(&style))? {
                         children.push(node);
                     }
                 }
+                self.selector_ancestors.pop();
                 let node = self
                     .tree
                     .new_with_children(style.layout.clone(), &children)

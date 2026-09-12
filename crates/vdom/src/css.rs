@@ -36,6 +36,7 @@ struct SimpleSelector {
     id: Option<String>,
     classes: Vec<String>,
     universal: bool,
+    ancestor: Option<Box<SimpleSelector>>,
 }
 
 #[derive(Debug, Clone)]
@@ -176,10 +177,20 @@ impl Stylesheet {
         Ok(Self { rules })
     }
 
+    #[allow(dead_code)]
     pub(crate) fn resolve(
         &self,
         element: &NativeElement,
         parent: Option<&ResolvedStyle>,
+    ) -> ResolvedStyle {
+        self.resolve_with_ancestors(element, parent, &[])
+    }
+
+    pub(crate) fn resolve_with_ancestors(
+        &self,
+        element: &NativeElement,
+        parent: Option<&ResolvedStyle>,
+        ancestors: &[NativeElement],
     ) -> ResolvedStyle {
         let mut resolved = parent.map_or_else(ResolvedStyle::default, ResolvedStyle::inherited);
         apply_tag_defaults(&mut resolved, &element.tag);
@@ -187,7 +198,7 @@ impl Stylesheet {
 
         let mut winners: HashMap<String, (u32, usize, String)> = HashMap::new();
         for rule in &self.rules {
-            if !rule.selector.matches(element) {
+            if !rule.selector.matches(element, ancestors) {
                 continue;
             }
             let specificity = rule.selector.specificity();
@@ -247,6 +258,18 @@ impl Stylesheet {
 
 impl SimpleSelector {
     fn parse(selector: &str) -> Result<Self, CssError> {
+        let selector = selector.trim();
+        let parts = selector.split_whitespace().collect::<Vec<_>>();
+        if parts.len() > 1 {
+            let target = parts[parts.len() - 1];
+            let ancestor = parts[..parts.len() - 1].join(" ");
+            let mut parsed = Self::parse(target)?;
+            if parsed.ancestor.is_some() {
+                return Err(CssError::UnsupportedSelector(selector.into()));
+            }
+            parsed.ancestor = Some(Box::new(Self::parse(&ancestor)?));
+            return Ok(parsed);
+        }
         if selector == "*" {
             return Ok(Self {
                 universal: true,
@@ -300,7 +323,15 @@ impl SimpleSelector {
         Ok(())
     }
 
-    fn matches(&self, element: &NativeElement) -> bool {
+    fn matches(&self, element: &NativeElement, ancestors: &[NativeElement]) -> bool {
+        if self.ancestor.as_deref().is_some_and(|ancestor| {
+            !ancestors
+                .iter()
+                .rev()
+                .any(|candidate| ancestor.matches(candidate, &[]))
+        }) {
+            return false;
+        }
         if self.universal {
             return true;
         }
@@ -333,6 +364,7 @@ impl SimpleSelector {
         u32::from(self.id.is_some()) * 100
             + self.classes.len() as u32 * 10
             + u32::from(self.tag.is_some())
+            + self.ancestor.as_deref().map_or(0, Self::specificity)
     }
 }
 
@@ -1108,6 +1140,24 @@ mod tests {
             Stylesheet::parse(".card > span { color: red; }"),
             Err(CssError::UnsupportedSelector(_))
         ));
+    }
+
+    #[test]
+    fn descendant_selector_matches_any_ancestor_and_adds_specificity() {
+        let stylesheet = Stylesheet::parse(".card .title { color: #123456; }").unwrap();
+        let mut card = NativeElement {
+            tag: "div".into(),
+            ..Default::default()
+        };
+        card.attributes.insert("class".into(), "card".into());
+        let mut title = NativeElement {
+            tag: "span".into(),
+            ..Default::default()
+        };
+        title.attributes.insert("class".into(), "title".into());
+
+        let style = stylesheet.resolve_with_ancestors(&title, None, &[card]);
+        assert_eq!(style.color, Color::rgb(0x12, 0x34, 0x56));
     }
 
     #[test]
