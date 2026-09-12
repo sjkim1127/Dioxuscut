@@ -273,9 +273,6 @@ impl SimpleSelector {
                 return Err(CssError::UnsupportedSelector(selector.into()));
             }
             let mut parsed = Self::parse(target)?;
-            if parsed.ancestor.is_some() {
-                return Err(CssError::UnsupportedSelector(selector.into()));
-            }
             parsed.ancestor = Some(Box::new(Self::parse(ancestor)?));
             parsed.direct_parent = true;
             return Ok(parsed);
@@ -285,9 +282,6 @@ impl SimpleSelector {
             let target = parts[parts.len() - 1];
             let ancestor = parts[..parts.len() - 1].join(" ");
             let mut parsed = Self::parse(target)?;
-            if parsed.ancestor.is_some() {
-                return Err(CssError::UnsupportedSelector(selector.into()));
-            }
             parsed.ancestor = Some(Box::new(Self::parse(&ancestor)?));
             return Ok(parsed);
         }
@@ -345,19 +339,22 @@ impl SimpleSelector {
     }
 
     fn matches(&self, element: &NativeElement, ancestors: &[NativeElement]) -> bool {
-        if self.ancestor.as_deref().is_some_and(|ancestor| {
-            if self.direct_parent {
+        if let Some(ancestor) = self.ancestor.as_deref() {
+            let matches_ancestor = if self.direct_parent {
                 ancestors
-                    .last()
-                    .is_none_or(|candidate| !ancestor.matches(candidate, &[]))
+                    .len()
+                    .checked_sub(1)
+                    .is_some_and(|index| ancestor.matches(&ancestors[index], &ancestors[..index]))
             } else {
-                !ancestors
+                ancestors
                     .iter()
+                    .enumerate()
                     .rev()
-                    .any(|candidate| ancestor.matches(candidate, &[]))
+                    .any(|(index, candidate)| ancestor.matches(candidate, &ancestors[..index]))
+            };
+            if !matches_ancestor {
+                return false;
             }
-        }) {
-            return false;
         }
         if self.universal {
             return true;
@@ -1207,6 +1204,28 @@ mod tests {
         title.attributes.insert("class".into(), "title".into());
 
         let style = stylesheet.resolve_with_ancestors(&title, None, &[card]);
+        assert_eq!(style.color, Color::rgb(0x12, 0x34, 0x56));
+    }
+
+    #[test]
+    fn descendant_selector_supports_multiple_ancestor_levels() {
+        let stylesheet = Stylesheet::parse("main .card .title { color: #123456; }").unwrap();
+        let main = NativeElement {
+            tag: "main".into(),
+            ..Default::default()
+        };
+        let mut card = NativeElement {
+            tag: "div".into(),
+            ..Default::default()
+        };
+        card.attributes.insert("class".into(), "card".into());
+        let mut title = NativeElement {
+            tag: "span".into(),
+            ..Default::default()
+        };
+        title.attributes.insert("class".into(), "title".into());
+
+        let style = stylesheet.resolve_with_ancestors(&title, None, &[main, card]);
         assert_eq!(style.color, Color::rgb(0x12, 0x34, 0x56));
     }
 
