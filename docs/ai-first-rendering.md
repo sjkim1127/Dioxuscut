@@ -21,7 +21,10 @@ Schema is available at `schemas/dioxuscut-project-v1.schema.json`.
     "backend": "browser"
   },
   "props": { "color": "#6c63ff" },
-  "assets": [],
+  "assets": [
+    { "id": "logo", "path": "assets/logo.png", "kind": "image" },
+    { "id": "font", "path": "assets/Inter-Regular.woff2", "kind": "font" }
+  ],
   "tracks": []
 }
 ```
@@ -45,6 +48,10 @@ DIOXUSCUT_JSON=1 dioxuscut render-project project.dioxuscut.json --output out.mp
 
 `render-project` maps the project backend to the shared renderer and emits the
 same machine-readable success/error result as `render`.
+
+For Browser projects, asset paths are passed to the worker before the first
+frame. Images, fonts, and video metadata are loaded once and reused across
+frames; a failed load is retried according to the Browser frame retry policy.
 
 ## Job lifecycle
 
