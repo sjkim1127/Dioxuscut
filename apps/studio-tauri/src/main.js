@@ -43,6 +43,40 @@ scene.add(cube);
 // protocol. Adapters may register Three.js, R3F, or another WebGL renderer.
 const compositions = new Map();
 const preloadedAssets = new Map();
+const renderGates = new Map();
+let nextRenderGate = 1;
+
+function delayRender(reason = 'render gate') {
+  const handle = nextRenderGate++;
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  renderGates.set(handle, { promise, reason, resolve, reject });
+  return handle;
+}
+
+function continueRender(handle) {
+  const gate = renderGates.get(handle);
+  if (!gate) return;
+  renderGates.delete(handle);
+  gate.resolve();
+}
+
+function cancelRender(handle, reason = 'render cancelled') {
+  const gate = renderGates.get(handle);
+  if (!gate) return;
+  renderGates.delete(handle);
+  gate.reject(new Error(String(reason)));
+}
+
+async function waitForRenderGates() {
+  while (renderGates.size > 0) {
+    await Promise.all([...renderGates.values()].map((gate) => gate.promise));
+  }
+}
 async function preloadAssets(assets = []) {
   await Promise.all(assets.map(async (source) => {
     if (preloadedAssets.has(source)) return preloadedAssets.get(source);
@@ -118,13 +152,27 @@ export async function renderFrame({ composition = 'three_preview', frame: nextFr
         assets,
       });
     }
+    await waitForRenderGates();
     return;
   }
   const customRender = compositions.get(composition);
-  if (customRender) return customRender({ frame: nextFrame, fps, props, assets });
-  return renderDefaultFrame({ composition, frame: nextFrame, fps, props });
+  if (customRender) {
+    const result = await customRender({ frame: nextFrame, fps, props, assets });
+    await waitForRenderGates();
+    return result;
+  }
+  const result = renderDefaultFrame({ composition, frame: nextFrame, fps, props });
+  await waitForRenderGates();
+  return result;
 }
-window.dioxuscut = { renderFrame, registerComposition, listCompositions };
+window.dioxuscut = {
+  renderFrame,
+  registerComposition,
+  listCompositions,
+  delayRender,
+  continueRender,
+  cancelRender,
+};
 
 function resize() {
   const { width, height } = canvas.parentElement.getBoundingClientRect();
