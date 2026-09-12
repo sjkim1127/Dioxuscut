@@ -12,6 +12,7 @@ use crate::scene::{
 };
 use crate::video_cache::VideoFrameCache;
 use image::{imageops, RgbaImage};
+use rayon::prelude::*;
 use tiny_skia::{
     BlendMode as SkBlendMode, FillRule, IntSize, Mask, MaskType, Paint, Path, PathBuilder, Pixmap,
     PixmapPaint, Rect, Stroke, Transform,
@@ -1035,34 +1036,42 @@ fn apply_filter(pixmap: &mut Pixmap, filter: &SceneFilter) -> Result<(), RasterE
             let height = pixmap.height() as f32;
             let max_diag = (1.0 - rnd) * 1.0 + rnd * 2.0f32.sqrt();
             let span = (max_diag - off).max(1e-5);
-
-            for y in 0..pixmap.height() {
-                let v = (y as f32 + 0.5) / height;
-                let py = 2.0 * (v - 0.5).abs();
-                for x in 0..pixmap.width() {
+            let row_len = pixmap.width() as usize * 4;
+            let px_by_x: Vec<f32> = (0..pixmap.width())
+                .map(|x| {
                     let u = (x as f32 + 0.5) / width;
-                    let px = 2.0 * (u - 0.5).abs();
+                    2.0 * (u - 0.5).abs()
+                })
+                .collect();
 
-                    let d_rect = px.max(py);
-                    let d_ellipse = (px * px + py * py).sqrt();
-                    let d = (1.0 - rnd) * d_rect + rnd * d_ellipse;
+            pixmap
+                .data_mut()
+                .par_chunks_exact_mut(row_len)
+                .enumerate()
+                .for_each(|(y, row)| {
+                    let v = (y as f32 + 0.5) / height;
+                    let py = 2.0 * (v - 0.5).abs();
+                    for (x, pixel) in row.chunks_exact_mut(4).enumerate() {
+                        let px = px_by_x[x];
 
-                    let factor = if d <= off {
-                        1.0
-                    } else {
-                        let t = ((d - off) / span).clamp(0.0, 1.0);
-                        let s = t * t * (3.0 - 2.0 * t);
-                        1.0 - dark * s
-                    };
+                        let d_rect = px.max(py);
+                        let d_ellipse = (px * px + py * py).sqrt();
+                        let d = (1.0 - rnd) * d_rect + rnd * d_ellipse;
 
-                    let idx = ((y * pixmap.width() + x) * 4) as usize;
-                    let pixel = &mut pixmap.data_mut()[idx..idx + 4];
-                    let alpha = pixel[3] as f32;
-                    for ch in pixel[0..3].iter_mut() {
-                        *ch = (*ch as f32 * factor).round().clamp(0.0, alpha) as u8;
+                        let factor = if d <= off {
+                            1.0
+                        } else {
+                            let t = ((d - off) / span).clamp(0.0, 1.0);
+                            let s = t * t * (3.0 - 2.0 * t);
+                            1.0 - dark * s
+                        };
+
+                        let alpha = pixel[3] as f32;
+                        for ch in pixel[0..3].iter_mut() {
+                            *ch = (*ch as f32 * factor).round().clamp(0.0, alpha) as u8;
+                        }
                     }
-                }
-            }
+                });
         }
         SceneFilter::Contrast { factor } => {
             if !factor.is_finite() || factor < 0.0 {
