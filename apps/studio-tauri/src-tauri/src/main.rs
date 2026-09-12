@@ -5,9 +5,9 @@ use dioxuscut_cli::{
 };
 use dioxuscut_project::{JobStatus, JobStore, Project, RenderJob};
 use dioxuscut_rasterizer::{
-    make_cancel_signal, render_web_to_ffmpeg_pipe_fallible, BackendCapabilities,
-    BrowserFrameBackend, PipeConfig, RenderCancellationToken, RenderControl, VideoCodec,
-    WebFrameRequest, WebWorkerMessage, WEB_WORKER_PROTOCOL_VERSION,
+    make_cancel_signal, render_still_fallible, render_web_to_ffmpeg_pipe_fallible,
+    BackendCapabilities, BrowserFrameBackend, PipeConfig, RenderCancellationToken, RenderControl,
+    StillImageFormat, VideoCodec, WebFrameRequest, WebWorkerMessage, WEB_WORKER_PROTOCOL_VERSION,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -41,6 +41,21 @@ fn project_video_codec(path: &std::path::Path) -> VideoCodec {
         "mov" => VideoCodec::ProRes,
         "gif" => VideoCodec::Gif,
         _ => VideoCodec::H264,
+    }
+}
+
+fn project_still_format(path: &std::path::Path) -> Option<StillImageFormat> {
+    match path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "png" => Some(StillImageFormat::Png),
+        "jpg" | "jpeg" => Some(StillImageFormat::Jpeg),
+        "webp" => Some(StillImageFormat::WebP),
+        _ => None,
     }
 }
 
@@ -212,17 +227,32 @@ fn start_render_job(
                     }
                 });
             let output_path = PathBuf::from(&output);
-            let config = PipeConfig::new(
-                project.settings.width,
-                project.settings.height,
-                project.settings.fps,
-                project.settings.duration,
-                output_path.clone(),
-            )
-            .with_codec(project_video_codec(&output_path))
-            .with_control(control);
-            render_web_to_ffmpeg_pipe_fallible(&backend, &config, project.props.clone())
+            if let Some(format) = project_still_format(&output_path) {
+                render_still_fallible(
+                    &backend,
+                    project.settings.width,
+                    project.settings.height,
+                    project.settings.fps,
+                    0,
+                    &output_path,
+                    format,
+                    &control,
+                    |_| Ok::<_, std::convert::Infallible>(dioxuscut_rasterizer::Scene::new()),
+                )
                 .map_err(|error| error.to_string())?;
+            } else {
+                let config = PipeConfig::new(
+                    project.settings.width,
+                    project.settings.height,
+                    project.settings.fps,
+                    project.settings.duration,
+                    output_path.clone(),
+                )
+                .with_codec(project_video_codec(&output_path))
+                .with_control(control);
+                render_web_to_ffmpeg_pipe_fallible(&backend, &config, project.props.clone())
+                    .map_err(|error| error.to_string())?;
+            }
             let mut store = state_jobs
                 .lock()
                 .map_err(|_| "job store lock poisoned".to_string())?;
