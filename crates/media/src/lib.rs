@@ -16,8 +16,8 @@ pub mod video;
 
 pub use audio::{Audio, AudioProps};
 pub use audio_viz::{
-    create_smooth_svg_path, get_waveform_portion, load_audio_data, visualize_audio, AudioData,
-    AudioVizError, VisualizeFor,
+    create_smooth_svg_path, get_waveform_portion, get_waveform_portion_channel, load_audio_data,
+    visualize_audio, AudioData, AudioVizError, VisualizeFor,
 };
 pub use ducking::{
     calculate_ducking_envelope, merge_speech_intervals, DuckingOptions, SpeechInterval,

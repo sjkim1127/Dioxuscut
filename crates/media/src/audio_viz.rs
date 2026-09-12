@@ -204,6 +204,41 @@ pub fn get_waveform_portion(data: &AudioData, start_sec: f32, duration_sec: f32)
 
     let channels = data.channel_waveforms.len();
     let total_len = data.channel_waveforms[0].len();
+    let start_idx =
+        ((start_sec.max(0.0) * data.sample_rate as f32).round() as usize).min(total_len);
+    let end_idx = (((start_sec.max(0.0) + duration_sec) * data.sample_rate as f32).round()
+        as usize)
+        .min(total_len);
+    if start_idx >= end_idx {
+        return Vec::new();
+    }
+    (start_idx..end_idx)
+        .map(|idx| {
+            data.channel_waveforms
+                .iter()
+                .map(|waveform| waveform[idx])
+                .sum::<f32>()
+                / channels as f32
+        })
+        .collect()
+}
+
+/// Returns one channel of waveform samples for a time range.
+///
+/// The channel index is clamped to the final available channel, matching the
+/// forgiving behavior of Remotion's waveform helpers for mono sources.
+pub fn get_waveform_portion_channel(
+    data: &AudioData,
+    channel: usize,
+    start_sec: f32,
+    duration_sec: f32,
+) -> Vec<f32> {
+    if data.channel_waveforms.is_empty() || data.sample_rate == 0 || duration_sec <= 0.0 {
+        return Vec::new();
+    }
+
+    let waveform = &data.channel_waveforms[channel.min(data.channel_waveforms.len() - 1)];
+    let total_len = waveform.len();
 
     let start_idx =
         ((start_sec.max(0.0) * data.sample_rate as f32).round() as usize).min(total_len);
@@ -215,18 +250,7 @@ pub fn get_waveform_portion(data: &AudioData, start_sec: f32, duration_sec: f32)
         return Vec::new();
     }
 
-    let count = end_idx - start_idx;
-    let mut portion = Vec::with_capacity(count);
-
-    for idx in start_idx..end_idx {
-        let mut mono = 0.0f32;
-        for ch in 0..channels {
-            mono += data.channel_waveforms[ch][idx];
-        }
-        portion.push(mono / channels as f32);
-    }
-
-    portion
+    waveform[start_idx..end_idx].to_vec()
 }
 
 /// Generates a smoothed SVG path (`d` attribute string) from a slice of amplitude values.
@@ -323,5 +347,26 @@ mod tests {
         for b in &bars {
             assert_eq!(*b, 0.0);
         }
+    }
+
+    #[test]
+    fn test_waveform_channel_selection_preserves_stereo_data() {
+        let data = AudioData {
+            channel_waveforms: vec![vec![0.1, 0.2, 0.3], vec![-0.4, -0.5, -0.6]],
+            sample_rate: 3,
+            duration_secs: 1.0,
+        };
+        assert_eq!(
+            get_waveform_portion_channel(&data, 1, 0.0, 1.0),
+            vec![-0.4, -0.5, -0.6]
+        );
+        assert_eq!(
+            get_waveform_portion_channel(&data, 99, 0.0, 1.0),
+            vec![-0.4, -0.5, -0.6]
+        );
+        assert_eq!(
+            get_waveform_portion(&data, 0.0, 1.0),
+            vec![-0.15, -0.15, -0.15]
+        );
     }
 }
