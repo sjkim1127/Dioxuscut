@@ -389,7 +389,8 @@ where
 ///
 /// # Performance
 /// On a machine with N cores, this is roughly N× faster than sequential
-/// for the rasterization step. PNG file I/O is still sequential to preserve order.
+/// for the rasterization step. Each worker writes its indexed PNG immediately,
+/// so peak image memory is bounded by the worker count rather than frame count.
 pub fn render_parallel<F, B>(
     backend: &B,
     config: &NativeRenderConfig,
@@ -418,31 +419,20 @@ where
             .map_err(|e| RasterError::Init(format!("Failed to build thread pool: {e}")))?,
     };
 
-    // Render all frames in parallel → collect (frame_index, img) pairs
-    let rendered: Result<Vec<(u32, RgbaImage)>, RasterError> = pool.install(|| {
-        (0..total)
-            .into_par_iter()
-            .map(|frame| {
-                let scene = scene_fn(frame);
-                let frame_cfg = FrameConfig::new(width, height, frame, fps);
-                let img = backend.render_frame(&scene, &frame_cfg)?;
-                Ok((frame, img))
-            })
-            .collect()
-    });
+    pool.install(|| {
+        (0..total).into_par_iter().try_for_each(|frame| {
+            let scene = scene_fn(frame);
+            let frame_cfg = FrameConfig::new(width, height, frame, fps);
+            let img = backend.render_frame(&scene, &frame_cfg)?;
+            let path = dir.join(format!("frame_{:06}.png", frame + 1));
+            img.save(&path)
+                .map_err(|e| RasterError::ImageEncode(e.to_string()))
+        })
+    })?;
 
-    let mut pairs = rendered?;
-    // Sort by frame index (parallel iteration doesn't guarantee order)
-    pairs.sort_by_key(|(f, _)| *f);
-
-    // Write PNGs in order
-    let mut paths = Vec::with_capacity(total as usize);
-    for (frame, img) in pairs {
-        let path = dir.join(format!("frame_{:06}.png", frame + 1));
-        img.save(&path)
-            .map_err(|e| RasterError::ImageEncode(e.to_string()))?;
-        paths.push(path);
-    }
+    let paths = (0..total)
+        .map(|frame| dir.join(format!("frame_{:06}.png", frame + 1)))
+        .collect();
 
     Ok(paths)
 }
