@@ -14,9 +14,9 @@
     "security": { "csp": null }
   },
   "bundle": {
-    "active": false,
+    "active": true,
     "targets": "all",
-    "icon": ["../../../assets/logo.svg"],
+    "icon": ["../../../assets/logo.png"],
     "resources": ["../scripts/three-render-worker.mjs"]
   }
 }
