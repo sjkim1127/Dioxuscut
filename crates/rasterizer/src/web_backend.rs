@@ -118,10 +118,14 @@ impl BrowserFrameBackend {
 }
 
 fn browser_transport_retries_from_env() -> usize {
-    std::env::var("DIOXUSCUT_BROWSER_TRANSPORT_RETRIES")
-        .or_else(|_| std::env::var("DIOXUSCUT_BROWSER_FRAME_RETRIES"))
-        .ok()
-        .and_then(|value| value.parse().ok())
+    let primary = std::env::var("DIOXUSCUT_BROWSER_TRANSPORT_RETRIES").ok();
+    let legacy = std::env::var("DIOXUSCUT_BROWSER_FRAME_RETRIES").ok();
+    parse_browser_transport_retries(primary.as_deref().or(legacy.as_deref()))
+}
+
+fn parse_browser_transport_retries(value: Option<&str>) -> usize {
+    value
+        .and_then(|value| value.trim().parse().ok())
         .unwrap_or(1)
 }
 
@@ -661,5 +665,13 @@ mod tests {
         assert_eq!(image.as_raw(), &[1, 2, 3, 4]);
         drop(backend);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn transport_retry_parser_has_safe_default() {
+        assert_eq!(parse_browser_transport_retries(None), 1);
+        assert_eq!(parse_browser_transport_retries(Some(" 3 ")), 3);
+        assert_eq!(parse_browser_transport_retries(Some("0")), 0);
+        assert_eq!(parse_browser_transport_retries(Some("invalid")), 1);
     }
 }
