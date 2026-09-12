@@ -44,7 +44,7 @@
         "id": { "type": "string", "minLength": 1 },
         "path": { "type": "string", "minLength": 1 },
         "kind": { "enum": ["other", "image", "video", "audio", "font", "model", "shader"] },
-        "sha256": { "type": ["string", "null"] }
+        "sha256": { "type": ["string", "null"], "pattern": "^[a-fA-F0-9]{64}$" }
       },
       "additionalProperties": false
     },

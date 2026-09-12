@@ -174,6 +174,8 @@ pub enum ProjectError {
         expected: String,
         actual: String,
     },
+    #[error("project asset '{0}' has an invalid SHA-256 digest")]
+    InvalidAssetHash(String),
     #[error("project scale must be finite and greater than zero")]
     InvalidScale,
     #[error("invalid render job transition from {from:?} to {to:?}")]
@@ -230,6 +232,11 @@ impl Project {
             }
             if asset.path.trim().is_empty() {
                 return Err(ProjectError::EmptyAssetPath(asset.id.clone()));
+            }
+            if let Some(hash) = &asset.sha256 {
+                if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                    return Err(ProjectError::InvalidAssetHash(asset.id.clone()));
+                }
             }
             if !asset_ids.insert(asset.id.as_str()) {
                 return Err(ProjectError::DuplicateAssetId(asset.id.clone()));
@@ -595,6 +602,12 @@ mod tests {
         assert_eq!(
             p.validate(),
             Err(ProjectError::EmptyAssetPath("other".into()))
+        );
+        p.assets[1].path = "other.png".into();
+        p.assets[1].sha256 = Some("not-a-digest".into());
+        assert_eq!(
+            p.validate(),
+            Err(ProjectError::InvalidAssetHash("other".into()))
         );
     }
 
