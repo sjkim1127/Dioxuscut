@@ -48,6 +48,8 @@ use tracing::{error, info, warn};
 
 /// Maximum number of frame messages buffered in the broadcast channel.
 const CHANNEL_CAPACITY: usize = 4;
+/// Maximum number of rendered preview frames retained for scrubbing.
+const PREVIEW_CACHE_CAPACITY: usize = 8;
 /// Debounce period before re-rendering after a file change.
 const DEBOUNCE_MS: u64 = 150;
 
@@ -158,7 +160,7 @@ async fn health_handler(State(state): State<AppState>) -> impl IntoResponse {
         "fps": state.config.fps,
         "preview_cache": {
             "entries": state.frame_cache.lock().map(|cache| cache.len()).unwrap_or(0),
-            "capacity": 8,
+            "capacity": PREVIEW_CACHE_CAPACITY,
         },
     }))
 }
@@ -266,7 +268,7 @@ fn cached_frame(
             source_stamp: stamp,
             png: png.clone(),
         });
-        guard.truncate(8);
+        guard.truncate(PREVIEW_CACHE_CAPACITY);
     }
     Ok(png)
 }
