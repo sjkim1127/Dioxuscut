@@ -294,3 +294,29 @@ fn test_cli_probe_subcommand() {
         _ => panic!("Expected Commands::Probe"),
     }
 }
+
+#[test]
+fn test_cli_render_project_accepts_remote_asset_cache() {
+    let cli = Cli::try_parse_from([
+        "dioxuscut",
+        "render-project",
+        "project.dioxuscut.json",
+        "--output",
+        "out.mp4",
+        "--asset-cache-dir",
+        ".dioxuscut-assets",
+    ])
+    .expect("Failed to parse render-project asset cache option");
+    match cli.command {
+        Commands::RenderProject {
+            input,
+            output,
+            asset_cache_dir,
+        } => {
+            assert_eq!(input, PathBuf::from("project.dioxuscut.json"));
+            assert_eq!(output, PathBuf::from("out.mp4"));
+            assert_eq!(asset_cache_dir, Some(PathBuf::from(".dioxuscut-assets")));
+        }
+        _ => panic!("Expected Commands::RenderProject"),
+    }
+}
