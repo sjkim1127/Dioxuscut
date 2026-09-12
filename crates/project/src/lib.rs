@@ -166,6 +166,8 @@ pub enum ProjectError {
     EmptyAssetPath(String),
     #[error("project asset id '{0}' is duplicated")]
     DuplicateAssetId(String),
+    #[error("project references unknown asset '{0}'")]
+    UnknownAssetReference(String),
     #[error("project asset '{asset}' could not be read: {reason}")]
     AssetRead { asset: String, reason: String },
     #[error("project asset '{0}' resolves outside the project directory")]
@@ -260,8 +262,10 @@ impl Project {
                         reason: reason.into(),
                     });
                 }
+                validate_asset_references(&clip.props, &asset_ids)?;
             }
         }
+        validate_asset_references(&self.props, &asset_ids)?;
         Ok(())
     }
 
@@ -559,6 +563,35 @@ impl JobStore {
     }
 }
 
+fn validate_asset_references(
+    value: &serde_json::Value,
+    asset_ids: &BTreeSet<&str>,
+) -> Result<(), ProjectError> {
+    match value {
+        serde_json::Value::String(text) if text.starts_with("asset://") => {
+            let id = text.trim_start_matches("asset://");
+            if id.is_empty() || !asset_ids.contains(id) {
+                return Err(ProjectError::UnknownAssetReference(id.to_string()));
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                validate_asset_references(value, asset_ids)?;
+            }
+        }
+        serde_json::Value::Object(values) => {
+            for value in values.values() {
+                validate_asset_references(value, asset_ids)?;
+            }
+        }
+        serde_json::Value::Null
+        | serde_json::Value::Bool(_)
+        | serde_json::Value::Number(_)
+        | serde_json::Value::String(_) => {}
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -628,6 +661,12 @@ mod tests {
         assert_eq!(
             p.validate(),
             Err(ProjectError::InvalidAssetHash("other".into()))
+        );
+        p.assets[1].sha256 = None;
+        p.props = serde_json::json!({"src": "asset://missing"});
+        assert_eq!(
+            p.validate(),
+            Err(ProjectError::UnknownAssetReference("missing".into()))
         );
     }
 
