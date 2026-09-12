@@ -1,7 +1,7 @@
 //! Browser-backed frame transport for Three.js and other web compositions.
 
 use crate::backend::{BackendCapabilities, FrameConfig, RasterError, RasterizerBackend};
-use crate::frame_cache::{CacheMetrics, FrameCacheKey, FrameCacheManager};
+use crate::frame_cache::{CacheMetrics, FrameCacheConfig, FrameCacheKey, FrameCacheManager};
 use crate::scene::Scene;
 use crate::web::{
     WebFrameRequest, WebFrameResponse, WebTimelineClip, WebWorkerMessage,
@@ -259,6 +259,15 @@ impl BrowserFrameBackend {
     /// preferable for embedders that do not use process-wide environment state.
     pub fn with_transparent(mut self, transparent: bool) -> Self {
         self.transparent = transparent;
+        self
+    }
+
+    /// Configure the decoded browser-frame cache budget in bytes.
+    ///
+    /// The default is 512 MiB. Embedders can lower it when the browser worker
+    /// shares memory with a Tauri or Dioxus application.
+    pub fn with_frame_cache_bytes(mut self, max_bytes: usize) -> Self {
+        self.cache = FrameCacheManager::new(FrameCacheConfig::with_max_bytes(max_bytes));
         self
     }
 
