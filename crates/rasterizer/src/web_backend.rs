@@ -81,8 +81,13 @@ impl BrowserFrameBackend {
                     .and_then(|value| serde_json::from_str(&value).ok())
                     .unwrap_or_default(),
             ),
-            image_format: std::env::var("DIOXUSCUT_BROWSER_IMAGE_FORMAT").ok().filter(|v| v == "png" || v == "jpeg"),
-            jpeg_quality: std::env::var("DIOXUSCUT_BROWSER_JPEG_QUALITY").ok().and_then(|v| v.parse().ok()).filter(|v: &u8| (1..=100).contains(v)),
+            image_format: std::env::var("DIOXUSCUT_BROWSER_IMAGE_FORMAT")
+                .ok()
+                .filter(|v| v == "png" || v == "jpeg"),
+            jpeg_quality: std::env::var("DIOXUSCUT_BROWSER_JPEG_QUALITY")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .filter(|v: &u8| (1..=100).contains(v)),
             props: Mutex::new(serde_json::json!({})),
             cache: FrameCacheManager::default(),
         })
@@ -243,7 +248,11 @@ impl BrowserFrameBackend {
             .map_err(|_| RasterError::Init("browser worker stdout lock poisoned".into()))?;
         let mut line = String::new();
         stdout.read_line(&mut line)?;
-        tracing::debug!(frame = request.frame, bytes = line.len(), "browser frame response received");
+        tracing::debug!(
+            frame = request.frame,
+            bytes = line.len(),
+            "browser frame response received"
+        );
         let result = match serde_json::from_str::<WebWorkerMessage>(&line) {
             Ok(WebWorkerMessage::Frame(WebFrameResponse {
                 frame,
