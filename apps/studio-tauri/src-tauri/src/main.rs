@@ -161,6 +161,9 @@ fn start_render_job(
         store
             .set_output(&id, &output)
             .map_err(|error| error.to_string())?;
+        store
+            .try_update(&id, JobStatus::Preparing, 0)
+            .map_err(|error| error.to_string())?;
     }
     if backend_kind != dioxuscut_project::BackendKind::Browser {
         let state_jobs = Arc::clone(&state.jobs);
@@ -270,15 +273,6 @@ fn start_render_job(
                 .and_then(|value| value.parse().ok())
         })
         .unwrap_or(1);
-    {
-        let mut store = state
-            .jobs
-            .lock()
-            .map_err(|_| "job store lock poisoned".to_string())?;
-        store
-            .try_update(&id, JobStatus::Preparing, 0)
-            .map_err(|error| error.to_string())?;
-    }
     let state_jobs = Arc::clone(&state.jobs);
     let state_cancellations = Arc::clone(&state.cancellations);
     let cancellation = make_cancel_signal();
