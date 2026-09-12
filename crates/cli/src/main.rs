@@ -163,12 +163,19 @@ async fn main() -> anyhow::Result<()> {
             }
             println!("{}", serde_json::to_string_pretty(&project)?);
         }
-        Commands::RenderProject { input, output } => {
+        Commands::RenderProject {
+            input,
+            output,
+            asset_cache_dir,
+        } => {
             let mut project = dioxuscut_project::Project::load(input)
                 .map_err(|error| anyhow::anyhow!("Project validation failed: {error}"))?;
             if let Some(parent) = input.parent() {
                 project.validate_asset_files(parent)?;
                 project.resolve_local_asset_paths(parent);
+            }
+            if let Some(cache_dir) = asset_cache_dir {
+                project.materialize_remote_assets(cache_dir, 256 * 1024 * 1024)?;
             }
             let props_path = std::env::temp_dir().join(format!(
                 "dioxuscut-project-props-{}.json",

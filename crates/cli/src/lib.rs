@@ -522,6 +522,9 @@ pub enum Commands {
         /// Output media file path.
         #[arg(long, short, default_value = "out.mp4")]
         output: PathBuf,
+        /// Optional directory for downloading HTTP(S) project assets before rendering.
+        #[arg(long)]
+        asset_cache_dir: Option<PathBuf>,
     },
 
     /// (Experimental) Scaffold a Dioxuscut component from a Remotion (.tsx) file.
