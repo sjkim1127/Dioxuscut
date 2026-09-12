@@ -1,7 +1,7 @@
 //! Browser-backed frame transport for Three.js and other web compositions.
 
 use crate::backend::{BackendCapabilities, FrameConfig, RasterError, RasterizerBackend};
-use crate::frame_cache::{FrameCacheKey, FrameCacheManager};
+use crate::frame_cache::{CacheMetrics, FrameCacheKey, FrameCacheManager};
 use crate::scene::Scene;
 use crate::web::{
     WebFrameRequest, WebFrameResponse, WebWorkerMessage, WEB_WORKER_PROTOCOL_VERSION,
@@ -120,6 +120,11 @@ impl BrowserFrameBackend {
             .lock()
             .map_err(|_| RasterError::Init("browser worker props lock poisoned".into()))? = props;
         Ok(())
+    }
+
+    /// Return cache counters for host UIs and performance telemetry.
+    pub fn cache_metrics(&self) -> CacheMetrics {
+        self.cache.metrics()
     }
     pub fn render_web_frame(&self, request: &WebFrameRequest) -> Result<RgbaImage, RasterError> {
         let cache_key = FrameCacheKey::from_props(
