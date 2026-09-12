@@ -83,7 +83,7 @@ rayon             = "1"
 # Web server & HTTP
 axum              = { version = "0.7", features = ["ws"] }
 tower-http        = { version = "0.5", features = ["fs", "trace", "cors"] }
-reqwest           = { version = "0.12", features = ["json"] }
+reqwest           = { version = "0.12", features = ["json", "blocking"] }
 
 # Internal crates
 dioxuscut-animation   = { version = "0.2.0-alpha.1", path = "crates/animation" }

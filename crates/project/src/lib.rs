@@ -362,6 +362,118 @@ impl Project {
             }
         }
         rewrite(&mut self.props, &replacements);
+        for track in &mut self.tracks {
+            for clip in &mut track.clips {
+                rewrite(&mut clip.props, &replacements);
+            }
+        }
+    }
+
+    /// Download remote HTTP(S) assets into `cache_dir` and rewrite the project
+    /// to use the downloaded local files. This is opt-in so Browser projects
+    /// can continue to let Chromium fetch remote media directly.
+    pub fn materialize_remote_assets(
+        &mut self,
+        cache_dir: impl AsRef<std::path::Path>,
+        max_bytes: usize,
+    ) -> Result<(), ProjectError> {
+        if max_bytes == 0 {
+            return Err(ProjectError::AssetRead {
+                asset: "remote".into(),
+                reason: "remote asset byte limit must be greater than zero".into(),
+            });
+        }
+        let cache_dir = cache_dir.as_ref();
+        std::fs::create_dir_all(cache_dir)
+            .map_err(|error| ProjectError::File(error.to_string()))?;
+        let client = reqwest::blocking::Client::builder()
+            .redirect(reqwest::redirect::Policy::limited(5))
+            .build()
+            .map_err(|error| ProjectError::AssetRead {
+                asset: "remote".into(),
+                reason: error.to_string(),
+            })?;
+        let mut replacements = Vec::new();
+        for asset in &mut self.assets {
+            let source = asset.path.trim();
+            if !(source.starts_with("http://") || source.starts_with("https://")) {
+                continue;
+            }
+            let response = client
+                .get(source)
+                .send()
+                .and_then(|response| response.error_for_status())
+                .map_err(|error| ProjectError::AssetRead {
+                    asset: asset.id.clone(),
+                    reason: error.to_string(),
+                })?;
+            if response
+                .content_length()
+                .is_some_and(|length| length > max_bytes as u64)
+            {
+                return Err(ProjectError::AssetRead {
+                    asset: asset.id.clone(),
+                    reason: format!("remote asset exceeds the {max_bytes} byte limit"),
+                });
+            }
+            let bytes = response.bytes().map_err(|error| ProjectError::AssetRead {
+                asset: asset.id.clone(),
+                reason: error.to_string(),
+            })?;
+            if bytes.len() > max_bytes {
+                return Err(ProjectError::AssetRead {
+                    asset: asset.id.clone(),
+                    reason: format!("remote asset exceeds the {max_bytes} byte limit"),
+                });
+            }
+            let actual = format!("{:x}", Sha256::digest(&bytes));
+            if let Some(expected) = &asset.sha256 {
+                if !expected.eq_ignore_ascii_case(&actual) {
+                    return Err(ProjectError::AssetHashMismatch {
+                        asset: asset.id.clone(),
+                        expected: expected.clone(),
+                        actual,
+                    });
+                }
+            }
+            let filename = format!("{actual}-{}", asset.id);
+            let local = cache_dir.join(filename);
+            std::fs::write(&local, &bytes).map_err(|error| ProjectError::AssetRead {
+                asset: asset.id.clone(),
+                reason: error.to_string(),
+            })?;
+            let reference = format!("asset://{}", asset.id);
+            replacements.push((source.to_string(), local.to_string_lossy().into_owned()));
+            replacements.push((reference, local.to_string_lossy().into_owned()));
+            asset.path = local.to_string_lossy().into_owned();
+        }
+        fn rewrite(value: &mut serde_json::Value, replacements: &[(String, String)]) {
+            match value {
+                serde_json::Value::String(text) => {
+                    if let Some((_, replacement)) =
+                        replacements.iter().find(|(source, _)| source == text)
+                    {
+                        *text = replacement.clone();
+                    }
+                }
+                serde_json::Value::Array(values) => values
+                    .iter_mut()
+                    .for_each(|value| rewrite(value, replacements)),
+                serde_json::Value::Object(values) => values
+                    .values_mut()
+                    .for_each(|value| rewrite(value, replacements)),
+                serde_json::Value::Null
+                | serde_json::Value::Bool(_)
+                | serde_json::Value::Number(_) => {}
+            }
+        }
+        rewrite(&mut self.props, &replacements);
+        for track in &mut self.tracks {
+            for clip in &mut track.clips {
+                rewrite(&mut clip.props, &replacements);
+            }
+        }
+        Ok(())
     }
 
     /// Convert local asset paths back to project-relative paths before saving.
