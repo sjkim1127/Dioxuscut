@@ -12,16 +12,19 @@ use image::RgbaImage;
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Duration;
 
 struct BrowserWorker {
     process: Mutex<WorkerProcess>,
     node: OsString,
     worker: PathBuf,
     url: String,
+    timeout: Duration,
     compositions: Vec<String>,
     /// A worker processes one request at a time; protect the full
     /// write/read transaction so concurrent host threads cannot steal replies.
@@ -31,7 +34,7 @@ struct BrowserWorker {
 struct WorkerProcess {
     child: Child,
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    stdout: Receiver<std::io::Result<String>>,
 }
 
 pub struct BrowserFrameBackend {
@@ -112,12 +115,20 @@ impl BrowserWorker {
         let node = node.as_ref().to_os_string();
         let worker = worker.to_path_buf();
         let url = url.to_string();
+        let timeout = Duration::from_millis(
+            std::env::var("DIOXUSCUT_BROWSER_FRAME_TIMEOUT_MS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .filter(|value: &u64| *value > 0)
+                .unwrap_or(30_000),
+        );
         let (process, compositions) = Self::spawn_process(&node, &worker, &url)?;
         Ok(Self {
             process: Mutex::new(process),
             node,
             worker,
             url,
+            timeout,
             compositions,
             request: Mutex::new(()),
         })
@@ -139,14 +150,24 @@ impl BrowserWorker {
             .stdin
             .take()
             .ok_or_else(|| RasterError::Init("browser worker stdin unavailable".into()))?;
-        let mut stdout = BufReader::new(
-            child
-                .stdout
-                .take()
-                .ok_or_else(|| RasterError::Init("browser worker stdout unavailable".into()))?,
-        );
-        let mut line = String::new();
-        stdout.read_line(&mut line)?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| RasterError::Init("browser worker stdout unavailable".into()))?;
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let done = line.is_err();
+                if sender.send(line).is_err() || done {
+                    break;
+                }
+            }
+        });
+        let line = receiver
+            .recv_timeout(Duration::from_secs(30))
+            .map_err(|error| {
+                RasterError::Init(format!("browser worker handshake timeout: {error}"))
+            })??;
         let compositions = match serde_json::from_str::<WebWorkerMessage>(&line) {
             Ok(WebWorkerMessage::Ready {
                 protocol,
@@ -172,7 +193,7 @@ impl BrowserWorker {
             WorkerProcess {
                 child,
                 stdin,
-                stdout,
+                stdout: receiver,
             },
             compositions,
         ))
@@ -197,15 +218,20 @@ impl BrowserWorker {
             .map_err(|_| RasterError::Init("browser worker process lock poisoned".into()))?;
         writeln!(process.stdin, "{encoded}")?;
         process.stdin.flush()?;
-        let mut line = String::new();
-        process.stdout.read_line(&mut line)?;
-        if line.is_empty() {
-            return Err(RasterError::Frame {
+        match process.stdout.recv_timeout(self.timeout) {
+            Ok(line) => Ok(line?),
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(RasterError::Frame {
+                frame: 0,
+                reason: format!(
+                    "browser worker response timed out after {}ms",
+                    self.timeout.as_millis()
+                ),
+            }),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(RasterError::Frame {
                 frame: 0,
                 reason: "browser worker exited without a response".into(),
-            });
+            }),
         }
-        Ok(line)
     }
 }
 
