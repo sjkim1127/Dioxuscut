@@ -84,7 +84,19 @@ fn start_render_job(
                     sandbox_roots: vec![],
                     permissive: true,
                 };
-                let control = RenderControl::new().with_cancellation(cancellation);
+                let progress_state = Arc::clone(&state_jobs);
+                let progress_id = id.clone();
+                let control = RenderControl::new()
+                    .with_cancellation(cancellation)
+                    .with_progress(move |progress| {
+                        if let Ok(mut store) = progress_state.lock() {
+                            let _ = store.try_update(
+                                &progress_id,
+                                JobStatus::Rendering,
+                                progress.completed_frames,
+                            );
+                        }
+                    });
                 tokio::runtime::Runtime::new()
                     .map_err(|e| e.to_string())?
                     .block_on(execute_render_command_with_control(&request, control))
@@ -105,7 +117,6 @@ fn start_render_job(
                 }
             } else if let Ok(mut store) = state_jobs.lock() {
                 let frames = project.settings.duration;
-                let _ = store.try_update(&id, JobStatus::Preparing, 0);
                 let _ = store.try_update(&id, JobStatus::Rendering, frames);
                 let _ = store.try_update(&id, JobStatus::Encoding, frames);
                 let _ = store.try_update(&id, JobStatus::Completed, frames);
