@@ -701,14 +701,13 @@ fn parse_linear_gradient(value: &str) -> Option<(f32, Vec<GradientStop>)> {
     let (angle_deg, first_stop) = if let Some(angle) = first.strip_suffix("deg") {
         (angle.trim().parse().ok()?, parts.next()?)
     } else {
-        let angle = match first {
-            "to right" => 90.0,
-            "to left" => 270.0,
-            "to bottom" => 180.0,
-            "to top" => 0.0,
-            _ => 180.0,
-        };
-        (angle, first)
+        match first {
+            "to right" => (90.0, parts.next()?),
+            "to left" => (270.0, parts.next()?),
+            "to bottom" => (180.0, parts.next()?),
+            "to top" => (0.0, parts.next()?),
+            _ => (180.0, first),
+        }
     };
     let mut colors = vec![Color::from_css(first_stop)?];
     colors.extend(parts.map(Color::from_css).collect::<Option<Vec<_>>>()?);
@@ -794,7 +793,7 @@ mod tests {
     #[test]
     fn parses_linear_gradient_background() {
         let stylesheet =
-            Stylesheet::parse(".hero { background: linear-gradient(90deg, #ff0000, #0000ff); }")
+            Stylesheet::parse(".hero { background: linear-gradient(to right, red, blue); }")
                 .unwrap();
         let mut element = NativeElement {
             tag: "div".into(),

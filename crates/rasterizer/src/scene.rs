@@ -57,6 +57,15 @@ impl Color {
         match value.to_ascii_lowercase().as_str() {
             "black" => return Some(Self::BLACK),
             "white" => return Some(Self::WHITE),
+            "red" => return Some(Self::rgb(255, 0, 0)),
+            "green" => return Some(Self::rgb(0, 128, 0)),
+            "blue" => return Some(Self::rgb(0, 0, 255)),
+            "yellow" => return Some(Self::rgb(255, 255, 0)),
+            "cyan" | "aqua" => return Some(Self::rgb(0, 255, 255)),
+            "magenta" | "fuchsia" => return Some(Self::rgb(255, 0, 255)),
+            "gray" | "grey" => return Some(Self::rgb(128, 128, 128)),
+            "orange" => return Some(Self::rgb(255, 165, 0)),
+            "purple" => return Some(Self::rgb(128, 0, 128)),
             "transparent" => return Some(Self::TRANSPARENT),
             _ => {}
         }
@@ -782,6 +791,13 @@ mod tests {
             Color::from_css("rgba(100%, 0%, 0%, 0.5)"),
             Some(Color::rgba(255, 0, 0, 128))
         );
+    }
+
+    #[test]
+    fn common_css_named_colors_are_parsed() {
+        assert_eq!(Color::from_css("red"), Some(Color::rgb(255, 0, 0)));
+        assert_eq!(Color::from_css("blue"), Some(Color::rgb(0, 0, 255)));
+        assert_eq!(Color::from_css("fuchsia"), Some(Color::rgb(255, 0, 255)));
     }
 
     #[test]
