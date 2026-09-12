@@ -179,8 +179,8 @@ docker build -f benchmarks/docker/Dockerfile.dioxuscut -t dioxuscut:local .
 docker run --rm dioxuscut:local render --help
 ```
 
-The builder compiles `dioxuscut-cli` inside Linux and the Debian runtime keeps
-FFmpeg and CA certificates available for native exports.
+The builder compiles `dioxuscut-cli` against musl inside Linux and the Alpine
+runtime keeps FFmpeg and CA certificates available for native exports.
 
 
 ## Native buffer and export pipeline comparison

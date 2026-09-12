@@ -1,19 +1,18 @@
 # Dioxuscut Linux image. The build stage is intentional: a macOS or Windows
 # host must never copy its native executable into a Linux image.
-FROM rust:1.97-bookworm AS builder
+FROM rust:1.97-alpine AS builder
 
 WORKDIR /src
+RUN apk add --no-cache build-base pkgconf openssl-dev openssl-libs-static
 COPY . .
 RUN cargo build --locked --release -p dioxuscut-cli --bin dioxuscut
 
-FROM debian:bookworm-slim
+FROM alpine:3.20
 
 WORKDIR /app
 
 # FFmpeg and CA certificates are the only runtime packages required.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache ffmpeg ca-certificates libgcc libstdc++
 
 COPY --from=builder /src/target/release/dioxuscut /usr/local/bin/dioxuscut
 
