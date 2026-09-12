@@ -958,6 +958,8 @@ pub async fn execute_render_command_with_registry_and_control(
                     &request.output,
                     format,
                     &control,
+                    // BrowserFrameBackend owns the browser request; the Scene
+                    // value is intentionally empty for this backend.
                     |_| Ok::<_, std::convert::Infallible>(dioxuscut_rasterizer::Scene::new()),
                 )?;
             } else {
