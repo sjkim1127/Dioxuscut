@@ -68,8 +68,10 @@ fn browser_worker_path() -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
     if let Ok(executable) = std::env::current_exe() {
         if let Some(parent) = executable.parent() {
+            candidates.push(parent.join("resources/_up_/scripts/three-render-worker.mjs"));
             candidates.push(parent.join("resources/scripts/three-render-worker.mjs"));
             candidates.push(parent.join("../Resources/scripts/three-render-worker.mjs"));
+            candidates.push(parent.join("../Resources/_up_/scripts/three-render-worker.mjs"));
             candidates.push(parent.join("scripts/three-render-worker.mjs"));
         }
     }
