@@ -428,7 +428,11 @@ written into workflow files.
 - `dioxuscut-vdom` translates an explicit DOM/CSS subset, not a browser engine. Complex selectors, intrinsic browser layout, canvas/WebGL, DOM APIs, events, animations, and advanced paint effects still require direct Scene APIs or further adapter work. Basic CSS linear/radial gradients, translate/scale/rotate transforms, borders, non-inset `box-shadow`, common pixel filters (including `drop-shadow`), and `mix-blend-mode` are supported.
 - Native video and audio sources are local files, while image nodes additionally accept base64 `data:image/png`, `data:image/jpeg`, and `data:image/webp` sources up to 32 MiB. Project renders can opt into downloading HTTP(S) assets with `--asset-cache-dir`; direct remote URLs are still not opened by the rasterizer itself.
 - Video frames use cached FFprobe stream metadata, up to four persistent FFmpeg decoder sources, fixed-output-FPS sampling for VFR input, and a 128 MiB frame LRU. Backward or large forward seeks restart only the affected decoder.
-- Audio declarations are taken from frame zero and must be static for the render.
+- Audio declarations may be supplied by `PreparedComposition::audio_tracks()` as
+  an explicit render-level timeline, including per-track timing and volume
+  keyframes. Compositions that do not implement that contract use the first
+  rendered scene as a legacy fallback, so audio discovered only after frame
+  zero is not currently inferred automatically.
 - `SceneLayer` supports rectangular or SVG-path clips, alpha or luminance masks, twelve blend modes, ordered blur/brightness/grayscale/opacity filters, and drop shadows. These effects use CPU offscreen surfaces for export and SVG/CSS equivalents for Player preview.
 - GPU acceleration covers rectangles, circles, tessellated path fills and strokes, nested group transforms and opacity, and gradients with up to 16 stops. Text, image, video, composited layers, and gradients beyond the stop limit use whole-frame CPU fallback.
 - Text nodes accept ordered local TTF/OTF `font_sources`; native rendering caches those files, shapes glyph runs with Rustybuzz, and falls through per grapheme. `SceneTextBlock` and Rhai `text_box` add Unicode line breaking, fitting, alignment, line limits, and ellipsis. Text without explicit sources still uses platform font discovery and is not pixel-identical across platforms; full mixed-direction paragraph layout remains incomplete.
@@ -441,6 +445,9 @@ written into workflow files.
 3. Complete GPU parity for text, media, composited layers, masks, blend modes, and filters.
 4. Additional color, distortion, and convolution filter primitives.
 5. Studio timeline editing and media management on top of the shared project/job contract.
+
+6. A first-class dynamic audio provider for compositions whose audio topology
+   changes over time, without requiring a frame-by-frame scene scan.
 
 ## License
 
