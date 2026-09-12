@@ -103,6 +103,9 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install ffmpeg -y
 
+      - name: Prepare Tauri frontend directory for macro checks
+        run: mkdir -p apps/studio-tauri/dist
+
       - name: Cargo Check Workspace
         run: cargo check --locked --workspace --all-targets --all-features
 
