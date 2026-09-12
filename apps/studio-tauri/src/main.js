@@ -39,8 +39,20 @@ const cube = new THREE.Mesh(
 );
 scene.add(cube);
 
+// Browser compositions can replace the demo scene without changing the Rust
+// protocol. Adapters may register Three.js, R3F, or another WebGL renderer.
+const compositions = new Map();
+export function registerComposition(id, render) {
+  if (typeof id !== 'string' || !id || typeof render !== 'function') {
+    throw new TypeError('registerComposition expects a non-empty id and render function');
+  }
+  compositions.set(id, render);
+}
+
 // Explicit frame input keeps this scene deterministic for future exports.
 export function renderFrame({ composition = 'three_preview', frame: nextFrame, fps = 30, props = {} }) {
+  const customRender = compositions.get(composition);
+  if (customRender) return customRender({ frame: nextFrame, fps, props });
   frame = nextFrame;
   cube.rotation.x = nextFrame / Math.max(fps, 1) * 0.36;
   cube.rotation.y = nextFrame / Math.max(fps, 1) * 0.54;
@@ -49,7 +61,7 @@ export function renderFrame({ composition = 'three_preview', frame: nextFrame, f
   document.querySelector('#frame').textContent = `frame ${nextFrame}`;
   document.querySelector('#protocol').textContent = `composition ${composition}`;
 }
-window.dioxuscut = { renderFrame };
+window.dioxuscut = { renderFrame, registerComposition };
 
 function resize() {
   const { width, height } = canvas.parentElement.getBoundingClientRect();
