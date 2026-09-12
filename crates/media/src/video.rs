@@ -29,6 +29,12 @@ pub struct VideoProps {
     /// Repeat the source when it reaches its end.
     #[props(default = false)]
     pub looped: bool,
+    /// Composition time at which this video becomes active, in seconds.
+    #[props(default = 0.0)]
+    pub start_at: f64,
+    /// Composition time at which this video stops, in seconds.
+    #[props(default)]
+    pub end_at: Option<f64>,
 }
 
 /// A video element synchronized to the composition timeline.
@@ -41,8 +47,12 @@ pub fn Video(props: VideoProps) -> Element {
     let config = use_video_config();
 
     // Compute the source video timestamp for this frame
+    let timeline_time = frame as f64 / config.fps;
+    if timeline_time < props.start_at || props.end_at.is_some_and(|end| timeline_time >= end) {
+        return rsx! {};
+    }
     let time_in_seconds = props.start_from
-        + (frame as f64 / config.fps) * props.playback_rate.max(0.0);
+        + (timeline_time - props.start_at).max(0.0) * props.playback_rate.max(0.0);
 
     let base_style = "width: 100%; height: 100%; object-fit: cover;";
     let style = match &props.style {
