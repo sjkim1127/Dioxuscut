@@ -18,6 +18,10 @@ target/
 # Vendor (참고용 소스 — 커밋하지 않음)
 vendor/
 
+# JavaScript dependencies and generated benchmark reports
+node_modules/
+benchmarks/render-*.json
+
 # OS
 .DS_Store
 Thumbs.db
@@ -36,4 +40,3 @@ dist/
 
 # AI agent swarm scratchpads and logs
 .agents/
-
