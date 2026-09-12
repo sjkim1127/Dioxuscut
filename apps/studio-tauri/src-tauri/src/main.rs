@@ -422,6 +422,10 @@ fn load_project(path: String) -> Result<Project, String> {
 
 #[tauri::command]
 fn save_project(path: String, project: Project) -> Result<(), String> {
+    let path = std::path::PathBuf::from(path);
+    let mut project = project;
+    let base_dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    project.relativize_local_asset_paths(base_dir);
     project.save(path).map_err(|error| error.to_string())
 }
 

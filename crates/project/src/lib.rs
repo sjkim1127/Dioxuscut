@@ -330,6 +330,51 @@ impl Project {
         rewrite(&mut self.props, &replacements);
     }
 
+    /// Convert local asset paths back to project-relative paths before saving.
+    pub fn relativize_local_asset_paths(&mut self, base_dir: impl AsRef<std::path::Path>) {
+        let base_dir = base_dir.as_ref();
+        let replacements: Vec<(String, String)> = self
+            .assets
+            .iter_mut()
+            .filter_map(|asset| {
+                if asset.path.contains("://") || asset.path.starts_with("data:") {
+                    return None;
+                }
+                let path = std::path::Path::new(&asset.path);
+                let relative = path
+                    .strip_prefix(base_dir)
+                    .ok()?
+                    .to_string_lossy()
+                    .into_owned();
+                let resolved = asset.path.clone();
+                asset.path = relative.clone();
+                Some((resolved, relative))
+            })
+            .collect();
+
+        fn rewrite(value: &mut serde_json::Value, replacements: &[(String, String)]) {
+            match value {
+                serde_json::Value::String(text) => {
+                    if let Some((resolved, relative)) =
+                        replacements.iter().find(|(resolved, _)| resolved == text)
+                    {
+                        *text = relative.clone();
+                    }
+                }
+                serde_json::Value::Array(values) => values
+                    .iter_mut()
+                    .for_each(|value| rewrite(value, replacements)),
+                serde_json::Value::Object(values) => values
+                    .values_mut()
+                    .for_each(|value| rewrite(value, replacements)),
+                serde_json::Value::Null
+                | serde_json::Value::Bool(_)
+                | serde_json::Value::Number(_) => {}
+            }
+        }
+        rewrite(&mut self.props, &replacements);
+    }
+
     pub fn load(path: impl AsRef<std::path::Path>) -> Result<Self, ProjectError> {
         let source =
             std::fs::read_to_string(path).map_err(|error| ProjectError::File(error.to_string()))?;
