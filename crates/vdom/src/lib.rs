@@ -85,6 +85,22 @@ mod tests {
                 height: "90",
                 style: "object-fit: contain; opacity: 0.5",
             }
+            audio {
+                src: "assets/voice.wav",
+                "data-start-from": "1.25",
+                "data-timeline-start": "2",
+                "data-duration": "3.5",
+                "data-volume": "0.4",
+                "playback-rate": "1.5",
+                r#loop: true,
+            }
+            video {
+                src: "assets/clip.mp4",
+                width: "320",
+                height: "180",
+                "data-time": "4.25",
+                r#loop: true,
+            }
         }
     }
 
@@ -104,6 +120,24 @@ mod tests {
                                 && (*w - 160.0).abs() < 0.01
                                 && (*h - 90.0).abs() < 0.01
                     )
+        ));
+        assert!(matches!(
+            &scene.nodes[1],
+            SceneNode::Audio { track }
+                if track.src == "assets/voice.wav"
+                    && (track.start_from - 1.25).abs() < 0.01
+                    && (track.timeline_start - 2.0).abs() < 0.01
+                    && (track.duration.unwrap() - 3.5).abs() < 0.01
+                    && (track.volume - 0.4).abs() < 0.01
+                    && (track.playback_rate - 1.5).abs() < 0.01
+                    && track.looped
+        ));
+        assert!(matches!(
+            &scene.nodes[2],
+            SceneNode::Video { src, time, looped, .. }
+                if src == "assets/clip.mp4"
+                    && (*time - 4.25).abs() < 0.01
+                    && *looped
         ));
     }
 

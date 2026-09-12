@@ -437,7 +437,11 @@ fn emit_element_media(
                 track.start_from = number_attr(attr("data-start-from"), 0.0);
                 track.timeline_start = number_attr(attr("data-timeline-start"), 0.0);
                 track.duration = attr("data-duration").and_then(|value| value.parse().ok());
-                track.volume = number_attr(attr("volume"), 1.0).clamp(0.0, 1.0);
+                track.volume = number_attr(
+                    attr("data-volume").or_else(|| attr("volume")),
+                    1.0,
+                )
+                .clamp(0.0, 1.0);
                 track.playback_rate = number_attr(attr("playback-rate"), 1.0);
                 track.looped = bool_attr(attr("loop"));
                 nodes.push(SceneNode::Audio { track });

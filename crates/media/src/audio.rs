@@ -59,6 +59,7 @@ pub fn Audio(props: AudioProps) -> Element {
             "data-duration": "{duration_attr}",
             "data-remotion-seek": "{time_in_seconds}",
             volume: "{props.muted.then_some(0.0).unwrap_or(props.volume)}",
+            "data-volume": "{props.muted.then_some(0.0).unwrap_or(props.volume)}",
             "playback-rate": "{props.playback_rate}",
             "data-remotion-volume": "{props.volume}",
             "data-remotion-playback-rate": "{props.playback_rate}",
