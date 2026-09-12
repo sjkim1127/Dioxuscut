@@ -549,6 +549,12 @@ impl WgpuBackend {
         })
     }
 
+    /// Configure the image cache used when a scene falls back to CPU.
+    pub fn with_image_cache_bytes(mut self, max_bytes: usize) -> Self {
+        self.fallback = self.fallback.with_image_cache_bytes(max_bytes);
+        self
+    }
+
     fn submit_frame_to_slot(
         &self,
         commands: &[DrawCommand],

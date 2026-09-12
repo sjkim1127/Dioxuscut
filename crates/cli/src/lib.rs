@@ -1206,7 +1206,11 @@ pub async fn execute_render_command_with_registry_and_control(
                 };
 
                 let rasterizer = WgpuBackend::new()
-                    .map_err(|error| anyhow::anyhow!("GPU backend init failed: {error}"))?;
+                    .map_err(|error| anyhow::anyhow!("GPU backend init failed: {error}"))?
+                    .with_image_cache_bytes(
+                        native_image_cache_bytes()
+                            .unwrap_or(dioxuscut_rasterizer::DEFAULT_IMAGE_CACHE_BYTES),
+                    );
                 if let Some(format) = request.codec.still_format() {
                     render_still_fallible_scaled(
                         &rasterizer,
