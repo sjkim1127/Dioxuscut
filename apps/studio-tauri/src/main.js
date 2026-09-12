@@ -243,7 +243,14 @@ function setFrame(nextFrame) {
   document.querySelector('#timeline-slider').max = project.settings.duration - 1;
   document.querySelector('#timeline-slider').value = frame;
   document.querySelector('#timeline-frame').textContent = `${frame} / ${project.settings.duration - 1}`;
-  renderFrame({ frame, fps: project.settings.fps, props: project.props });
+  renderFrame({
+    composition: project.composition,
+    frame,
+    fps: project.settings.fps,
+    props: project.props,
+    assets: project.assets.map((asset) => asset.path),
+    timeline: project.tracks.flatMap((track) => track.clips),
+  }).catch((error) => showMessage(`preview error: ${error}`));
 }
 
 document.querySelector('#play-toggle').addEventListener('click', (event) => {
