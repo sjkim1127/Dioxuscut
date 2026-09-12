@@ -45,6 +45,7 @@ scene.add(cube);
 const compositions = new Map();
 const preloadedAssets = new Map();
 const imageDimensionsCache = new Map();
+const videoMetadataCache = new Map();
 const videoTextureCache = new Map();
 const renderGates = new Map();
 let lottieAdapter = null;
@@ -147,6 +148,39 @@ export async function getImageDimensions(source) {
   });
   imageDimensionsCache.set(source, dimensions);
   return dimensions;
+}
+
+// Browser equivalent of @remotion/media-utils/getVideoMetadata.
+export async function getVideoMetadata(source) {
+  if (typeof source !== 'string' || !source) throw new TypeError('getVideoMetadata expects a source URL');
+  if (videoMetadataCache.has(source)) return videoMetadataCache.get(source);
+  const metadata = new Promise((resolve, reject) => {
+    const video = document.createElement('video');
+    const cleanup = () => { video.removeAttribute('src'); video.load(); };
+    video.preload = 'metadata';
+    video.onloadedmetadata = () => {
+      if (!video.videoWidth || !video.videoHeight || !Number.isFinite(video.duration)) {
+        reject(new Error(`unable to determine video metadata: ${source}`));
+        cleanup();
+        return;
+      }
+      resolve({
+        durationInSeconds: video.duration,
+        width: video.videoWidth,
+        height: video.videoHeight,
+        aspectRatio: video.videoWidth / video.videoHeight,
+        isRemote: /^https?:\/\//i.test(source),
+      });
+      cleanup();
+    };
+    video.onerror = () => { reject(new Error(`failed to load video metadata: ${source}`)); cleanup(); };
+    video.src = source;
+  }).catch((error) => {
+    videoMetadataCache.delete(source);
+    throw error;
+  });
+  videoMetadataCache.set(source, metadata);
+  return metadata;
 }
 
 // Browser equivalent of Remotion's useVideoTexture for non-React Three.js
@@ -437,6 +471,7 @@ window.dioxuscut = {
   getVideoTexture,
   useVideoTexture,
   getImageDimensions,
+  getVideoMetadata,
   releaseVideoTexture,
 };
 

@@ -211,6 +211,9 @@ before scheduling a render.
 Browser compositions can use `window.dioxuscut.getImageDimensions(src)` for the
 same Promise-based query. Results are cached by source and expose
 `{width, height}`, matching vendor `@remotion/media-utils` behavior.
+Browser compositions can likewise call `window.dioxuscut.getVideoMetadata(src)`
+to receive `{durationInSeconds, width, height, aspectRatio, isRemote}` with
+source-level caching.
 
 Each worker owns one Chromium page and serializes its own requests; the shared
 streaming pipeline schedules different frames across the pool while preserving
