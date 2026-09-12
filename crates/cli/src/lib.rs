@@ -173,6 +173,39 @@ struct BrowserComposition {
 mod project_timeline_tests {
     use super::*;
 
+    struct AudioOnlyComposition;
+
+    struct PreparedAudioOnly;
+
+    impl dioxuscut_composition::Composition for AudioOnlyComposition {
+        fn id(&self) -> &str {
+            "AudioOnly"
+        }
+
+        fn prepare(
+            &self,
+            _props: &serde_json::Value,
+            _context: NativeCompositionContext,
+        ) -> Result<Box<dyn dioxuscut_composition::PreparedComposition + '_>, CompositionError>
+        {
+            Ok(Box::new(PreparedAudioOnly))
+        }
+    }
+
+    impl dioxuscut_composition::PreparedComposition for PreparedAudioOnly {
+        fn render(&self, _frame: u32) -> Result<dioxuscut_rasterizer::Scene, CompositionError> {
+            Ok(dioxuscut_rasterizer::Scene::new())
+        }
+
+        fn audio_tracks(
+            &self,
+        ) -> Result<Option<Vec<dioxuscut_rasterizer::AudioTrack>>, CompositionError> {
+            Ok(Some(vec![dioxuscut_rasterizer::AudioTrack::new(
+                "later.wav",
+            )]))
+        }
+    }
+
     #[test]
     fn clips_use_local_frames_only_when_active() {
         let timeline = ProjectTimelineComposition {
@@ -201,6 +234,42 @@ mod project_timeline_tests {
         assert!(!prepared.render(2).expect("active frame").nodes.is_empty());
         assert!(!prepared.render(3).expect("active frame").nodes.is_empty());
         assert!(prepared.render(4).expect("after clip").nodes.is_empty());
+    }
+
+    #[test]
+    fn timeline_collects_audio_from_later_clips() {
+        let mut registry = CompositionRegistry::new();
+        registry
+            .register(AudioOnlyComposition)
+            .expect("audio composition registers");
+        let timeline = ProjectTimelineComposition {
+            id: "timeline-audio".into(),
+            clips: vec![Clip {
+                id: "later".into(),
+                composition: "AudioOnly".into(),
+                start: 10,
+                duration: 5,
+                props: serde_json::json!({}),
+            }],
+            registry,
+        };
+        let prepared = timeline
+            .prepare(
+                &serde_json::json!({}),
+                NativeCompositionContext {
+                    width: 320,
+                    height: 240,
+                    fps: 30.0,
+                    duration_in_frames: 20,
+                },
+            )
+            .expect("timeline prepares");
+        let tracks = prepared
+            .audio_tracks()
+            .expect("audio tracks resolve")
+            .expect("timeline provides audio tracks");
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].src, "later.wav");
     }
 }
 
