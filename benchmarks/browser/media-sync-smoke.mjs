@@ -1,4 +1,7 @@
-import { chromium } from 'playwright-core';
+import { createRequire } from 'node:module';
+
+const require = createRequire(new URL('../../apps/studio-tauri/package.json', import.meta.url));
+const { chromium } = require('playwright-core');
 
 const url = process.env.DIOXUSCUT_BROWSER_URL ?? 'http://127.0.0.1:1420';
 const executablePath = process.env.CHROME_PATH ??
