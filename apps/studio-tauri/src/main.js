@@ -46,6 +46,8 @@ const compositions = new Map();
 const preloadedAssets = new Map();
 const renderGates = new Map();
 let lottieAdapter = null;
+const lottieInstances = new WeakMap();
+let lottieModulePromise;
 let nextRenderGate = 1;
 let renderGateError = null;
 
@@ -129,6 +131,38 @@ export function registerLottieAdapter(adapter) {
   }
   lottieAdapter = adapter;
 }
+
+const defaultLottieAdapter = {
+  async render(element, state) {
+    const lottie = (await (lottieModulePromise ??= import('lottie-web'))).default;
+    let instance = lottieInstances.get(element);
+    if (!instance || instance.src !== state.src) {
+      instance?.animation.destroy();
+      const animation = lottie.loadAnimation({
+        container: element,
+        renderer: 'svg',
+        loop: false,
+        autoplay: false,
+        path: state.src,
+      });
+      instance = { animation, src: state.src, ready: new Promise((resolve) => {
+        animation.addEventListener('DOMLoaded', resolve, { once: true });
+      }) };
+      lottieInstances.set(element, instance);
+    }
+    await instance.ready;
+    const totalFrames = Math.max(1, instance.animation.totalFrames || 1);
+    const rawFrame = state.time * state.fps * state.playbackRate;
+    const frame = state.loopBehavior === 'Loop'
+      ? ((rawFrame % totalFrames) + totalFrames) % totalFrames
+      : Math.max(0, Math.min(totalFrames - 1, rawFrame));
+    element.style.visibility = state.loopBehavior === 'Unmount' && rawFrame >= totalFrames
+      ? 'hidden' : '';
+    instance.animation.goToAndStop(frame, true);
+  },
+};
+
+lottieAdapter = defaultLottieAdapter;
 
 export function listCompositions() {
   return [...new Set(['three_preview', ...compositions.keys()])];
