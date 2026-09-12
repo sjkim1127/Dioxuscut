@@ -108,6 +108,10 @@ pub enum ProjectError {
     InvalidDimensions,
     #[error("project fps must be finite and greater than zero")]
     InvalidFps,
+    #[error("invalid render job transition from {from:?} to {to:?}")]
+    InvalidJobTransition { from: JobStatus, to: JobStatus },
+    #[error("render job '{0}' was not found")]
+    JobNotFound(String),
 }
 
 impl Project {
@@ -154,13 +158,45 @@ impl JobStore {
         self.jobs.get(id)
     }
     pub fn update(&mut self, id: &str, status: JobStatus, completed_frames: u32) -> bool {
-        if let Some(job) = self.jobs.get_mut(id) {
-            job.status = status;
-            job.completed_frames = completed_frames;
-            true
-        } else {
-            false
+        self.try_update(id, status, completed_frames).is_ok()
+    }
+    pub fn try_update(
+        &mut self,
+        id: &str,
+        status: JobStatus,
+        completed_frames: u32,
+    ) -> Result<(), ProjectError> {
+        let job = self
+            .jobs
+            .get_mut(id)
+            .ok_or_else(|| ProjectError::JobNotFound(id.to_string()))?;
+        let valid = matches!(
+            (&job.status, &status),
+            (
+                JobStatus::Queued,
+                JobStatus::Preparing | JobStatus::Cancelled | JobStatus::Failed
+            ) | (
+                JobStatus::Preparing,
+                JobStatus::Rendering | JobStatus::Cancelled | JobStatus::Failed
+            ) | (
+                JobStatus::Rendering,
+                JobStatus::Encoding | JobStatus::Cancelled | JobStatus::Failed
+            ) | (
+                JobStatus::Encoding,
+                JobStatus::Completed | JobStatus::Cancelled | JobStatus::Failed
+            ) | (JobStatus::Completed, JobStatus::Completed)
+                | (JobStatus::Failed, JobStatus::Failed)
+                | (JobStatus::Cancelled, JobStatus::Cancelled)
+        );
+        if !valid {
+            return Err(ProjectError::InvalidJobTransition {
+                from: job.status.clone(),
+                to: status,
+            });
         }
+        job.status = status;
+        job.completed_frames = completed_frames;
+        Ok(())
     }
 }
 
@@ -196,6 +232,7 @@ mod tests {
         let mut store = JobStore::default();
         let id = store.submit(project()).unwrap();
         assert_eq!(store.get(&id).unwrap().status, JobStatus::Queued);
+        assert!(store.update(&id, JobStatus::Preparing, 0));
         assert!(store.update(&id, JobStatus::Rendering, 12));
         assert_eq!(store.get(&id).unwrap().completed_frames, 12);
     }
@@ -204,5 +241,12 @@ mod tests {
         let mut p = project();
         p.settings.fps = 0.0;
         assert_eq!(p.validate(), Err(ProjectError::InvalidFps));
+    }
+    #[test]
+    fn invalid_job_transition_is_rejected() {
+        let mut store = JobStore::default();
+        let id = store.submit(project()).unwrap();
+        assert!(store.try_update(&id, JobStatus::Encoding, 0).is_err());
+        assert!(store.try_update(&id, JobStatus::Preparing, 0).is_ok());
     }
 }

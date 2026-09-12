@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use dioxuscut_project::{JobStore, Project, RenderJob};
+use dioxuscut_project::{JobStatus, JobStore, Project, RenderJob};
 use dioxuscut_rasterizer::{
     BackendCapabilities, WebFrameRequest, WebWorkerMessage, WEB_WORKER_PROTOCOL_VERSION,
 };
@@ -29,6 +29,21 @@ fn get_render_job(
         .map_err(|_| "job store lock poisoned".to_string())?
         .get(&id)
         .cloned())
+}
+
+#[tauri::command]
+fn update_render_job(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    status: JobStatus,
+    completed_frames: u32,
+) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "job store lock poisoned".to_string())?
+        .try_update(&id, status, completed_frames)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -71,7 +86,8 @@ fn main() {
             web_worker_protocol,
             validate_frame_request,
             submit_project,
-            get_render_job
+            get_render_job,
+            update_render_job
         ])
         .run(tauri::generate_context!())
         .expect("error while running Dioxuscut Studio");
