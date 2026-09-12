@@ -137,7 +137,7 @@ export DIOXUSCUT_BROWSER_CONCURRENCY=4
 # Optional: fail readiness or an async renderFrame() that exceeds this limit.
 export DIOXUSCUT_BROWSER_FRAME_TIMEOUT_MS=30000
 # Optional: retry a failed frame (default: 1 retry).
-export DIOXUSCUT_BROWSER_FRAME_RETRIES=1
+export DIOXUSCUT_BROWSER_TRANSPORT_RETRIES=1
 # Optional: lower-latency lossy browser capture for opaque video workloads.
 export DIOXUSCUT_BROWSER_IMAGE_FORMAT=jpeg
 export DIOXUSCUT_BROWSER_JPEG_QUALITY=90

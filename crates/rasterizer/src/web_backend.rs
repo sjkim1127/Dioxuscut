@@ -110,11 +110,19 @@ impl BrowserFrameBackend {
                         "1" | "true" | "yes"
                     )
                 }),
-            transport_retries: 1,
+            transport_retries: browser_transport_retries_from_env(),
             props: Mutex::new(serde_json::json!({})),
             cache: FrameCacheManager::default(),
         })
     }
+}
+
+fn browser_transport_retries_from_env() -> usize {
+    std::env::var("DIOXUSCUT_BROWSER_TRANSPORT_RETRIES")
+        .or_else(|_| std::env::var("DIOXUSCUT_BROWSER_FRAME_RETRIES"))
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(1)
 }
 
 impl BrowserWorker {
