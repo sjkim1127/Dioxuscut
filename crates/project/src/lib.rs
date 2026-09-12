@@ -257,6 +257,24 @@ impl JobStore {
         job.error = Some(message.into());
         Ok(())
     }
+
+    pub fn cancel(&mut self, id: &str) -> Result<(), ProjectError> {
+        let job = self
+            .jobs
+            .get_mut(id)
+            .ok_or_else(|| ProjectError::JobNotFound(id.to_string()))?;
+        if !matches!(
+            job.status,
+            JobStatus::Queued | JobStatus::Preparing | JobStatus::Rendering | JobStatus::Encoding
+        ) {
+            return Err(ProjectError::InvalidJobTransition {
+                from: job.status.clone(),
+                to: JobStatus::Cancelled,
+            });
+        }
+        job.status = JobStatus::Cancelled;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -330,5 +348,17 @@ mod tests {
         let job = store.get(&id).unwrap();
         assert_eq!(job.status, JobStatus::Failed);
         assert_eq!(job.error.as_deref(), Some("worker exited"));
+    }
+
+    #[test]
+    fn cancellation_preserves_progress() {
+        let mut store = JobStore::default();
+        let id = store.submit(project()).unwrap();
+        store.update(&id, JobStatus::Preparing, 0);
+        store.update(&id, JobStatus::Rendering, 12);
+        store.cancel(&id).unwrap();
+        let job = store.get(&id).unwrap();
+        assert_eq!(job.status, JobStatus::Cancelled);
+        assert_eq!(job.completed_frames, 12);
     }
 }

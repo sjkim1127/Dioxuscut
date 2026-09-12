@@ -11,6 +11,7 @@ app.innerHTML = `
       <button id="load-project">Open project</button>
       <button id="save-project">Save project</button>
       <button id="submit-render">Queue render</button>
+      <button id="cancel-render" disabled>Cancel</button>
       <span id="message"></span>
     </section>
     <section class="preview"><canvas id="preview-canvas"></canvas></section>
@@ -82,10 +83,23 @@ document.querySelector('#save-project').addEventListener('click', async () => {
 document.querySelector('#submit-render').addEventListener('click', async () => {
   try {
     const id = await invoke('submit_project', { project });
+    document.querySelector('#cancel-render').disabled = false;
+    document.querySelector('#cancel-render').dataset.jobId = id;
     showMessage(`${id} queued`);
     const job = await invoke('get_render_job', { id });
     if (job) document.querySelector('#job').textContent = `${job.id} · ${job.status}`;
   } catch (error) { showMessage(`queue error: ${error}`); }
+});
+
+document.querySelector('#cancel-render').addEventListener('click', async (event) => {
+  const id = event.currentTarget.dataset.jobId;
+  if (!id) return;
+  try {
+    await invoke('cancel_render_job', { id });
+    document.querySelector('#job').textContent = `${id} · cancelled`;
+    event.currentTarget.disabled = true;
+    showMessage('render cancelled');
+  } catch (error) { showMessage(`cancel error: ${error}`); }
 });
 
 function renderPreview() {

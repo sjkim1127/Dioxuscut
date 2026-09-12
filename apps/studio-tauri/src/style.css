@@ -7,6 +7,7 @@ header, footer { display: flex; align-items: center; justify-content: space-betw
 input { flex: 1; min-width: 260px; padding: 9px 10px; border: 1px solid #27304b; border-radius: 7px; color: #e8ecf8; background: #11182a; }
 button { padding: 9px 12px; border: 1px solid #3e4b77; border-radius: 7px; color: #f5f7ff; background: #202b4b; cursor: pointer; }
 button:hover { background: #2b3963; }
+button:disabled { cursor: not-allowed; opacity: 0.45; }
 #message { color: #9da8c4; }
 h1 { margin: 0; color: #f5f7ff; font-size: 20px; }
 .preview { min-height: 0; overflow: hidden; border: 1px solid #27304b; border-radius: 12px; background: #0b1020; box-shadow: 0 20px 60px #0006; }
