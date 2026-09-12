@@ -18,6 +18,42 @@ struct CachedLottie {
 
 type LottieFrameKey = (PathBuf, u32, u32, u32);
 
+/// Basic metadata for a Lottie animation, equivalent to Remotion's
+/// `getLottieMetadata()` result.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LottieMetadata {
+    pub width: f32,
+    pub height: f32,
+    pub frame_rate: f32,
+    pub duration_in_frames: f32,
+}
+
+/// Read Lottie dimensions, frame rate, and duration without rasterizing it.
+pub fn get_lottie_metadata(
+    src: impl AsRef<std::path::Path>,
+) -> Result<LottieMetadata, RasterError> {
+    let path = src.as_ref();
+    let json_content = std::fs::read_to_string(path).map_err(|e| RasterError::ImageAsset {
+        path: path.display().to_string(),
+        reason: format!("failed to read Lottie file: {e}"),
+    })?;
+    let animation =
+        Animation::from_json_str(&json_content).map_err(|e| RasterError::ImageAsset {
+            path: path.display().to_string(),
+            reason: format!("failed to parse Lottie JSON: {e}"),
+        })?;
+    Ok(LottieMetadata {
+        width: animation.width as f32,
+        height: animation.height as f32,
+        frame_rate: if animation.frame_rate > 0.0 {
+            animation.frame_rate
+        } else {
+            30.0
+        },
+        duration_in_frames: (animation.out_point - animation.in_point).max(1.0),
+    })
+}
+
 #[derive(Default)]
 pub(crate) struct LottieCache {
     animations: Mutex<HashMap<PathBuf, Arc<CachedLottie>>>,
