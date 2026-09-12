@@ -569,6 +569,17 @@ fn render_node(
                 // avoid evaluating children or allocating compositing surfaces.
                 return Ok(());
             }
+            if children.is_empty() && clip.is_none() && mask.is_none() && shadow.is_none() {
+                // Preserve filter validation while avoiding a full-canvas
+                // surface for an empty layer (for example an overlay filter).
+                let mut validation_surface = Pixmap::new(1, 1).ok_or_else(|| {
+                    RasterError::Scene("failed to allocate filter validation surface".into())
+                })?;
+                for filter in filters {
+                    apply_filter(&mut validation_surface, filter)?;
+                }
+                return Ok(());
+            }
             if filters.is_empty()
                 && shadow.is_none()
                 && clip.is_none()
