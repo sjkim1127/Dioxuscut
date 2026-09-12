@@ -564,6 +564,20 @@ fn render_node(
                     "layer and inherited opacity must be finite".into(),
                 ));
             }
+            if filters.is_empty()
+                && shadow.is_none()
+                && clip.is_none()
+                && mask.is_none()
+                && *blend_mode == BlendMode::Normal
+                && (opacity - 1.0).abs() <= f32::EPSILON
+                && (*layer_opacity - 1.0).abs() <= f32::EPSILON
+            {
+                // A fully opaque normal layer without compositing features is
+                // equivalent to its children; avoid a full-canvas allocation
+                // and copy on the common grouping path.
+                render_nodes(pixmap, children, transform, opacity, resources)?;
+                return Ok(());
+            }
             let mut layer = Pixmap::new(pixmap.width(), pixmap.height())
                 .ok_or_else(|| RasterError::Scene("failed to allocate layer surface".into()))?;
             render_nodes(&mut layer, children, transform, 1.0, resources)?;
@@ -2306,6 +2320,30 @@ mod tests {
 
         assert_eq!(image.get_pixel(32, 32), &Rgba([255, 0, 0, 255]));
         assert_eq!(image.get_pixel(8, 8)[3], 0);
+    }
+
+    #[test]
+    fn opaque_normal_layer_matches_direct_children() {
+        let children = vec![
+            solid_rect(Color::rgb(255, 0, 0), 4.0, 5.0, 20.0, 12.0),
+            solid_rect(Color::rgb(0, 0, 255), 12.0, 9.0, 20.0, 12.0),
+        ];
+        let direct = render(
+            &Scene {
+                nodes: children.clone(),
+            },
+            40,
+            32,
+        );
+        let layered = render(
+            &Scene {
+                nodes: vec![composited_layer(children)],
+            },
+            40,
+            32,
+        );
+
+        assert_eq!(direct, layered);
     }
 
     #[test]
