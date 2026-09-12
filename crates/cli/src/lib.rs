@@ -243,6 +243,32 @@ impl dioxuscut_composition::PreparedComposition for ProjectTimelinePrepared<'_> 
         }
         Ok(scene)
     }
+
+    fn audio_tracks(
+        &self,
+    ) -> Result<Option<Vec<dioxuscut_rasterizer::AudioTrack>>, CompositionError> {
+        let mut tracks = Vec::new();
+        for clip in &self.composition.clips {
+            let composition = self
+                .composition
+                .registry
+                .get(&clip.composition)
+                .map_err(|error| CompositionError::render(clip.start, error.to_string()))?;
+            let clip_context = NativeCompositionContext {
+                duration_in_frames: clip.duration,
+                ..self.context
+            };
+            let prepared = composition
+                .prepare(&clip.props, clip_context)
+                .map_err(|error| CompositionError::render(clip.start, error.to_string()))?;
+            let clip_tracks = match prepared.audio_tracks()? {
+                Some(tracks) => tracks,
+                None => prepared.render(0)?.audio_tracks(),
+            };
+            tracks.extend(clip_tracks);
+        }
+        Ok(Some(tracks))
+    }
 }
 
 impl Composition for ProjectTimelineComposition {
