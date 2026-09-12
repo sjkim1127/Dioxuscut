@@ -7,6 +7,7 @@ const url = process.env.DIOXUSCUT_BROWSER_URL ?? 'http://127.0.0.1:1420';
 const executablePath = process.env.CHROME_PATH ??
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const jsonAsset = new URL('/package.json', url).toString();
+const canvasAsset = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 const browser = await chromium.launch({ executablePath, headless: true });
 try {
@@ -15,7 +16,7 @@ try {
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => typeof window.dioxuscut?.renderFrame === 'function');
 
-  const result = await page.evaluate(async (jsonAsset) => {
+  const result = await page.evaluate(async ({ jsonAsset, canvasAsset }) => {
     window.dioxuscut.registerComposition('media_sync_smoke', async ({ frame }) => {
       let media = document.querySelector('video[data-dioxuscut-smoke]');
       if (!media) {
@@ -44,6 +45,18 @@ try {
         document.body.append(lottie);
       }
       lottie.dataset.time = String(frame / 10);
+
+      let canvasImage = document.querySelector('[data-dioxuscut-canvas-image-smoke]');
+      if (!canvasImage) {
+        canvasImage = document.createElement('canvas');
+        canvasImage.dataset.dioxuscutCanvasImageSmoke = '1';
+        canvasImage.dataset.dioxuscutCanvasImage = 'true';
+        canvasImage.dataset.src = canvasAsset;
+        canvasImage.dataset.fit = 'contain';
+        canvasImage.setAttribute('width', '1');
+        canvasImage.setAttribute('height', '1');
+        document.body.append(canvasImage);
+      }
     });
 
     await window.dioxuscut.renderFrame({
@@ -69,8 +82,9 @@ try {
       inactiveVisibility: media.style.visibility,
       lottieSvg: Boolean(lottie.querySelector('svg')),
       lottieFrame: lottie.dataset.frame,
+      canvasPixel: [...document.querySelector('[data-dioxuscut-canvas-image-smoke]').getContext('2d').getImageData(0, 0, 1, 1).data],
     };
-  }, jsonAsset);
+  }, { jsonAsset, canvasAsset });
 
   const assert = (condition, message) => {
     if (!condition) throw new Error(message);
@@ -83,6 +97,7 @@ try {
   assert(result.inactiveVisibility === 'hidden', 'inactive media was not hidden');
   assert(result.lottieSvg, 'Lottie adapter did not create an SVG');
   assert(result.lottieFrame === '40', `unexpected Lottie frame: ${result.lottieFrame}`);
+  assert(result.canvasPixel[3] > 0, `CanvasImage was not rasterized: ${result.canvasPixel}`);
   console.log('browser media sync smoke: passed');
 } finally {
   await browser.close();
