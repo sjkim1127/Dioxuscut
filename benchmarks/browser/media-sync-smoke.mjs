@@ -6,6 +6,7 @@ const { chromium } = require('playwright-core');
 const url = process.env.DIOXUSCUT_BROWSER_URL ?? 'http://127.0.0.1:1420';
 const executablePath = process.env.CHROME_PATH ??
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const jsonAsset = new URL('/package.json', url).toString();
 
 const browser = await chromium.launch({ executablePath, headless: true });
 try {
@@ -14,7 +15,7 @@ try {
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => typeof window.dioxuscut?.renderFrame === 'function');
 
-  const result = await page.evaluate(async () => {
+  const result = await page.evaluate(async (jsonAsset) => {
     window.dioxuscut.registerComposition('media_sync_smoke', async ({ frame }) => {
       let media = document.querySelector('video[data-dioxuscut-smoke]');
       if (!media) {
@@ -47,7 +48,7 @@ try {
 
     await window.dioxuscut.renderFrame({
       composition: 'media_sync_smoke', frame: 15, fps: 10,
-      props: {}, assets: [], timeline: [],
+      props: {}, assets: [jsonAsset], timeline: [],
     });
     const media = document.querySelector('video[data-dioxuscut-smoke]');
     const lottie = document.querySelector('[data-dioxuscut-lottie-smoke]');
@@ -61,7 +62,7 @@ try {
 
     await window.dioxuscut.renderFrame({
       composition: 'media_sync_smoke', frame: 40, fps: 10,
-      props: {}, assets: [], timeline: [],
+      props: {}, assets: [jsonAsset], timeline: [],
     });
     return {
       active,
@@ -69,7 +70,7 @@ try {
       lottieSvg: Boolean(lottie.querySelector('svg')),
       lottieFrame: lottie.dataset.frame,
     };
-  });
+  }, jsonAsset);
 
   const assert = (condition, message) => {
     if (!condition) throw new Error(message);
