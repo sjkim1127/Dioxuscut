@@ -36,6 +36,12 @@ pub struct ProjectSettings {
     pub height: u32,
     pub fps: f64,
     pub duration: u32,
+    /// Optional FFmpeg quality value; hosts use their default when omitted.
+    #[serde(default)]
+    pub crf: Option<u32>,
+    /// Optional FFmpeg encoder preset.
+    #[serde(default)]
+    pub preset: Option<String>,
     /// Optional render worker count. `None` lets the host choose automatically.
     #[serde(default)]
     pub concurrency: Option<u32>,
@@ -386,6 +392,8 @@ mod tests {
                 height: 1920,
                 fps: 30.0,
                 duration: 60,
+                crf: None,
+                preset: None,
                 concurrency: None,
                 frame_step: 1,
                 frame_start: None,

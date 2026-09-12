@@ -46,6 +46,8 @@ mod project_asset_tests {
                 height: 240,
                 fps: 30.0,
                 duration: 30,
+                crf: None,
+                preset: None,
                 concurrency: None,
                 frame_step: 1,
                 frame_start: None,

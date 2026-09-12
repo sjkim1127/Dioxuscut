@@ -189,8 +189,12 @@ async fn main() -> anyhow::Result<()> {
                 frame_step: project.settings.frame_step,
                 concurrency: project.settings.concurrency.map(|value| value as usize),
                 timeout_seconds: None,
-                crf: 18,
-                preset: "fast".into(),
+                crf: project.settings.crf.unwrap_or(18),
+                preset: project
+                    .settings
+                    .preset
+                    .clone()
+                    .unwrap_or_else(|| "fast".into()),
                 hw_accel: dioxuscut_rasterizer::HwAccel::Auto,
                 sandbox_roots: vec![],
                 permissive: true,
