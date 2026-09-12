@@ -208,8 +208,16 @@ impl SceneLayout<'_> {
                     nodes.extend(self.emit(*child, x, y)?);
                 }
                 if record.style.transform != Transform2D::default() {
+                    let transform = transform_with_origin(
+                        record.style.transform,
+                        record.style.transform_origin,
+                        x,
+                        y,
+                        width,
+                        height,
+                    );
                     nodes = vec![SceneNode::Group {
-                        transform: record.style.transform,
+                        transform,
                         opacity: 1.0,
                         children: nodes,
                     }];
@@ -269,6 +277,28 @@ impl SceneLayout<'_> {
             NativeNodeKind::Root | NativeNodeKind::Placeholder => Ok(Vec::new()),
         }
     }
+}
+
+fn transform_with_origin(
+    transform: Transform2D,
+    origin: (f32, f32),
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+) -> Transform2D {
+    let ox = x + width * origin.0;
+    let oy = y + height * origin.1;
+    let radians = transform.rotate_deg.to_radians();
+    let (sin, cos) = radians.sin_cos();
+    let mx = transform.scale_x * cos;
+    let my = transform.scale_x * sin;
+    let nx = -transform.scale_y * sin;
+    let ny = transform.scale_y * cos;
+    transform.with_translate(
+        transform.tx + ox - (mx * ox + nx * oy),
+        transform.ty + oy - (my * ox + ny * oy),
+    )
 }
 
 fn measure_node(

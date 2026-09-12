@@ -49,6 +49,8 @@ pub struct ResolvedStyle {
     pub background_radial_gradient: Option<(f32, f32, f32, Vec<GradientStop>)>,
     /// Supported CSS transform subset: translate, scale, and rotate.
     pub transform: Transform2D,
+    /// Transform origin as normalized coordinates within the element's box.
+    pub transform_origin: (f32, f32),
     pub border_color: Option<Color>,
     pub border_width: f32,
     pub border_radius: f32,
@@ -77,6 +79,7 @@ impl Default for ResolvedStyle {
             background_gradient: None,
             background_radial_gradient: None,
             transform: Transform2D::default(),
+            transform_origin: (0.5, 0.5),
             border_color: None,
             border_width: 0.0,
             border_radius: 0.0,
@@ -472,6 +475,11 @@ pub(crate) fn apply_declarations(style: &mut ResolvedStyle, declarations: &[(Str
             "transform" => {
                 if let Some(transform) = parse_transform(value) {
                     style.transform = transform;
+                }
+            }
+            "transform-origin" => {
+                if let Some(origin) = parse_transform_origin(value) {
+                    style.transform_origin = origin;
                 }
             }
             "color" => {
@@ -995,6 +1003,30 @@ fn parse_transform(value: &str) -> Option<Transform2D> {
         .then(|| Transform2D::make_transform(translate, scale, rotate))
 }
 
+fn parse_transform_origin(value: &str) -> Option<(f32, f32)> {
+    let args = value.split_whitespace().collect::<Vec<_>>();
+    let x = parse_origin_component(args.first().copied()?, true)?;
+    let y = args
+        .get(1)
+        .and_then(|value| parse_origin_component(value, false))
+        .unwrap_or(0.5);
+    Some((x, y))
+}
+
+fn parse_origin_component(value: &str, horizontal: bool) -> Option<f32> {
+    match value.to_ascii_lowercase().as_str() {
+        "left" if horizontal => Some(0.0),
+        "center" => Some(0.5),
+        "right" if horizontal => Some(1.0),
+        "top" if !horizontal => Some(0.0),
+        "bottom" if !horizontal => Some(1.0),
+        _ => value
+            .strip_suffix('%')
+            .and_then(|value| value.parse::<f32>().ok())
+            .map(|value| value / 100.0),
+    }
+}
+
 fn split_css_arguments(value: &str) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut start = 0;
@@ -1207,6 +1239,35 @@ mod tests {
         assert_eq!(style.transform.ty, 8.0);
         assert_eq!(style.transform.scale_x, 2.0);
         assert_eq!(style.transform.scale_y, 0.5);
+    }
+
+    #[test]
+    fn parses_transform_origin_keywords_and_percentages() {
+        let stylesheet = Stylesheet::parse(
+            ".hero { transform-origin: left 25%; } .center { transform-origin: center bottom; }",
+        )
+        .unwrap();
+        let hero = stylesheet.resolve(
+            &NativeElement {
+                tag: "div".into(),
+                attributes: [("class".into(), "hero".into())].into_iter().collect(),
+                namespace: None,
+                ..Default::default()
+            },
+            None,
+        );
+        assert_eq!(hero.transform_origin, (0.0, 0.25));
+
+        let center = stylesheet.resolve(
+            &NativeElement {
+                tag: "div".into(),
+                attributes: [("class".into(), "center".into())].into_iter().collect(),
+                namespace: None,
+                ..Default::default()
+            },
+            None,
+        );
+        assert_eq!(center.transform_origin, (0.5, 1.0));
     }
 
     #[test]
