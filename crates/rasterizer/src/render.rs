@@ -1174,6 +1174,18 @@ pub fn render_frame_timed(
     Ok((img, start.elapsed()))
 }
 
+/// Export browser-rendered frames through the shared FFmpeg pipeline.
+pub fn render_web_to_ffmpeg_pipe_fallible(
+    backend: &crate::web_backend::BrowserFrameBackend,
+    config: &PipeConfig,
+    props: serde_json::Value,
+) -> Result<(), RasterError> {
+    backend.set_props(props)?;
+    render_to_ffmpeg_pipe_fallible(backend, config, |_| {
+        Ok::<Scene, std::convert::Infallible>(Scene::new())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

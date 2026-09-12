@@ -15,6 +15,7 @@ pub struct BrowserFrameBackend {
     child: Mutex<Child>,
     stdin: Mutex<ChildStdin>,
     stdout: Mutex<BufReader<ChildStdout>>,
+    props: Mutex<serde_json::Value>,
 }
 
 impl BrowserFrameBackend {
@@ -65,7 +66,16 @@ impl BrowserFrameBackend {
             child: Mutex::new(child),
             stdin: Mutex::new(stdin),
             stdout: Mutex::new(stdout),
+            props: Mutex::new(serde_json::Value::Null),
         })
+    }
+
+    pub fn set_props(&self, props: serde_json::Value) -> Result<(), RasterError> {
+        *self
+            .props
+            .lock()
+            .map_err(|_| RasterError::Init("browser worker props lock poisoned".into()))? = props;
+        Ok(())
     }
     pub fn render_web_frame(&self, request: &WebFrameRequest) -> Result<RgbaImage, RasterError> {
         let encoded =
@@ -142,12 +152,17 @@ impl RasterizerBackend for BrowserFrameBackend {
         }
     }
     fn render_frame(&self, _scene: &Scene, config: &FrameConfig) -> Result<RgbaImage, RasterError> {
+        let props = self
+            .props
+            .lock()
+            .map_err(|_| RasterError::Init("browser worker props lock poisoned".into()))?
+            .clone();
         self.render_web_frame(&WebFrameRequest {
             frame: config.frame,
             fps: config.fps,
             width: config.width,
             height: config.height,
-            props: serde_json::Value::Null,
+            props,
         })
     }
 }
