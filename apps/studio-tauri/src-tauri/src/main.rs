@@ -33,18 +33,15 @@ fn start_render_job(
     output: String,
 ) -> Result<(), String> {
     let project = {
-        let mut store = state
+        let store = state
             .jobs
             .lock()
             .map_err(|_| "job store lock poisoned".to_string())?;
-        let job = store
+        store
             .get(&id)
             .cloned()
-            .ok_or_else(|| format!("render job '{id}' was not found"))?;
-        store
-            .try_update(&id, JobStatus::Preparing, 0)
-            .map_err(|error| error.to_string())?;
-        job.project
+            .ok_or_else(|| format!("render job '{id}' was not found"))?
+            .project
     };
     if project.settings.backend != dioxuscut_project::BackendKind::Browser {
         return Err("Tauri executor currently supports browser backend jobs only".into());
@@ -57,6 +54,15 @@ fn start_render_job(
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(1);
+    {
+        let mut store = state
+            .jobs
+            .lock()
+            .map_err(|_| "job store lock poisoned".to_string())?;
+        store
+            .try_update(&id, JobStatus::Preparing, 0)
+            .map_err(|error| error.to_string())?;
+    }
     let state_jobs = Arc::clone(&state.jobs);
     let state_cancellations = Arc::clone(&state.cancellations);
     let cancellation = make_cancel_signal();
