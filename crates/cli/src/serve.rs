@@ -153,8 +153,10 @@ async fn frame_handler(
     Query(query): Query<FrameQuery>,
 ) -> impl IntoResponse {
     let frame = query.frame.unwrap_or(state.config.default_frame);
-    match render_frame(&state.config, frame) {
-        Ok(png) => Json(serde_json::json!({
+    let config = state.config.clone();
+    let result = tokio::task::spawn_blocking(move || render_frame(&config, frame)).await;
+    match result {
+        Ok(Ok(png)) => Json(serde_json::json!({
             "type": "frame",
             "frame": frame,
             "width": state.config.width,
@@ -162,12 +164,21 @@ async fn frame_handler(
             "png_base64": BASE64.encode(png),
         }))
         .into_response(),
-        Err(error) => (
+        Ok(Err(error)) => (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({
                 "type": "error",
                 "frame": frame,
                 "message": error.to_string(),
+            })),
+        )
+            .into_response(),
+        Err(error) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "type": "error",
+                "frame": frame,
+                "message": format!("frame render task failed: {error}"),
             })),
         )
             .into_response(),
