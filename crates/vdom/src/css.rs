@@ -37,6 +37,7 @@ struct SimpleSelector {
     classes: Vec<String>,
     universal: bool,
     ancestor: Option<Box<SimpleSelector>>,
+    direct_parent: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -259,6 +260,26 @@ impl Stylesheet {
 impl SimpleSelector {
     fn parse(selector: &str) -> Result<Self, CssError> {
         let selector = selector.trim();
+        if let Some((ancestor, target)) = selector.split_once('>') {
+            let ancestor = ancestor.trim();
+            let target = target.trim();
+            if ancestor.is_empty()
+                || target.is_empty()
+                || ancestor.contains('>')
+                || target.contains('>')
+                || target.contains('+')
+                || target.contains('~')
+            {
+                return Err(CssError::UnsupportedSelector(selector.into()));
+            }
+            let mut parsed = Self::parse(target)?;
+            if parsed.ancestor.is_some() {
+                return Err(CssError::UnsupportedSelector(selector.into()));
+            }
+            parsed.ancestor = Some(Box::new(Self::parse(ancestor)?));
+            parsed.direct_parent = true;
+            return Ok(parsed);
+        }
         let parts = selector.split_whitespace().collect::<Vec<_>>();
         if parts.len() > 1 {
             let target = parts[parts.len() - 1];
@@ -325,10 +346,16 @@ impl SimpleSelector {
 
     fn matches(&self, element: &NativeElement, ancestors: &[NativeElement]) -> bool {
         if self.ancestor.as_deref().is_some_and(|ancestor| {
-            !ancestors
-                .iter()
-                .rev()
-                .any(|candidate| ancestor.matches(candidate, &[]))
+            if self.direct_parent {
+                ancestors
+                    .last()
+                    .is_none_or(|candidate| !ancestor.matches(candidate, &[]))
+            } else {
+                !ancestors
+                    .iter()
+                    .rev()
+                    .any(|candidate| ancestor.matches(candidate, &[]))
+            }
         }) {
             return false;
         }
@@ -1135,11 +1162,34 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_complex_selector_is_reported() {
-        assert!(matches!(
-            Stylesheet::parse(".card > span { color: red; }"),
-            Err(CssError::UnsupportedSelector(_))
-        ));
+    fn child_selector_matches_only_the_direct_parent() {
+        let stylesheet = Stylesheet::parse(".card > span { color: #123456; }").unwrap();
+        let mut card = NativeElement {
+            tag: "div".into(),
+            ..Default::default()
+        };
+        card.attributes.insert("class".into(), "card".into());
+        let span = NativeElement {
+            tag: "span".into(),
+            ..Default::default()
+        };
+        let nested = NativeElement {
+            tag: "section".into(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            stylesheet
+                .resolve_with_ancestors(&span, None, &[card.clone()])
+                .color,
+            Color::rgb(0x12, 0x34, 0x56)
+        );
+        assert_eq!(
+            stylesheet
+                .resolve_with_ancestors(&span, None, &[card, nested])
+                .color,
+            Color::BLACK
+        );
     }
 
     #[test]
