@@ -157,6 +157,9 @@ export async function getVideoTexture(source, options = {}) {
   return texture;
 }
 
+// Naming-compatible entry point for adapters ported from @remotion/three.
+export const useVideoTexture = getVideoTexture;
+
 function seekVideoTexture(video, options) {
   const frame = Number(options.frame);
   const fps = Number(options.fps ?? 30);
@@ -412,6 +415,7 @@ window.dioxuscut = {
   cancelRender,
   registerLottieAdapter,
   getVideoTexture,
+  useVideoTexture,
   releaseVideoTexture,
 };
 
