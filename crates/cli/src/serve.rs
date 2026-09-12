@@ -288,7 +288,14 @@ fn render_frame(config: &ServeConfig, frame: u32) -> anyhow::Result<Vec<u8>> {
             .unwrap_or_else(|| config.script.clone());
 
         let policy = MediaSecurityPolicy::sandboxed(vec![script_dir]);
-        let backend = TinySkiaBackend::new().with_security_policy(policy);
+        let cache_bytes = std::env::var("DIOXUSCUT_IMAGE_CACHE_BYTES")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(dioxuscut_rasterizer::DEFAULT_IMAGE_CACHE_BYTES);
+        let backend = TinySkiaBackend::new()
+            .with_image_cache_bytes(cache_bytes)
+            .with_security_policy(policy);
 
         let composition = RhaiComposition::from_file(&config.script)?;
         let props = load_props(config)?;
