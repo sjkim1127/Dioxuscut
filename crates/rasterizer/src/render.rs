@@ -1181,6 +1181,16 @@ pub fn render_web_to_ffmpeg_pipe_fallible(
     props: serde_json::Value,
 ) -> Result<(), RasterError> {
     backend.set_props(props)?;
+    // BrowserFrameBackend owns one ordered request/response worker. Rayon
+    // threads cannot increase throughput until a browser worker pool exists;
+    // avoid creating idle render threads and preserve request ordering.
+    let serial_config;
+    let config = if config.concurrency.is_none() {
+        serial_config = config.clone().with_concurrency(1);
+        &serial_config
+    } else {
+        config
+    };
     render_to_ffmpeg_pipe_fallible(backend, config, |_| {
         Ok::<Scene, std::convert::Infallible>(Scene::new())
     })
