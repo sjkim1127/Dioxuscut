@@ -143,12 +143,16 @@ const defaultLottieAdapter = {
     let instance = lottieInstances.get(element);
     if (!instance || instance.src !== state.src) {
       instance?.animation.destroy();
+      const preloaded = preloadedAssets.get(state.src);
+      const animationData = preloaded && isJsonSource(state.src)
+        ? await preloaded
+        : undefined;
       const animation = lottie.loadAnimation({
         container: element,
         renderer: 'svg',
         loop: false,
         autoplay: false,
-        path: state.src,
+        ...(animationData ? { animationData } : { path: state.src }),
       });
       instance = { animation, src: state.src, ready: new Promise((resolve) => {
         animation.addEventListener('DOMLoaded', resolve, { once: true });
@@ -217,6 +221,10 @@ async function syncMediaElements({ frame: nextFrame, fps }) {
     media.pause();
   }
   await Promise.all(pendingSeeks);
+}
+
+function isJsonSource(source = '') {
+  return source.split(/[?#]/, 1)[0].toLowerCase().endsWith('.json');
 }
 
 async function syncLottieElements({ frame: nextFrame, fps }) {
