@@ -78,6 +78,8 @@ pub enum RenderBackend {
     /// Pure-Rust CPU rasterizer via tiny-skia. Default.
     #[default]
     Native,
+    /// Browser-backed Three.js/WebGL renderer. Requires a worker path in `DIOXUSCUT_BROWSER_WORKER`.
+    Browser,
     /// GPU rasterizer via wgpu. Requires `--features gpu`.
     Gpu,
 }
@@ -730,6 +732,49 @@ pub async fn execute_render_command_with_registry_and_control(
                 render_to_ffmpeg_pipe_fallible(&rasterizer, &pipe_config, |frame| {
                     prepared.render(frame)
                 })?;
+            }
+        }
+        RenderBackend::Browser => {
+            use dioxuscut_rasterizer::{
+                render_still_fallible, render_web_to_ffmpeg_pipe_fallible, BrowserFrameBackend,
+                PipeConfig,
+            };
+            let worker = std::env::var_os("DIOXUSCUT_BROWSER_WORKER").ok_or_else(|| {
+                anyhow::anyhow!("Browser backend requires DIOXUSCUT_BROWSER_WORKER")
+            })?;
+            let url = std::env::var("DIOXUSCUT_BROWSER_URL")
+                .unwrap_or_else(|_| "http://localhost:1420".to_string());
+            let rasterizer = BrowserFrameBackend::new("node", worker, url)
+                .map_err(|error| anyhow::anyhow!("Browser backend init failed: {error}"))?;
+            rasterizer.set_props(props.clone())?;
+            if let Some(format) = request.codec.still_format() {
+                render_still_fallible(
+                    &rasterizer,
+                    request.width,
+                    request.height,
+                    request.fps,
+                    frame_start,
+                    &request.output,
+                    format,
+                    &control,
+                    |_| Ok::<_, std::convert::Infallible>(dioxuscut_rasterizer::Scene::new()),
+                )?;
+            } else {
+                let pipe_config = PipeConfig::new(
+                    request.width,
+                    request.height,
+                    request.fps,
+                    frame_count,
+                    &request.output,
+                )
+                .with_frame_start(frame_start)
+                .with_codec(request.codec.video_codec().expect("video codec validated"))
+                .with_hw_accel(request.hw_accel)
+                .with_quality(request.crf, &request.preset)
+                .with_audio_tracks(audio_tracks.clone())
+                .with_control(control.clone())
+                .with_security_policy(security_policy.clone());
+                render_web_to_ffmpeg_pipe_fallible(&rasterizer, &pipe_config, props.clone())?;
             }
         }
         RenderBackend::Gpu => {

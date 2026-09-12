@@ -45,8 +45,9 @@ fn parse_backend(backend: &str) -> Result<RenderBackend, PyErr> {
     match backend.to_ascii_lowercase().as_str() {
         "native" | "cpu" => Ok(RenderBackend::Native),
         "gpu" => Ok(RenderBackend::Gpu),
+        "browser" | "web" | "chromium" => Ok(RenderBackend::Browser),
         other => Err(PyValueError::new_err(format!(
-            "Unsupported backend '{other}'. Supported: native, gpu"
+            "Unsupported backend '{other}'. Supported: native, gpu, browser"
         ))),
     }
 }
