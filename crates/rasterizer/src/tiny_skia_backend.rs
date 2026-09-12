@@ -54,6 +54,16 @@ impl TinySkiaBackend {
         }
     }
 
+    /// Configure the decoded image cache budget in bytes.
+    ///
+    /// This is useful for embedded hosts such as Tauri, where the renderer
+    /// should share an explicit memory budget with the application. The
+    /// default constructors retain the 256 MiB cache budget.
+    pub fn with_image_cache_bytes(mut self, max_bytes: usize) -> Self {
+        self.images = ImageCache::with_max_bytes(max_bytes);
+        self
+    }
+
     /// Create without loading a font (text will use placeholder blocks).
     pub fn headless() -> Self {
         Self::headless_with_policy(crate::security::MediaSecurityPolicy::default())
