@@ -13,14 +13,27 @@ const lines = createInterface({ input: child.stdout });
 const messages = [];
 lines.on('line', (line) => { try { messages.push(JSON.parse(line)); } catch {} });
 const waitFor = async (predicate) => {
-  while (!messages.some(predicate)) await new Promise((resolve) => setTimeout(resolve, 5));
-  return messages.find(predicate);
+  while (true) {
+    const index = messages.findIndex(predicate);
+    if (index >= 0) return messages.splice(index, 1)[0];
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 };
 
 try {
   const ready = await waitFor((message) => message.type === 'ready');
   assert.ok(ready.compositions.includes('three_lifecycle_preview'));
   assert.ok(ready.compositions.includes('three_audio_reactive_preview'));
+  const parityRequest = { type: 'render', composition: 'three_lifecycle_preview', frame: 1, fps: 30, width: 640, height: 360, props: { color: '#ff8844' } };
+  child.stdin.write(`${JSON.stringify({ ...parityRequest, transport: 'rgba' })}\n`);
+  const rgbaParity = await waitFor((message) => message.type === 'frame' && message.frame === 1);
+  const rgbaBytes = Buffer.from(rgbaParity.video_frame.rgba_base64, 'base64');
+  assert.equal(rgbaBytes.length, 640 * 360 * 4);
+  child.stdin.write(`${JSON.stringify({ ...parityRequest, transport: 'rgba_file' })}\n`);
+  const fileParity = await waitFor((message) => message.type === 'frame' && message.frame === 1);
+  const fileBytes = readFileSync(fileParity.video_frame.file_path);
+  assert.deepEqual(fileBytes, rgbaBytes);
+  unlinkSync(fileParity.video_frame.file_path);
   for (const frame of [0, 15, 30]) {
     child.stdin.write(`${JSON.stringify({ type: 'render', composition: 'three_lifecycle_preview', frame, fps: 30, width: 640, height: 360, props: { color: '#ff8844' }, ...(frame === 0 ? { transport: 'rgba' } : frame === 15 ? { transport: 'rgba_file' } : {}) })}\n`);
     const response = await waitFor((message) => message.type === 'frame' && message.frame === frame);
@@ -45,7 +58,7 @@ try {
     assert.equal(response.width, 640);
     assert.equal(response.height, 360);
   }
-  console.log(JSON.stringify({ compositions: 2, frames: 6, status: 'ok' }));
+  console.log(JSON.stringify({ compositions: 2, frames: 8, raw_rgba_parity: true, status: 'ok' }));
 } finally {
   child.stdin.write('{"type":"shutdown"}\n');
   await new Promise((resolve) => child.once('exit', resolve));
