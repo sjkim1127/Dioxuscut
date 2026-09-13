@@ -46,6 +46,16 @@ pub struct WebFrameRequest {
 
 /// Result returned by a browser-backed renderer.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WebVideoFrame {
+    pub width: u32,
+    pub height: u32,
+    /// WebCodecs timestamp in microseconds.
+    pub timestamp_us: i64,
+    /// Tightly packed top-to-bottom RGBA8 bytes.
+    pub rgba_base64: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WebFrameResponse {
     pub frame: u32,
     pub width: u32,
@@ -60,6 +70,9 @@ pub struct WebFrameResponse {
     pub rgba_base64: Option<String>,
     #[serde(default)]
     pub file_path: Option<String>,
+    /// Optional raw WebCodecs frame transport for native consumers.
+    #[serde(default)]
+    pub video_frame: Option<WebVideoFrame>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -132,5 +145,13 @@ mod tests {
         let parsed: WebWorkerMessage = serde_json::from_str(message).unwrap();
         assert!(matches!(parsed, WebWorkerMessage::Frame(response)
             if response.jpeg_base64.as_deref() == Some("AQIDBA==")));
+    }
+
+    #[test]
+    fn frame_response_accepts_webcodecs_video_frame_transport() {
+        let message = r#"{"type":"frame","frame":3,"width":1,"height":1,"video_frame":{"width":1,"height":1,"timestamp_us":1250000,"rgba_base64":"AQIDBA=="}}"#;
+        let parsed: WebWorkerMessage = serde_json::from_str(message).unwrap();
+        assert!(matches!(parsed, WebWorkerMessage::Frame(response)
+            if response.video_frame.as_ref().is_some_and(|frame| frame.timestamp_us == 1_250_000)));
     }
 }

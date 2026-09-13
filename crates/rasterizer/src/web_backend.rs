@@ -474,6 +474,7 @@ impl BrowserFrameBackend {
                 jpeg_base64,
                 rgba_base64,
                 file_path,
+                video_frame,
             })) if frame == request.frame => {
                 if let Some(encoded) = png_base64 {
                     let bytes = base64::engine::general_purpose::STANDARD
@@ -527,6 +528,46 @@ impl BrowserFrameBackend {
                         });
                     }
                     Ok(image.into_rgba8())
+                } else if let Some(video_frame) = video_frame {
+                    let bytes = base64::engine::general_purpose::STANDARD
+                        .decode(video_frame.rgba_base64)
+                        .map_err(|e| RasterError::Frame {
+                            frame,
+                            reason: e.to_string(),
+                        })?;
+                    let expected = usize::try_from(video_frame.width)
+                        .ok()
+                        .and_then(|width| {
+                            usize::try_from(video_frame.height)
+                                .ok()
+                                .and_then(|height| width.checked_mul(height))
+                        })
+                        .and_then(|pixels| pixels.checked_mul(4))
+                        .ok_or_else(|| RasterError::Frame {
+                            frame,
+                            reason: "video frame dimensions overflow RGBA size".into(),
+                        })?;
+                    if video_frame.width != width
+                        || video_frame.height != height
+                        || bytes.len() != expected
+                    {
+                        return Err(RasterError::Frame {
+                            frame,
+                            reason: format!(
+                                "video frame payload {}x{} ({} bytes) does not match response {}x{} ({} bytes expected)",
+                                video_frame.width,
+                                video_frame.height,
+                                bytes.len(),
+                                width,
+                                height,
+                                expected
+                            ),
+                        });
+                    }
+                    RgbaImage::from_raw(width, height, bytes).ok_or_else(|| RasterError::Frame {
+                        frame,
+                        reason: "failed to construct RGBA image from video frame payload".into(),
+                    })
                 } else if let Some(encoded) = rgba_base64 {
                     let bytes = base64::engine::general_purpose::STANDARD
                         .decode(encoded)
@@ -711,5 +752,38 @@ mod tests {
         assert_eq!(parse_browser_transport_retries(Some(" 3 ")), 3);
         assert_eq!(parse_browser_transport_retries(Some("0")), 0);
         assert_eq!(parse_browser_transport_retries(Some("invalid")), 1);
+    }
+
+    #[test]
+    fn webcodecs_video_frame_transport_decodes_tightly_packed_rgba() {
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("dioxuscut-browser-video-frame-{nonce}"));
+        fs::create_dir_all(&root).unwrap();
+        let script = root.join("worker.sh");
+        fs::write(
+            &script,
+            "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"ready\",\"protocol\":1}'\nread request\nprintf '%s\\n' '{\"type\":\"frame\",\"frame\":3,\"width\":1,\"height\":1,\"video_frame\":{\"width\":1,\"height\":1,\"timestamp_us\":1250000,\"rgba_base64\":\"AQIDBA==\"}}'\n",
+        )
+        .unwrap();
+        let backend = BrowserFrameBackend::new("/bin/sh", &script, "http://unused").unwrap();
+        let image = backend
+            .render_web_frame(&WebFrameRequest {
+                composition: None,
+                frame: 3,
+                fps: 30.0,
+                width: 1,
+                height: 1,
+                props: serde_json::json!({}),
+                assets: vec![],
+                timeline: vec![],
+                image_format: None,
+                jpeg_quality: None,
+                transparent: false,
+                transport: None,
+            })
+            .unwrap();
+        assert_eq!(image.as_raw(), &[1, 2, 3, 4]);
+        drop(backend);
+        let _ = fs::remove_dir_all(root);
     }
 }
