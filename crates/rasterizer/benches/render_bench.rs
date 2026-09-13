@@ -158,6 +158,35 @@ fn scene_complex_gradients() -> Scene {
     Scene { nodes }
 }
 
+/// A representative browser/native media scene.  The image node deliberately
+/// remains a fallback case until the WGPU texture path lands, so its timing is
+/// tracked separately from analytic GPU scenes.
+fn scene_image_fallback() -> Scene {
+    Scene {
+        nodes: vec![
+            SceneNode::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 1920.0,
+                h: 1080.0,
+                fill: Color::rgb(12, 12, 20),
+                stroke: None,
+                stroke_width: 0.0,
+                corner_radius: 0.0,
+            },
+            SceneNode::Image {
+                src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=".into(),
+                x: 160.0,
+                y: 120.0,
+                w: 1600.0,
+                h: 840.0,
+                fit: dioxuscut_rasterizer::scene::ImageFit::Cover,
+                opacity: 0.9,
+            },
+        ],
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Bench groups
 // ─────────────────────────────────────────────────────────────────
@@ -172,6 +201,7 @@ fn bench_cpu_scenes(c: &mut Criterion) {
         ("hello_world", scene_hello_world()),
         ("grid_25x14", scene_grid(25, 14)),
         ("complex_gradients", scene_complex_gradients()),
+        ("image_cpu_fallback", scene_image_fallback()),
     ];
 
     for (name, scene) in scenes {
