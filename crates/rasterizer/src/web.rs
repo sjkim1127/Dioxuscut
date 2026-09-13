@@ -62,6 +62,42 @@ pub struct WebFrameTiming {
     pub timeline_frame: f64,
 }
 
+/// Aggregate drift measurements for a rendered output-frame sequence.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WebFrameDriftReport {
+    pub sample_count: usize,
+    pub mean_abs_drift_frames: f64,
+    pub max_abs_drift_frames: f64,
+    /// Number of adjacent samples whose requested output frames are not
+    /// consecutive. This catches dropped or duplicated scheduler requests.
+    pub non_contiguous_samples: usize,
+}
+
+impl WebFrameDriftReport {
+    pub fn from_samples(samples: &[(u32, WebFrameTiming)]) -> Option<Self> {
+        let first = samples.first()?;
+        let mut total_abs_drift = first.1.drift_frames(first.0).abs();
+        let mut max_abs_drift = total_abs_drift;
+        let mut non_contiguous_samples = 0;
+        let mut previous_frame = first.0;
+        for &(output_frame, timing) in &samples[1..] {
+            let abs_drift = timing.drift_frames(output_frame).abs();
+            total_abs_drift += abs_drift;
+            max_abs_drift = max_abs_drift.max(abs_drift);
+            if output_frame != previous_frame.saturating_add(1) {
+                non_contiguous_samples += 1;
+            }
+            previous_frame = output_frame;
+        }
+        Some(Self {
+            sample_count: samples.len(),
+            mean_abs_drift_frames: total_abs_drift / samples.len() as f64,
+            max_abs_drift_frames: max_abs_drift,
+            non_contiguous_samples,
+        })
+    }
+}
+
 impl WebFrameTiming {
     pub fn from_timestamp(timestamp_us: i64, fps: f64) -> Option<Self> {
         if !fps.is_finite() || fps <= 0.0 {
@@ -247,6 +283,21 @@ mod tests {
     fn webcodecs_timing_reports_subframe_drift() {
         let timing = WebFrameTiming::from_timestamp(133_333, 30.0).unwrap();
         assert!((timing.drift_frames(4) + 0.00001).abs() < 1e-6);
+    }
+
+    #[test]
+    fn webcodecs_drift_report_aggregates_sequence_and_gaps() {
+        let samples = [
+            (3, WebFrameTiming::from_timestamp(100_000, 30.0).unwrap()),
+            (4, WebFrameTiming::from_timestamp(133_333, 30.0).unwrap()),
+            (6, WebFrameTiming::from_timestamp(200_000, 30.0).unwrap()),
+        ];
+        let report = WebFrameDriftReport::from_samples(&samples).unwrap();
+        assert_eq!(report.sample_count, 3);
+        assert_eq!(report.non_contiguous_samples, 1);
+        assert!(report.max_abs_drift_frames < 1e-5);
+        assert!(report.mean_abs_drift_frames < 1e-5);
+        assert_eq!(WebFrameDriftReport::from_samples(&[]), None);
     }
 
     #[test]

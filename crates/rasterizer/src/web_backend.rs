@@ -880,10 +880,18 @@ mod tests {
         };
         let (first, first_timing) = backend.render_web_frame_with_timing(&request(3)).unwrap();
         assert_eq!(first.as_raw(), &[1, 2, 3, 4]);
-        assert!((first_timing.unwrap().drift_frames(3)).abs() < 1e-9);
+        let first_timing = first_timing.unwrap();
+        assert!(first_timing.drift_frames(3).abs() < 1e-9);
         let (second, second_timing) = backend.render_web_frame_with_timing(&request(4)).unwrap();
         assert_eq!(second.as_raw(), &[5, 6, 7, 8]);
-        assert!((second_timing.unwrap().drift_frames(4) + 0.00001).abs() < 1e-6);
+        let second_timing = second_timing.unwrap();
+        assert!((second_timing.drift_frames(4) + 0.00001).abs() < 1e-6);
+        let report =
+            crate::web::WebFrameDriftReport::from_samples(&[(3, first_timing), (4, second_timing)])
+                .unwrap();
+        assert_eq!(report.sample_count, 2);
+        assert_eq!(report.non_contiguous_samples, 0);
+        assert!(report.max_abs_drift_frames < 1e-5);
         drop(backend);
         let _ = fs::remove_dir_all(root);
     }
