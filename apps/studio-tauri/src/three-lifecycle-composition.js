@@ -6,12 +6,19 @@ export async function register(api) {
   const unblock = buffer?.delayPlayback?.().unblock;
   if (unblock) setTimeout(unblock, 0);
 
-  const prefetched = api.prefetch?.('data:text/plain,three-prefetch-fixture', { method: 'base64' });
+  let prefetchProgressCalls = 0;
+  const prefetched = api.prefetch?.('data:text/plain,three-prefetch-fixture', {
+    method: 'base64',
+    onProgress: ({ loadedBytes, totalBytes }) => {
+      if (loadedBytes > 0 && (totalBytes === null || totalBytes >= loadedBytes)) prefetchProgressCalls += 1;
+    },
+  });
   if (prefetched) {
     const prefetchedUrl = await prefetched.waitUntilDone();
     if (!prefetchedUrl.startsWith('data:text/plain;base64,')) {
       throw new Error('prefetch did not return a base64 data URL');
     }
+    if (prefetchProgressCalls === 0) throw new Error('prefetch did not report progress');
     prefetched.free();
   }
 
