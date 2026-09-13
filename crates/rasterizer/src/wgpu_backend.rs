@@ -579,6 +579,14 @@ struct GpuContext {
     screen_mesh_pipeline: wgpu::RenderPipeline,
     screen_image_pipeline: wgpu::RenderPipeline,
     screen_text_pipeline: wgpu::RenderPipeline,
+    darken_pipeline: wgpu::RenderPipeline,
+    darken_mesh_pipeline: wgpu::RenderPipeline,
+    darken_image_pipeline: wgpu::RenderPipeline,
+    darken_text_pipeline: wgpu::RenderPipeline,
+    lighten_pipeline: wgpu::RenderPipeline,
+    lighten_mesh_pipeline: wgpu::RenderPipeline,
+    lighten_image_pipeline: wgpu::RenderPipeline,
+    lighten_text_pipeline: wgpu::RenderPipeline,
     globals_layout: wgpu::BindGroupLayout,
     instance_layout: wgpu::BindGroupLayout,
     image_layout: wgpu::BindGroupLayout,
@@ -807,6 +815,42 @@ impl GpuContext {
             make_blend_pipeline("dioxuscut_screen_image_pipeline", "fs_image", false, screen);
         let screen_text_pipeline =
             make_blend_pipeline("dioxuscut_screen_text_pipeline", "fs_text", false, screen);
+        let darken = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Min,
+            },
+            alpha: wgpu::BlendComponent::OVER,
+        };
+        let lighten = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Max,
+            },
+            alpha: wgpu::BlendComponent::OVER,
+        };
+        let darken_pipeline =
+            make_blend_pipeline("dioxuscut_darken_pipeline", "fs_main", false, darken);
+        let darken_mesh_pipeline =
+            make_blend_pipeline("dioxuscut_darken_mesh_pipeline", "fs_solid", true, darken);
+        let darken_image_pipeline =
+            make_blend_pipeline("dioxuscut_darken_image_pipeline", "fs_image", false, darken);
+        let darken_text_pipeline =
+            make_blend_pipeline("dioxuscut_darken_text_pipeline", "fs_text", false, darken);
+        let lighten_pipeline =
+            make_blend_pipeline("dioxuscut_lighten_pipeline", "fs_main", false, lighten);
+        let lighten_mesh_pipeline =
+            make_blend_pipeline("dioxuscut_lighten_mesh_pipeline", "fs_solid", true, lighten);
+        let lighten_image_pipeline = make_blend_pipeline(
+            "dioxuscut_lighten_image_pipeline",
+            "fs_image",
+            false,
+            lighten,
+        );
+        let lighten_text_pipeline =
+            make_blend_pipeline("dioxuscut_lighten_text_pipeline", "fs_text", false, lighten);
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("dioxuscut_pipeline"),
@@ -983,6 +1027,14 @@ impl GpuContext {
             screen_mesh_pipeline,
             screen_image_pipeline,
             screen_text_pipeline,
+            darken_pipeline,
+            darken_mesh_pipeline,
+            darken_image_pipeline,
+            darken_text_pipeline,
+            lighten_pipeline,
+            lighten_mesh_pipeline,
+            lighten_image_pipeline,
+            lighten_text_pipeline,
             globals_layout,
             instance_layout,
             image_layout,
@@ -2143,6 +2195,8 @@ impl WgpuBackend {
                         let pipeline = match commands[start].instance().kind_data[2] {
                             1 => &self.ctx.multiply_pipeline,
                             2 => &self.ctx.screen_pipeline,
+                            3 => &self.ctx.darken_pipeline,
+                            4 => &self.ctx.lighten_pipeline,
                             _ => &self.ctx.pipeline,
                         };
                         pass.set_pipeline(pipeline);
@@ -2153,6 +2207,8 @@ impl WgpuBackend {
                         let pipeline = match commands[i].instance().kind_data[2] {
                             1 => &self.ctx.multiply_mesh_pipeline,
                             2 => &self.ctx.screen_mesh_pipeline,
+                            3 => &self.ctx.darken_mesh_pipeline,
+                            4 => &self.ctx.lighten_mesh_pipeline,
                             _ => &self.ctx.mesh_pipeline,
                         };
                         pass.set_pipeline(pipeline);
@@ -2169,6 +2225,8 @@ impl WgpuBackend {
                             let pipeline = match commands[i].instance().kind_data[2] {
                                 1 => &self.ctx.multiply_text_pipeline,
                                 2 => &self.ctx.screen_text_pipeline,
+                                3 => &self.ctx.darken_text_pipeline,
+                                4 => &self.ctx.lighten_text_pipeline,
                                 _ => &self.ctx.text_pipeline,
                             };
                             pass.set_pipeline(pipeline);
@@ -2177,6 +2235,8 @@ impl WgpuBackend {
                             let pipeline = match commands[i].instance().kind_data[2] {
                                 1 => &self.ctx.multiply_image_pipeline,
                                 2 => &self.ctx.screen_image_pipeline,
+                                3 => &self.ctx.darken_image_pipeline,
+                                4 => &self.ctx.lighten_image_pipeline,
                                 _ => &self.ctx.image_pipeline,
                             };
                             pass.set_pipeline(pipeline);
@@ -3461,6 +3521,8 @@ fn compile_nodes(
                     crate::scene::BlendMode::Normal
                         | crate::scene::BlendMode::Multiply
                         | crate::scene::BlendMode::Screen
+                        | crate::scene::BlendMode::Darken
+                        | crate::scene::BlendMode::Lighten
                 )
                 && (matches!(blend_mode, crate::scene::BlendMode::Normal)
                     || ((*layer_opacity - 1.0).abs() <= f32::EPSILON
@@ -3504,6 +3566,8 @@ fn compile_nodes(
                     instance.kind_data[2] = match blend_mode {
                         crate::scene::BlendMode::Multiply => 1,
                         crate::scene::BlendMode::Screen => 2,
+                        crate::scene::BlendMode::Darken => 3,
+                        crate::scene::BlendMode::Lighten => 4,
                         _ => 0,
                     };
                     instance.brightness[0] *= brightness;
@@ -5067,14 +5131,24 @@ mod tests {
         }
         assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
 
-        let SceneNode::Layer { blend_mode, .. } = &mut scene.nodes[1] else {
-            unreachable!("blend test scene lost its layer");
+        let set_blend_mode = |scene: &mut Scene, mode| {
+            let SceneNode::Layer { blend_mode, .. } = &mut scene.nodes[1] else {
+                unreachable!("blend test scene lost its layer");
+            };
+            *blend_mode = mode;
         };
-        *blend_mode = crate::scene::BlendMode::Screen;
+        set_blend_mode(&mut scene, crate::scene::BlendMode::Screen);
         assert!(gpu_supports_scene(&scene));
         let screen_image = gpu.render_frame(&scene, &config).unwrap();
         assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
         assert_ne!(screen_image.get_pixel(8, 8), gpu_pixel);
+
+        set_blend_mode(&mut scene, crate::scene::BlendMode::Darken);
+        let darken_image = gpu.render_frame(&scene, &config).unwrap();
+        set_blend_mode(&mut scene, crate::scene::BlendMode::Lighten);
+        let lighten_image = gpu.render_frame(&scene, &config).unwrap();
+        assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
+        assert_ne!(darken_image.get_pixel(8, 8), lighten_image.get_pixel(8, 8));
     }
 
     #[test]
