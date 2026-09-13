@@ -779,6 +779,7 @@ pub struct WgpuBackend {
     gpu_images: GpuImageCache,
     text_atlas: Mutex<Option<Arc<GpuTextAtlasResource>>>,
     text_atlas_upload_bytes: AtomicU64,
+    gpu_texture_uploads: AtomicU64,
     gpu_frame_count: AtomicU64,
     cpu_fallback_frame_count: AtomicU64,
 }
@@ -819,6 +820,7 @@ impl WgpuBackend {
             gpu_images: Mutex::new(GpuImageCacheState::new(256 * 1024 * 1024)),
             text_atlas: Mutex::new(None),
             text_atlas_upload_bytes: AtomicU64::new(0),
+            gpu_texture_uploads: AtomicU64::new(0),
             gpu_frame_count: AtomicU64::new(0),
             cpu_fallback_frame_count: AtomicU64::new(0),
         })
@@ -830,6 +832,12 @@ impl WgpuBackend {
             gpu_frames: self.gpu_frame_count.load(Ordering::Relaxed),
             cpu_fallback_frames: self.cpu_fallback_frame_count.load(Ordering::Relaxed),
         }
+    }
+
+    /// Number of decoded image/video textures uploaded to the GPU.
+    /// Re-rendering a cached source/frame must not increment this counter.
+    pub fn gpu_texture_uploads(&self) -> u64 {
+        self.gpu_texture_uploads.load(Ordering::Relaxed)
     }
 
     /// Configure the image cache used when a scene falls back to CPU.
@@ -913,6 +921,7 @@ impl WgpuBackend {
             width: decoded.width(),
             height: decoded.height(),
         });
+        self.gpu_texture_uploads.fetch_add(1, Ordering::Relaxed);
         let mut cache = self
             .gpu_images
             .lock()
@@ -2601,6 +2610,7 @@ mod tests {
             .render_frame(&scene, &config)
             .unwrap();
         assert_eq!(gpu.gpu_image_cache_len(), 1);
+        assert_eq!(gpu.gpu_texture_uploads(), 1);
         assert!(gpu_image.get_pixel(16, 16)[3] > 0);
         assert_eq!(gpu_image.get_pixel(2, 2), cpu_image.get_pixel(2, 2));
         let mean_error = gpu_image
@@ -3010,6 +3020,7 @@ mod tests {
         gpu.render_frame(&same_frame, &FrameConfig::new(16, 16, 0, 2.0))
             .unwrap();
         assert_eq!(gpu.gpu_image_cache_len(), 1);
+        assert_eq!(gpu.gpu_texture_uploads(), 1);
         assert_eq!(gpu.gpu_frame_count.load(Ordering::Relaxed), 2);
         std::fs::remove_dir_all(dir).unwrap();
     }
