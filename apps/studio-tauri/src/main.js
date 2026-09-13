@@ -43,6 +43,7 @@ scene.add(cube);
 // Browser compositions can replace the demo scene without changing the Rust
 // protocol. Adapters may register Three.js, R3F, or another WebGL renderer.
 const compositions = new Map();
+const threeCompositions = new Map();
 const preloadedAssets = new Map();
 const imageDimensionsCache = new Map();
 const videoMetadataCache = new Map();
@@ -130,6 +131,52 @@ export function registerComposition(id, render) {
     throw new TypeError('registerComposition expects a non-empty id and render function');
   }
   compositions.set(id, render);
+}
+
+/**
+ * Register a reusable Three.js composition with an explicit scene lifecycle.
+ *
+ * `setup` runs once per browser worker and may return `{scene, camera}` (or
+ * any additional application state). `render` runs for every requested frame.
+ * Keeping this contract outside the frame protocol lets the same scene module
+ * run in Studio, the headless worker, and a future R3F adapter.
+ */
+export function registerThreeComposition(id, { setup, render, dispose } = {}) {
+  if (typeof id !== 'string' || !id || typeof setup !== 'function' || typeof render !== 'function') {
+    throw new TypeError('registerThreeComposition expects id, setup(), and render()');
+  }
+  const previous = threeCompositions.get(id);
+  previous?.dispose?.();
+  const entry = { setup, render, dispose, instance: null };
+  threeCompositions.set(id, entry);
+  registerComposition(id, async (context) => {
+    if (!entry.instance) {
+      entry.instance = await setup({ THREE, renderer, canvas, ...context });
+    }
+    return render({
+      THREE,
+      renderer,
+      canvas,
+      ...context,
+      ...(entry.instance && typeof entry.instance === 'object' ? entry.instance : {}),
+    });
+  });
+}
+
+export function unregisterThreeComposition(id) {
+  const entry = threeCompositions.get(id);
+  if (!entry) return false;
+  entry.dispose?.(entry.instance);
+  entry.instance?.renderer?.dispose?.();
+  entry.instance?.scene?.traverse?.((object) => {
+    object.geometry?.dispose?.();
+    for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+      material?.dispose?.();
+    }
+  });
+  threeCompositions.delete(id);
+  compositions.delete(id);
+  return true;
 }
 
 // Browser equivalent of @remotion/media-utils/getImageDimensions. Dimensions
@@ -542,6 +589,8 @@ export async function renderFrame({ composition = 'three_preview', frame: nextFr
 window.dioxuscut = {
   renderFrame,
   registerComposition,
+  registerThreeComposition,
+  unregisterThreeComposition,
   listCompositions,
   delayRender,
   continueRender,
