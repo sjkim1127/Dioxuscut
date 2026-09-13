@@ -60,6 +60,7 @@ const preloadedAssets = new Map();
 const preloadedSources = new Map();
 const imageDimensionsCache = new Map();
 const videoMetadataCache = new Map();
+const webmMetadataCache = new Map();
 const audioDurationCache = new Map();
 const audioDataCache = new Map();
 const videoTextureCache = new Map();
@@ -432,6 +433,16 @@ export async function parseMedia({
 }
 
 async function parseWebmHeader(source) {
+  if (webmMetadataCache.has(source)) return webmMetadataCache.get(source);
+  const metadata = parseWebmHeaderUncached(source).catch((error) => {
+    webmMetadataCache.delete(source);
+    throw error;
+  });
+  webmMetadataCache.set(source, metadata);
+  return metadata;
+}
+
+async function parseWebmHeaderUncached(source) {
   const signature = await readMediaRange(source, 0, 4);
   if (signature.length !== 4 || signature[0] !== 0x1a || signature[1] !== 0x45
     || signature[2] !== 0xdf || signature[3] !== 0xa3) return null;
