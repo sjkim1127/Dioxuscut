@@ -877,7 +877,10 @@ impl WgpuBackend {
         looped: bool,
     ) -> Result<Arc<GpuImageResource>, RasterError> {
         let frame = self.video_cache.load(src, time, sampling_fps, looped)?;
-        let key = format!("video:{src}:{time:.6}:{sampling_fps:.6}:{looped}");
+        let frame_index = self
+            .video_cache
+            .frame_index_for(src, time, sampling_fps, looped)?;
+        let key = format!("video:{src}:{sampling_fps:.6}:{frame_index}");
         self.gpu_pixels(&key, &frame)
     }
 
@@ -2267,7 +2270,14 @@ mod tests {
         let image = gpu.render_frame(&scene, &FrameConfig::new(16, 16, 0, 2.0)).unwrap();
         let pixel = image.get_pixel(8, 8);
         assert!(pixel[0] > 200 && pixel[1] < 40 && pixel[2] < 40);
-        assert_eq!(gpu.gpu_frame_count.load(Ordering::Relaxed), 1);
+        let mut same_frame = scene.clone();
+        let SceneNode::Video { time, .. } = &mut same_frame.nodes[0] else {
+            unreachable!();
+        };
+        *time = 0.1;
+        gpu.render_frame(&same_frame, &FrameConfig::new(16, 16, 0, 2.0)).unwrap();
+        assert_eq!(gpu.gpu_image_cache_len(), 1);
+        assert_eq!(gpu.gpu_frame_count.load(Ordering::Relaxed), 2);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

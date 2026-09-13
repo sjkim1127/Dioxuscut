@@ -68,6 +68,27 @@ pub(crate) struct VideoFrameCache {
 }
 
 impl VideoFrameCache {
+    #[cfg(feature = "gpu")]
+    pub(crate) fn frame_index_for(
+        &self,
+        src: &str,
+        time: f64,
+        sampling_fps: f64,
+        looped: bool,
+    ) -> Result<u64, RasterError> {
+        let path = canonical_local_path_with_policy(
+            src,
+            &crate::security::MediaSecurityPolicy::default(),
+        )?;
+        let metadata = self.metadata_for(&path)?;
+        Ok(normalize_frame_index(
+            time,
+            sampling_fps,
+            metadata.duration,
+            looped,
+        ))
+    }
+
     #[allow(dead_code)]
     pub(crate) fn load(
         &self,
