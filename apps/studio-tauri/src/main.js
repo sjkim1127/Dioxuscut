@@ -390,6 +390,78 @@ export function visualizeAudioWaveform({
   }).map(({ amplitude }) => amplitude);
 }
 
+const visualizeAudioCache = new Map();
+
+function fftMagnitudes(samples) {
+  const size = samples.length;
+  const real = new Float64Array(samples);
+  const imaginary = new Float64Array(size);
+  for (let i = 1, j = 0; i < size; i += 1) {
+    let bit = size >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      const value = real[i]; real[i] = real[j]; real[j] = value;
+    }
+  }
+  for (let length = 2; length <= size; length <<= 1) {
+    const angle = -2 * Math.PI / length;
+    for (let offset = 0; offset < size; offset += length) {
+      for (let i = 0; i < length / 2; i += 1) {
+        const phase = angle * i;
+        const even = offset + i;
+        const odd = even + length / 2;
+        const cos = Math.cos(phase);
+        const sin = Math.sin(phase);
+        const oddReal = real[odd] * cos - imaginary[odd] * sin;
+        const oddImaginary = real[odd] * sin + imaginary[odd] * cos;
+        real[odd] = real[even] - oddReal;
+        imaginary[odd] = imaginary[even] - oddImaginary;
+        real[even] += oddReal;
+        imaginary[even] += oddImaginary;
+      }
+    }
+  }
+  return Array.from({ length: size / 2 }, (_, index) =>
+    Math.hypot(real[index], imaginary[index]));
+}
+
+export function visualizeAudio({
+  audioData, frame, fps, numberOfSamples, optimizeFor = 'accuracy',
+  dataOffsetInSeconds = 0, smoothing = true,
+}) {
+  const size = numberOfSamples * 2;
+  if (!Number.isInteger(numberOfSamples) || numberOfSamples <= 0 || (size & (size - 1)) !== 0) {
+    throw new TypeError(`numberOfSamples must produce a power-of-two FFT size; got ${numberOfSamples}`);
+  }
+  if (!fps) throw new TypeError('fps is required');
+  const waveform = audioData?.channelWaveforms?.[0];
+  if (!waveform || waveform.length < size) throw new TypeError(`Audio data is not big enough to provide ${size} bars.`);
+  const start = Math.floor((frame / fps - dataOffsetInSeconds) * audioData.sampleRate);
+  const actualStart = Math.max(0, start - size / 2);
+  const cacheKey = `${audioData.resultId}:${frame}:${fps}:${numberOfSamples}:${optimizeFor}:${dataOffsetInSeconds}`;
+  const compute = () => {
+    const samples = new Float64Array(size);
+    for (let i = 0; i < size; i += 1) {
+      const value = waveform[actualStart + i] ?? 0;
+      samples[i] = Math.max(-1, Math.min(1, value)) * 32767;
+    }
+    const magnitudes = fftMagnitudes(samples);
+    let maxMagnitude = 0;
+    for (const sample of waveform) maxMagnitude = Math.max(maxMagnitude, Math.abs(sample));
+    const maxInt = maxMagnitude * 32767 || 1;
+    return magnitudes.map((value) => Math.max(0, Math.min(1, value / (size / 2) / maxInt)));
+  };
+  const current = visualizeAudioCache.get(cacheKey) ?? compute();
+  visualizeAudioCache.set(cacheKey, current);
+  if (!smoothing) return current;
+  const neighbours = [frame - 1, frame + 1].map((nearbyFrame) => visualizeAudio({
+    audioData, frame: nearbyFrame, fps, numberOfSamples, optimizeFor,
+    dataOffsetInSeconds, smoothing: false,
+  }));
+  return current.map((value, index) => (value + neighbours[0][index] + neighbours[1][index]) / 3);
+}
+
 // Browser equivalent of Remotion's useVideoTexture for non-React Three.js
 // compositions. The element and texture are cached by source so a frame
 // callback can reuse GPU resources across the entire render.
@@ -756,6 +828,7 @@ window.dioxuscut = {
   useAudioData,
   getWaveformPortion,
   visualizeAudioWaveform,
+  visualizeAudio,
   releaseVideoTexture,
   useCurrentFrame,
   useVideoConfig,
