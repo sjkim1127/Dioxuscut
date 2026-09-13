@@ -165,6 +165,8 @@ struct InstanceData {
 
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(1) @binding(0) var<storage, read> instances: array<InstanceData>;
+@group(2) @binding(0) var image_texture: texture_2d<f32>;
+@group(2) @binding(1) var image_sampler: sampler;
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -319,6 +321,16 @@ fn fs_solid(in: VertexOutput) -> @location(0) vec4<f32> {
     let instance = instances[in.instance_index];
     return vec4<f32>(instance.color.rgb, instance.color.a * instance.params.w);
 }
+
+@fragment
+fn fs_image(in: VertexOutput) -> @location(0) vec4<f32> {
+    let instance = instances[in.instance_index];
+    let bounds = instance.shape_bounds;
+    let local = (in.local_position - bounds.xy) / max(bounds.zw, vec2<f32>(0.000001));
+    let uv = mix(instance.params.xy, instance.params.zw, clamp(local, vec2<f32>(0.0), vec2<f32>(1.0)));
+    let sampled = textureSample(image_texture, image_sampler, uv);
+    return vec4<f32>(sampled.rgb, sampled.a * instance.color.a * instance.params.w);
+}
 "#;
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -331,8 +343,10 @@ struct GpuContext {
     queue: wgpu::Queue,
     pipeline: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
+    image_pipeline: wgpu::RenderPipeline,
     globals_layout: wgpu::BindGroupLayout,
     instance_layout: wgpu::BindGroupLayout,
+    image_layout: wgpu::BindGroupLayout,
     max_texture_dimension_2d: u32,
 }
 
@@ -410,9 +424,31 @@ impl GpuContext {
             }],
         });
 
+        let image_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("image_bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("pipeline_layout"),
-            bind_group_layouts: &[&globals_layout, &instance_layout],
+            bind_group_layouts: &[&globals_layout, &instance_layout, &image_layout],
             push_constant_ranges: &[],
         });
 
@@ -484,13 +520,44 @@ impl GpuContext {
             cache: None,
         });
 
+        let image_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("dioxuscut_image_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_image",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: RENDER_FORMAT,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: SAMPLE_COUNT,
+                ..Default::default()
+            },
+            multiview: None,
+            cache: None,
+        });
+
         Ok(Self {
             device,
             queue,
             pipeline,
             mesh_pipeline,
+            image_pipeline,
             globals_layout,
             instance_layout,
+            image_layout,
             max_texture_dimension_2d,
         })
     }
@@ -704,7 +771,77 @@ impl WgpuBackend {
             label: Some("frame_encoder"),
         });
 
-        let all_instances: Vec<GpuInstance> = commands.iter().map(|c| *c.instance()).collect();
+        let mut all_instances: Vec<GpuInstance> = commands.iter().map(|c| *c.instance()).collect();
+        let mut image_resources = Vec::with_capacity(commands.len());
+        for (index, command) in commands.iter().enumerate() {
+            let DrawCommand::Image { src, fit, .. } = command else {
+                image_resources.push(None);
+                continue;
+            };
+            let image = self.image_cache.load(src)?;
+            let placement = image_placement(
+                *fit,
+                image.width() as f32,
+                image.height() as f32,
+                all_instances[index].shape_bounds[0],
+                all_instances[index].shape_bounds[1],
+                all_instances[index].shape_bounds[2],
+                all_instances[index].shape_bounds[3],
+            )
+            .ok_or_else(|| RasterError::ImageAsset {
+                path: src.clone(),
+                reason: "invalid image placement dimensions".into(),
+            })?;
+            all_instances[index].bounds = placement.destination;
+            all_instances[index].shape_bounds = placement.destination;
+            all_instances[index].params[0..4].copy_from_slice(&placement.source_uv);
+
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("image_texture"),
+                size: wgpu::Extent3d {
+                    width: image.width(),
+                    height: image.height(),
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            queue.write_texture(
+                texture.as_image_copy(),
+                image.as_raw(),
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(image.width() * 4),
+                    rows_per_image: Some(image.height()),
+                },
+                wgpu::Extent3d {
+                    width: image.width(),
+                    height: image.height(),
+                    depth_or_array_layers: 1,
+                },
+            );
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("image_bg"),
+                layout: &self.ctx.image_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                ],
+            });
+            image_resources.push(Some((texture, view, sampler, bind_group)));
+        }
 
         if !all_instances.is_empty() {
             let instance_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -719,6 +856,54 @@ impl WgpuBackend {
                     binding: 0,
                     resource: instance_buf.as_entire_binding(),
                 }],
+            });
+
+            // The shared pipeline layout requires group 2 even for analytic
+            // and mesh draws. A 1x1 dummy texture keeps those pipelines valid;
+            // image draws replace it with their per-command texture group.
+            let dummy_texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("dummy_image_texture"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            queue.write_texture(
+                dummy_texture.as_image_copy(),
+                &[0, 0, 0, 0],
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4),
+                    rows_per_image: Some(1),
+                },
+                wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+            );
+            let dummy_view = dummy_texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let dummy_sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+            let dummy_image_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("dummy_image_bg"),
+                layout: &self.ctx.image_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&dummy_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&dummy_sampler),
+                    },
+                ],
             });
 
             let mesh_buffers: Vec<Option<(wgpu::Buffer, wgpu::Buffer)>> = commands
@@ -739,7 +924,7 @@ impl WgpuBackend {
                         });
                         Some((vb, ib))
                     }
-                    DrawCommand::Analytic { .. } => None,
+                    DrawCommand::Analytic { .. } | DrawCommand::Image { .. } => None,
                 })
                 .collect();
 
@@ -758,6 +943,7 @@ impl WgpuBackend {
 
             pass.set_bind_group(0, &globals_bg, &[]);
             pass.set_bind_group(1, &instance_bg, &[]);
+            pass.set_bind_group(2, &dummy_image_bg, &[]);
 
             let mut i = 0;
             while i < commands.len() {
@@ -778,6 +964,16 @@ impl WgpuBackend {
                         pass.set_vertex_buffer(0, vb.slice(..));
                         pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
                         pass.draw_indexed(0..indices.len() as u32, 0, i as u32..i as u32 + 1);
+                        i += 1;
+                    }
+                    DrawCommand::Image { .. } => {
+                        pass.set_pipeline(&self.ctx.image_pipeline);
+                        pass.set_bind_group(
+                            2,
+                            &image_resources[i].as_ref().expect("image resource").3,
+                            &[],
+                        );
+                        pass.draw(0..6, i as u32..i as u32 + 1);
                         i += 1;
                     }
                 }
@@ -1121,12 +1317,19 @@ enum DrawCommand {
         vertices: Vec<GpuVertex>,
         indices: Vec<u32>,
     },
+    Image {
+        instance: GpuInstance,
+        src: String,
+        fit: ImageFit,
+    },
 }
 
 impl DrawCommand {
     fn instance(&self) -> &GpuInstance {
         match self {
-            Self::Analytic { instance } | Self::Mesh { instance, .. } => instance,
+            Self::Analytic { instance }
+            | Self::Mesh { instance, .. }
+            | Self::Image { instance, .. } => instance,
         }
     }
 }
@@ -1258,6 +1461,36 @@ fn compile_nodes(
                 output.push(DrawCommand::Analytic { instance });
             }
 
+            SceneNode::Image {
+                src,
+                x,
+                y,
+                w,
+                h,
+                fit,
+                opacity: node_opacity,
+            } => {
+                if ![*x, *y, *w, *h, *node_opacity]
+                    .iter()
+                    .all(|value| value.is_finite())
+                    || *w <= 0.0
+                    || *h <= 0.0
+                    || *node_opacity < 0.0
+                {
+                    return None;
+                }
+                let mut instance = GpuInstance::solid(Color::WHITE, opacity * *node_opacity, transform);
+                instance.kind_data[0] = 5;
+                instance.bounds = [*x, *y, *w, *h];
+                instance.shape_bounds = instance.bounds;
+                instance.params = [0.0, 0.0, 1.0, 1.0];
+                output.push(DrawCommand::Image {
+                    instance,
+                    src: src.clone(),
+                    fit: *fit,
+                });
+            }
+
             SceneNode::Group {
                 transform: group_transform,
                 opacity: group_opacity,
@@ -1294,7 +1527,6 @@ fn compile_nodes(
 
             SceneNode::Audio { .. } => {}
             SceneNode::Text { .. }
-            | SceneNode::Image { .. }
             | SceneNode::Video { .. }
             | SceneNode::Gif { .. }
             | SceneNode::Layer { .. }
@@ -1731,9 +1963,7 @@ mod tests {
                 corner_radius: 0.0,
             }],
         };
-        // Images are intentionally used here instead of text: this is the
-        // dominant media fallback boundary that the upcoming GPU texture
-        // path must eliminate. Keep the asset inline so the test is hermetic.
+        // Keep the asset inline so the texture upload test is hermetic.
         let fallback_scene = Scene {
             nodes: vec![SceneNode::Image {
                 src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=".into(),
@@ -1748,10 +1978,57 @@ mod tests {
         backend.render_frame(&gpu_scene, &config).unwrap();
         backend.render_frame(&fallback_scene, &config).unwrap();
         assert_eq!(backend.render_stats(), WgpuRenderStats {
-            gpu_frames: 1,
-            cpu_fallback_frames: 1,
+            gpu_frames: 2,
+            cpu_fallback_frames: 0,
         });
-        assert!((backend.render_stats().cpu_fallback_ratio() - 0.5).abs() < f64::EPSILON);
+        assert!(backend.render_stats().cpu_fallback_ratio().abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn gpu_image_matches_cpu_for_fill_and_preserves_draw_order() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping image parity test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![
+                SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 32.0,
+                    h: 32.0,
+                    fill: Color::rgb(0, 0, 255),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                },
+                SceneNode::Image {
+                    src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=".into(),
+                    x: 8.0,
+                    y: 8.0,
+                    w: 16.0,
+                    h: 16.0,
+                    fit: ImageFit::Fill,
+                    opacity: 0.5,
+                },
+            ],
+        };
+        let config = FrameConfig::new(32, 32, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::headless().render_frame(&scene, &config).unwrap();
+        assert!(gpu_image.get_pixel(16, 16)[3] > 0);
+        assert_eq!(gpu_image.get_pixel(2, 2), cpu_image.get_pixel(2, 2));
+        let mean_error = gpu_image
+            .pixels()
+            .zip(cpu_image.pixels())
+            .map(|(gpu, cpu)| {
+                (0..4)
+                    .map(|channel| (i16::from(gpu[channel]) - i16::from(cpu[channel])).unsigned_abs() as u64)
+                    .sum::<u64>()
+            })
+            .sum::<u64>() as f64
+            / (config.width * config.height * 4) as f64;
+        assert!(mean_error < 12.0, "GPU/CPU image mean error was {mean_error}");
     }
 
     #[test]
