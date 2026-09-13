@@ -31,4 +31,4 @@ pub use metadata::{
     ImageDimensions, MediaMetadataError, VideoMetadata,
 };
 pub use scene::{SceneAudio, SceneGif, SceneImage, SceneVideo};
-pub use video::{Video, VideoProps};
+pub use video::{Html5Video, OffthreadVideo, Video, VideoProps};

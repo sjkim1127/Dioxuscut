@@ -85,3 +85,23 @@ pub fn Video(props: VideoProps) -> Element {
         }
     }
 }
+
+/// Remotion-compatible alias for frame-accurate, off-thread video rendering.
+///
+/// Native export already seeks `<Video>` explicitly for every composition
+/// frame, so the compatibility component intentionally shares the exact same
+/// props and timeline semantics instead of maintaining a second implementation.
+#[component]
+pub fn OffthreadVideo(props: VideoProps) -> Element {
+    Video(props)
+}
+
+/// Remotion-compatible alias for preview-oriented HTML video playback.
+///
+/// The shared component keeps preview and native export on one timeline
+/// contract; the host chooses whether the emitted media node is played or
+/// frame-seeked.
+#[component]
+pub fn Html5Video(props: VideoProps) -> Element {
+    Video(props)
+}
