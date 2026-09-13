@@ -52,7 +52,7 @@ function spawnWorker() {
         width: 1280, height: 720, props: {},
         ...(imageFormat === 'jpeg' ? {image_format: 'jpeg', jpeg_quality: jpegQuality} : {}),
         ...(transparent ? {transparent: true} : {}),
-        ...(transport === 'file' || transport === 'rgba' ? {transport} : {}),
+        ...(transport === 'file' || transport === 'rgba' || transport === 'rgba_file' ? {transport} : {}),
       }) + '\n');
     });
     (async () => {
