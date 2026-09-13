@@ -1,4 +1,3 @@
-import * as THREE from 'three';
 import { invoke } from '@tauri-apps/api/core';
 import { join, tempDir } from '@tauri-apps/api/path';
 import { open, save } from '@tauri-apps/plugin-dialog';
@@ -27,18 +26,31 @@ app.innerHTML = `
   </main>`;
 
 const canvas = document.querySelector('#preview-canvas');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setClearColor(0x0b1020);
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-camera.position.z = 3;
-scene.add(new THREE.HemisphereLight(0x9bbcff, 0x182033, 2));
-const cube = new THREE.Mesh(
-  new THREE.BoxGeometry(1, 1, 1),
-  new THREE.MeshStandardMaterial({ color: 0x6c63ff, roughness: 0.28, metalness: 0.35 }),
-);
-scene.add(cube);
+let THREE;
+let renderer;
+let scene;
+let camera;
+let cube;
+let threeReady;
+async function ensureThree() {
+  if (threeReady) return threeReady;
+  threeReady = import('three').then((module) => {
+    THREE = module;
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setClearColor(0x0b1020);
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+    camera.position.z = 3;
+    scene.add(new THREE.HemisphereLight(0x9bbcff, 0x182033, 2));
+    cube = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshStandardMaterial({ color: 0x6c63ff, roughness: 0.28, metalness: 0.35 }),
+    );
+    scene.add(cube);
+  });
+  return threeReady;
+}
 
 // Browser compositions can replace the demo scene without changing the Rust
 // protocol. Adapters may register Three.js, R3F, or another WebGL renderer.
@@ -175,6 +187,7 @@ export function registerThreeComposition(id, { setup, render, dispose } = {}) {
   threeCompositions.set(id, entry);
   registerComposition(id, async (context) => {
     if (!entry.instance) {
+      await ensureThree();
       entry.instance = await setup({ THREE, renderer, canvas, ...context });
     }
     return render({
@@ -288,6 +301,7 @@ export const getAudioDuration = getAudioDurationInSeconds;
 // compositions. The element and texture are cached by source so a frame
 // callback can reuse GPU resources across the entire render.
 export async function getVideoTexture(source, options = {}) {
+  await ensureThree();
   if (typeof source !== 'string' || !source) throw new TypeError('getVideoTexture expects a source URL');
   const cached = videoTextureCache.get(source);
   if (cached) {
@@ -437,7 +451,8 @@ export function getRemotionEnvironment() {
 export const useRemotionEnvironment = getRemotionEnvironment;
 
 // Explicit frame input keeps this scene deterministic for future exports.
-function renderDefaultFrame({ composition, frame: nextFrame, fps, props, width, height }) {
+async function renderDefaultFrame({ composition, frame: nextFrame, fps, props, width, height }) {
+  await ensureThree();
   frame = nextFrame;
   if (Number.isFinite(width) && Number.isFinite(height)) {
     renderer.setSize(width, height, false);
@@ -616,7 +631,7 @@ export async function renderFrame({ composition = 'three_preview', frame: nextFr
     await waitForRenderGates();
     return result;
   }
-  const result = renderDefaultFrame({ composition, frame: nextFrame, fps, props, width, height });
+  const result = await renderDefaultFrame({ composition, frame: nextFrame, fps, props, width, height });
   await syncMediaElements({ frame: nextFrame, fps });
   await syncLottieElements({ frame: nextFrame, fps });
   await syncCanvasImages(nextFrame);
@@ -655,6 +670,7 @@ window.dioxuscut = {
 };
 
 function resize() {
+  if (!renderer || !camera) return;
   const { width, height } = canvas.parentElement.getBoundingClientRect();
   renderer.setSize(width, height, false);
   camera.aspect = width / Math.max(height, 1);
@@ -772,6 +788,7 @@ document.querySelector('#load-project').addEventListener('click', async () => {
 
 document.querySelector('#save-project').addEventListener('click', async () => {
   try {
+    await ensureThree();
     project.props = {
       ...(project.props && typeof project.props === 'object' && !Array.isArray(project.props)
         ? project.props
