@@ -54,6 +54,12 @@ fn browser_frame_cache_bytes() -> usize {
         .unwrap_or(dioxuscut_rasterizer::DEFAULT_MAX_CACHE_BYTES)
 }
 
+fn use_file_transport(transport: Option<&str>) -> bool {
+    transport
+        .map(|value| value.trim().eq_ignore_ascii_case("file"))
+        .unwrap_or(true)
+}
+
 fn project_still_format(path: &std::path::Path) -> Option<StillImageFormat> {
     match path
         .extension()
@@ -334,13 +340,10 @@ fn start_render_job(
             if let Some(retries) = project.settings.browser_transport_retries {
                 backend = backend.with_transport_retries(retries);
             }
-            let use_file_transport = project.settings.browser_transport.as_deref()
-                .map(|transport| transport.trim().eq_ignore_ascii_case("file"))
-                // Tauri owns a local process-scoped filesystem, so prefer the
-                // faster lossless path unless a project explicitly requests
-                // the portable JSON/base64 compatibility transport.
-                .unwrap_or(true);
-            if use_file_transport {
+            // Tauri owns a local process-scoped filesystem, so prefer the
+            // faster lossless path unless a project explicitly requests
+            // the portable JSON/base64 compatibility transport.
+            if use_file_transport(project.settings.browser_transport.as_deref()) {
                 backend = backend.with_file_transport(true);
             }
             backend
@@ -644,4 +647,16 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Dioxuscut Studio");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::use_file_transport;
+
+    #[test]
+    fn tauri_defaults_to_lossless_file_transport() {
+        assert!(use_file_transport(None));
+        assert!(use_file_transport(Some(" FILE ")));
+        assert!(!use_file_transport(Some("base64")));
+    }
 }
