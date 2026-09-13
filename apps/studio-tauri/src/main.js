@@ -633,7 +633,8 @@ async function readWebmSamplesFromCue(source, trackNumber = 1, options = {}) {
   }
   const next = cues.slice(cueIndex + 1).find((cue) => cue.clusterPosition > start)?.clusterPosition;
   const requestedEnd = (next ?? start + 16 * 1024 * 1024);
-  const response = await fetch(source, { headers: { Range: `bytes=${start}-${requestedEnd - 1}` } });
+  let response = await fetch(source, { headers: { Range: `bytes=${start}-${requestedEnd - 1}` } });
+  if (response.status === 416) response = await fetch(source);
   if (!response.ok) throw new Error(`failed to read WebM cluster: ${response.status}`);
   const responseBytes = await readBoundedResponse(response, 16 * 1024 * 1024);
   const bytes = response.status === 200
