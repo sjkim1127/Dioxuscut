@@ -497,13 +497,13 @@ impl Mesh3D {
         }
 
         // Sort faces by depth (Painter's algorithm: farthest first)
-        struct ProjectedFace {
+        struct ProjectedFace<'a> {
             depth: f32,
-            indices: Vec<usize>,
+            indices: &'a [usize],
             color: Color,
         }
 
-        let mut sorted_faces: Vec<ProjectedFace> = Vec::new();
+        let mut sorted_faces: Vec<ProjectedFace<'_>> = Vec::with_capacity(self.faces.len());
 
         for face in &self.faces {
             if face.len() < 3 {
@@ -541,7 +541,7 @@ impl Mesh3D {
 
             sorted_faces.push(ProjectedFace {
                 depth,
-                indices: face.clone(),
+                indices: face,
                 color: shaded_color,
             });
         }
