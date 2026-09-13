@@ -38,6 +38,7 @@ try {
       hookContext = {
         frame: window.dioxuscut.useCurrentFrame(),
         config: window.dioxuscut.useVideoConfig(),
+        inputProps: window.dioxuscut.getInputProps(),
         staticFile: window.dioxuscut.staticFile('assets/demo.png'),
         staticFiles: window.dioxuscut.getStaticFiles(),
       };
@@ -101,7 +102,7 @@ try {
 
     await window.dioxuscut.renderFrame({
       composition: 'media_sync_smoke', frame: 15, fps: 10,
-      props: {}, assets: [jsonAsset], timeline: [], width: 320, height: 180, durationInFrames: 60,
+      props: { title: 'smoke', nested: { value: 1 } }, assets: [jsonAsset], timeline: [], width: 320, height: 180, durationInFrames: 60,
     });
     const media = document.querySelector('video[data-dioxuscut-smoke]');
     const lottie = document.querySelector('[data-dioxuscut-lottie-smoke]');
@@ -115,7 +116,7 @@ try {
 
     await window.dioxuscut.renderFrame({
       composition: 'media_sync_smoke', frame: 40, fps: 10,
-      props: {}, assets: [jsonAsset], timeline: [], width: 320, height: 180, durationInFrames: 60,
+      props: { title: 'smoke', nested: { value: 1 } }, assets: [jsonAsset], timeline: [], width: 320, height: 180, durationInFrames: 60,
     });
     const imageDimensions = await window.dioxuscut.getImageDimensions(canvasAsset);
     const cachedImageDimensions = await window.dioxuscut.getImageDimensions(canvasAsset);
@@ -167,6 +168,8 @@ try {
     `unexpected staticFile URL: ${result.hookContext.staticFile}`);
   assert(result.hookContext.staticFiles.length === 1 && result.hookContext.staticFiles[0].endsWith('/package.json'),
     'static files did not expose the active request assets');
+  assert(result.hookContext.inputProps.title === 'smoke' && result.hookContext.inputProps.nested.value === 1,
+    `input props were not synchronized: ${JSON.stringify(result.hookContext.inputProps)}`);
   assert(result.imageDimensions.width === 1 && result.imageDimensions.height === 1,
     `unexpected image dimensions: ${JSON.stringify(result.imageDimensions)}`);
   assert(result.cachedImageDimensions.width === 1 && result.cachedImageDimensions.height === 1,

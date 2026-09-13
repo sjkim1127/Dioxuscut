@@ -194,6 +194,9 @@ request; they do not introduce React or a browser render loop.
 `window.dioxuscut.staticFile(path)` resolves a portable asset URL against the
 active Vite/Tauri origin, and `getStaticFiles()` returns the asset paths declared
 on the current project render request.
+`window.dioxuscut.getInputProps()` returns a cloned snapshot of the active
+project props, matching the non-hook Remotion API while preventing a
+composition from mutating the host-owned request object.
 For non-React Three.js compositions, `window.dioxuscut.useVideoTexture(src,
 {frame, fps})` (also available as `getVideoTexture`) returns a cached
 `THREE.VideoTexture` after `loadeddata` and

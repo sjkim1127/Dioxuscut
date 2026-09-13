@@ -338,6 +338,13 @@ export function getStaticFiles() {
   return [...activeAssets];
 }
 
+// Remotion-compatible access to the current composition input props.
+export function getInputProps() {
+  return typeof structuredClone === 'function'
+    ? structuredClone(activeProps)
+    : JSON.parse(JSON.stringify(activeProps));
+}
+
 // Explicit frame input keeps this scene deterministic for future exports.
 function renderDefaultFrame({ composition, frame: nextFrame, fps, props, width, height }) {
   frame = nextFrame;
@@ -461,6 +468,7 @@ export async function renderFrame({ composition = 'three_preview', frame: nextFr
   const props = inputProps && typeof inputProps === 'object' ? inputProps : {};
   frame = nextFrame;
   activeAssets = Array.isArray(assets) ? [...assets] : [];
+  activeProps = props;
   videoConfig = {
     ...videoConfig,
     fps,
@@ -543,6 +551,7 @@ window.dioxuscut = {
   useVideoConfig,
   staticFile,
   getStaticFiles,
+  getInputProps,
 };
 
 function resize() {
@@ -557,6 +566,7 @@ resize();
 let frame = 0;
 let videoConfig = { fps: 30, width: 1280, height: 720, durationInFrames: 150 };
 let activeAssets = [];
+let activeProps = {};
 let playing = true;
 let currentJobId = null;
 let playbackStartedAt = performance.now();
