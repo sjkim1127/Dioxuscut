@@ -54,6 +54,12 @@ fn browser_frame_cache_bytes() -> usize {
         .unwrap_or(dioxuscut_rasterizer::DEFAULT_MAX_CACHE_BYTES)
 }
 
+fn default_browser_concurrency() -> usize {
+    std::thread::available_parallelism()
+        .map(|parallelism| parallelism.get().min(4))
+        .unwrap_or(1)
+}
+
 fn use_file_transport(transport: Option<&str>) -> bool {
     transport
         .map(|value| value.trim().eq_ignore_ascii_case("file"))
@@ -304,7 +310,7 @@ fn start_render_job(
                 .ok()
                 .and_then(|value| value.parse().ok())
         })
-        .unwrap_or(1);
+        .unwrap_or_else(default_browser_concurrency);
     let state_jobs = Arc::clone(&state.jobs);
     let state_cancellations = Arc::clone(&state.cancellations);
     let cancellation = make_cancel_signal();
@@ -651,12 +657,17 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::use_file_transport;
+    use super::{default_browser_concurrency, use_file_transport};
 
     #[test]
     fn tauri_defaults_to_lossless_file_transport() {
         assert!(use_file_transport(None));
         assert!(use_file_transport(Some(" FILE ")));
         assert!(!use_file_transport(Some("base64")));
+    }
+
+    #[test]
+    fn browser_concurrency_has_a_bounded_positive_default() {
+        assert!((1..=4).contains(&default_browser_concurrency()));
     }
 }
