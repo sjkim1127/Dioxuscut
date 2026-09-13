@@ -31,6 +31,9 @@ try {
     }, 'audio');
     const audioSupport = await AudioDecoder.isConfigSupported({ codec: 'mp4a.40.2', numberOfChannels: 2, sampleRate: 48000 });
     const parsed = await window.dioxuscut.parseIsoBmffMovieHeader('/assets/showcase.mp4');
+    const samples = await window.dioxuscut.readIsoBmffSamples('/assets/showcase.mp4', 0, [0, 1, 2], {
+      parsed, concurrency: 2,
+    });
     return {
       type: chunk.type, timestamp: chunk.timestamp, duration: chunk.duration, supported: support.supported,
       annexB: [...annexB],
@@ -40,6 +43,9 @@ try {
       mediaDuration: parsed.durationInSeconds,
       sampleCount: parsed.tracks[0].sampleTables.sampleRanges.length,
       codecConfig: parsed.tracks[0].codecConfig.type,
+      batchSamples: samples.map(({ sampleIndex, offset, size, timestamp, keyframe, data }) => ({
+        sampleIndex, offset, size, timestamp, keyframe, bytes: data.byteLength,
+      })),
     };
   });
   assert.equal(result.type, 'key');
@@ -55,6 +61,11 @@ try {
   assert.equal(result.mediaDuration, 3);
   assert.equal(result.sampleCount, 180);
   assert.equal(result.codecConfig, 'avcC');
+  assert.equal(result.batchSamples.length, 3);
+  assert.deepEqual(result.batchSamples.map(({ sampleIndex }) => sampleIndex), [0, 1, 2]);
+  assert.equal(result.batchSamples[0].timestamp, 0);
+  assert.equal(result.batchSamples[0].keyframe, true);
+  assert.ok(result.batchSamples.every(({ size, bytes }) => size === bytes && size > 0));
   console.log(JSON.stringify({ status: 'ok', ...result }));
 } finally {
   await browser.close();
