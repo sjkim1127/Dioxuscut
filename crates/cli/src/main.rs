@@ -3,6 +3,7 @@ use dioxuscut_cli::{
     default_render_control, execute_render_command_with_control, serve::ServeConfig, Cli, Commands,
     RenderRequest,
 };
+use std::time::Instant;
 
 fn project_codec(output: &std::path::Path) -> anyhow::Result<dioxuscut_cli::RenderCodec> {
     match output.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
@@ -166,6 +167,7 @@ async fn main() -> anyhow::Result<()> {
             frame_start,
             frames,
             concurrency,
+            repetitions,
             output,
             csv,
         } => {
@@ -174,6 +176,9 @@ async fn main() -> anyhow::Result<()> {
             }
             if *concurrency == 0 {
                 anyhow::bail!("--concurrency must be greater than zero");
+            }
+            if *repetitions == 0 {
+                anyhow::bail!("--repetitions must be greater than zero");
             }
             if !fps.is_finite() || *fps <= 0.0 {
                 anyhow::bail!("--fps must be finite and greater than zero");
@@ -192,63 +197,101 @@ async fn main() -> anyhow::Result<()> {
                         .ok_or_else(|| anyhow::anyhow!("frame range overflows u32"))
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?;
-            let mut samples = Vec::with_capacity(*frames as usize);
-            for batch in frame_numbers.chunks(*concurrency) {
-                let backend_ref = &backend;
-                let batch_results = std::thread::scope(|scope| {
-                    let handles = batch.iter().map(|&frame| {
-                        let backend = backend_ref;
-                        scope.spawn(move || {
-                            let request = dioxuscut_rasterizer::WebFrameRequest {
-                                composition: Some(composition.clone()),
-                                frame,
-                                fps: *fps,
-                                width: *width,
-                                height: *height,
-                                props: serde_json::json!({}),
-                                assets: Vec::new(),
-                                timeline: Vec::new(),
-                                image_format: None,
-                                jpeg_quality: None,
-                                transparent: true,
-                                transport: Some("rgba".into()),
-                            };
-                            let (_, timing) = backend
-                                .render_web_frame_with_timing(&request)
-                                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-                            let timing = timing.ok_or_else(|| {
-                                anyhow::anyhow!(
-                                    "frame {frame} did not return WebCodecs timing metadata"
-                                )
-                            })?;
-                            Ok::<_, anyhow::Error>((frame, timing))
-                        })
-                    });
-                    handles
-                        .map(|handle| {
-                            handle
-                                .join()
-                                .map_err(|_| anyhow::anyhow!("WebCodecs frame worker panicked"))?
-                        })
-                        .collect::<anyhow::Result<Vec<_>>>()
-                })?;
-                samples.extend(batch_results);
+            let render_sequence = || -> anyhow::Result<(
+                dioxuscut_rasterizer::WebFrameDriftReport,
+                std::time::Duration,
+            )> {
+                let started = Instant::now();
+                let mut samples = Vec::with_capacity(*frames as usize);
+                for batch in frame_numbers.chunks(*concurrency) {
+                    let backend_ref = &backend;
+                    let batch_results = std::thread::scope(|scope| {
+                        let handles = batch.iter().map(|&frame| {
+                            let backend = backend_ref;
+                            scope.spawn(move || {
+                                let request = dioxuscut_rasterizer::WebFrameRequest {
+                                    composition: Some(composition.clone()),
+                                    frame,
+                                    fps: *fps,
+                                    width: *width,
+                                    height: *height,
+                                    props: serde_json::json!({}),
+                                    assets: Vec::new(),
+                                    timeline: Vec::new(),
+                                    image_format: None,
+                                    jpeg_quality: None,
+                                    transparent: true,
+                                    transport: Some("rgba".into()),
+                                };
+                                let (_, timing) = backend
+                                    .render_web_frame_with_timing(&request)
+                                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                                let timing = timing.ok_or_else(|| {
+                                    anyhow::anyhow!(
+                                        "frame {frame} did not return WebCodecs timing metadata"
+                                    )
+                                })?;
+                                Ok::<_, anyhow::Error>((frame, timing))
+                            })
+                        });
+                        handles
+                            .map(|handle| {
+                                handle.join().map_err(|_| {
+                                    anyhow::anyhow!("WebCodecs frame worker panicked")
+                                })?
+                            })
+                            .collect::<anyhow::Result<Vec<_>>>()
+                    })?;
+                    samples.extend(batch_results);
+                }
+                samples.sort_by_key(|(frame, _)| *frame);
+                let report = dioxuscut_rasterizer::WebFrameDriftReport::from_samples(&samples)
+                    .ok_or_else(|| anyhow::anyhow!("no WebCodecs timing samples were collected"))?;
+                Ok((report, started.elapsed()))
+            };
+            let mut runs = Vec::with_capacity(*repetitions);
+            for _ in 0..*repetitions {
+                runs.push(render_sequence()?);
             }
-            samples.sort_by_key(|(frame, _)| *frame);
-            let report = dioxuscut_rasterizer::WebFrameDriftReport::from_samples(&samples)
-                .ok_or_else(|| anyhow::anyhow!("no WebCodecs timing samples were collected"))?;
-            std::fs::write(output, report.to_json()?)?;
+            let report = runs[0].0;
+            let mut elapsed_ms = runs
+                .iter()
+                .map(|(_, duration)| duration.as_secs_f64() * 1000.0)
+                .collect::<Vec<_>>();
+            elapsed_ms.sort_by(f64::total_cmp);
+            let percentile = |rank: usize| {
+                let nearest_rank = (elapsed_ms.len() * rank).div_ceil(100).max(1);
+                elapsed_ms[nearest_rank - 1]
+            };
+            let artifact = serde_json::json!({
+                "drift": report,
+                "repetitions": elapsed_ms.len(),
+                "elapsed_ms": elapsed_ms,
+                "p50_ms": percentile(50),
+                "p95_ms": percentile(95),
+            });
+            std::fs::write(output, serde_json::to_string_pretty(&artifact)?)?;
             if let Some(csv_path) = csv {
-                std::fs::write(
-                    csv_path,
-                    format!(
-                        "{}\n{}\n",
-                        dioxuscut_rasterizer::WebFrameDriftReport::csv_header(),
+                let mut csv_output = String::from(
+                    "repetition,elapsed_ms,sample_count,mean_abs_drift_frames,max_abs_drift_frames,non_contiguous_samples\n",
+                );
+                for (index, elapsed) in elapsed_ms.iter().enumerate() {
+                    csv_output.push_str(&format!(
+                        "{},{:.3},{}\n",
+                        index + 1,
+                        elapsed,
                         report.to_csv_row()
-                    ),
-                )?;
+                    ));
+                }
+                std::fs::write(csv_path, csv_output)?;
             }
-            println!("validated {} WebCodecs frames", report.sample_count);
+            println!(
+                "validated {} WebCodecs frames across {} repetitions (p50 {:.2}ms, p95 {:.2}ms)",
+                report.sample_count,
+                elapsed_ms.len(),
+                percentile(50),
+                percentile(95)
+            );
         }
         Commands::ValidateProject { input } => {
             let project = dioxuscut_project::Project::load(input)

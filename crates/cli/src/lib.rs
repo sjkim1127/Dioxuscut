@@ -668,6 +668,9 @@ pub enum Commands {
         frames: u32,
         #[arg(long, default_value_t = 1)]
         concurrency: usize,
+        /// Number of independent frame-sequence measurements.
+        #[arg(long, default_value_t = 1)]
+        repetitions: usize,
         /// JSON report output path.
         #[arg(long, short, default_value = "webcodecs-drift.json")]
         output: PathBuf,
