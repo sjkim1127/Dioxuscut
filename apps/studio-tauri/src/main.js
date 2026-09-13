@@ -731,14 +731,15 @@ export function makeIsoBmffWebCodecsConfig(track) {
 // string selection depend on the sample entry; returned VideoFrames belong to
 // the caller and must be closed when no longer needed.
 export async function decodeIsoBmffVideo(source, {
-  trackIndex = 0, startSample = 0, endSample = Infinity, codec, description, options = {},
+  trackIndex = 0, startSample = 0, endSample = Infinity, maxSamples = 256, codec, description, options = {},
 } = {}) {
   if (typeof VideoDecoder === 'undefined') throw new Error('VideoDecoder is not available in this runtime');
   if (typeof codec !== 'string' || !codec) throw new TypeError('decodeIsoBmffVideo requires a codec string');
   const parsed = await parseIsoBmffMovieHeader(source, options);
   const track = parsed?.tracks?.[trackIndex];
   const ranges = track?.sampleTables?.sampleRanges ?? [];
-  const samples = ranges.filter(({ sampleIndex }) => sampleIndex >= startSample && sampleIndex < endSample);
+  if (!Number.isInteger(maxSamples) || maxSamples <= 0) throw new RangeError('maxSamples must be a positive integer');
+  const samples = ranges.filter(({ sampleIndex }) => sampleIndex >= startSample && sampleIndex < endSample).slice(0, maxSamples);
   if (!samples.length) throw new RangeError('decodeIsoBmffVideo found no samples in the requested range');
   const frames = [];
   let failure;
@@ -774,14 +775,15 @@ export async function decodeIsoBmffVideo(source, {
 }
 
 export async function decodeIsoBmffAudio(source, {
-  trackIndex = 0, startSample = 0, endSample = Infinity, codec, description, options = {},
+  trackIndex = 0, startSample = 0, endSample = Infinity, maxSamples = 256, codec, description, options = {},
 } = {}) {
   if (typeof AudioDecoder === 'undefined') throw new Error('AudioDecoder is not available in this runtime');
   if (typeof codec !== 'string' || !codec) throw new TypeError('decodeIsoBmffAudio requires a codec string');
   const parsed = await parseIsoBmffMovieHeader(source, options);
   const track = parsed?.tracks?.[trackIndex];
   const ranges = track?.sampleTables?.sampleRanges ?? [];
-  const samples = ranges.filter(({ sampleIndex }) => sampleIndex >= startSample && sampleIndex < endSample);
+  if (!Number.isInteger(maxSamples) || maxSamples <= 0) throw new RangeError('maxSamples must be a positive integer');
+  const samples = ranges.filter(({ sampleIndex }) => sampleIndex >= startSample && sampleIndex < endSample).slice(0, maxSamples);
   if (!samples.length) throw new RangeError('decodeIsoBmffAudio found no samples in the requested range');
   const chunks = [];
   let failure;

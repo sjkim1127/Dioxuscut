@@ -313,3 +313,6 @@ samples; codec string and optional description remain explicit at the call
 site so the same parser can serve different WebCodecs implementations.
 `decodeIsoBmffAudio()` provides the corresponding `AudioDecoder` lifecycle and
 returns owned `AudioData` objects for the shared audio pipeline.
+Both decoders default to at most 256 samples per call via `maxSamples`, making
+memory use bounded for long tracks; callers can choose a different positive
+limit for windowed decoding.
