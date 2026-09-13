@@ -13,6 +13,7 @@ use crate::scene::{
 use crate::video_cache::VideoFrameCache;
 use image::{imageops, RgbaImage};
 use rayon::prelude::*;
+#[cfg(feature = "gpu")]
 use std::sync::Arc;
 use tiny_skia::{
     BlendMode as SkBlendMode, FillRule, IntSize, Mask, MaskType, Paint, Path, PathBuilder, Pixmap,
