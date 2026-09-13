@@ -49,6 +49,7 @@
 use crate::backend::{BackendCapabilities, FrameConfig, RasterError, RasterizerBackend};
 use crate::scene::{Color, GradientStop, Scene, SceneNode};
 use crate::tiny_skia_backend::{svgpath_to_tiny_skia, TinySkiaBackend};
+use crate::image_cache::ImageCache;
 use image::RgbaImage;
 use std::sync::atomic::{AtomicU64, Ordering};
 use lyon_tessellation::geometry_builder::{BuffersBuilder, FillVertexConstructor, VertexBuffers};
@@ -539,6 +540,11 @@ pub struct WgpuBackend {
     /// Per-resolution GPU resource pool.  Key = `(width, height)`.
     frame_resources: GpuResourcePool,
     fallback: TinySkiaBackend,
+    /// Decoded image ownership for the future GPU texture cache. Keeping this
+    /// separate from the CPU backend prevents a GPU render from depending on
+    /// fallback implementation details while allowing both paths to share
+    /// decoded pixels during the transition.
+    image_cache: ImageCache,
     gpu_frame_count: AtomicU64,
     cpu_fallback_frame_count: AtomicU64,
 }
@@ -560,6 +566,7 @@ impl WgpuBackend {
             ctx,
             frame_resources: Mutex::new(HashMap::new()),
             fallback: TinySkiaBackend::new(),
+            image_cache: ImageCache::default(),
             gpu_frame_count: AtomicU64::new(0),
             cpu_fallback_frame_count: AtomicU64::new(0),
         })
@@ -576,6 +583,7 @@ impl WgpuBackend {
     /// Configure the image cache used when a scene falls back to CPU.
     pub fn with_image_cache_bytes(mut self, max_bytes: usize) -> Self {
         self.fallback = self.fallback.with_image_cache_bytes(max_bytes);
+        self.image_cache = ImageCache::with_max_bytes(max_bytes);
         self
     }
 
