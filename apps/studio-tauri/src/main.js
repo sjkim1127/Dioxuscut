@@ -315,10 +315,11 @@ export async function parseMedia({
     if (!requested || requested.length === 0) return result;
     return Object.fromEntries(requested.filter((field) => field in result).map((field) => [field, result[field]]));
   };
-  const [container, webm] = await Promise.all([
+  const [container, webmMetadata] = await Promise.all([
     parseIsoBmffMovieHeader(src).catch(() => null),
-    detectWebmContainer(src).catch(() => false),
+    parseWebmHeader(src).catch(() => null),
   ]);
+  const webm = Boolean(webmMetadata);
   const wav = await parseWavMetadata(src).catch(() => null);
   if (wav) {
     await onDimensions?.(null);
@@ -346,9 +347,11 @@ export async function parseMedia({
     height: video.height,
     fps: video.fps,
     durationInSeconds: video.durationInSeconds,
-    codec: null,
+    codec: webmMetadata.videoCodec,
+    trackNumber: webmMetadata.videoTrackNumber,
   } : null;
-  const durationInSeconds = video?.durationInSeconds ?? audioDuration ?? container?.durationInSeconds ?? 0;
+  const durationInSeconds = video?.durationInSeconds ?? audioDuration ?? container?.durationInSeconds
+    ?? webmMetadata?.durationInSeconds ?? 0;
   const videoTrack = container?.tracks?.find((track) => track.type === 'video') ?? webmTrack;
   const audioTrack = container?.tracks?.find((track) => track.type === 'audio');
   const fps = videoTrack?.fps ?? null;
@@ -410,10 +413,84 @@ export async function parseMedia({
   return selectFields(result);
 }
 
-async function detectWebmContainer(source) {
-  const bytes = await readMediaRange(source, 0, 4);
-  return bytes.length === 4 && bytes[0] === 0x1a && bytes[1] === 0x45
-    && bytes[2] === 0xdf && bytes[3] === 0xa3;
+async function parseWebmHeader(source) {
+  const signature = await readMediaRange(source, 0, 4);
+  if (signature.length !== 4 || signature[0] !== 0x1a || signature[1] !== 0x45
+    || signature[2] !== 0xdf || signature[3] !== 0xa3) return null;
+  const bytes = await readMediaRange(source, 0, 16 * 1024 * 1024);
+  const elements = [];
+  const readVint = (offset, forSize = false) => {
+    if (offset >= bytes.length) return null;
+    const first = bytes[offset];
+    let mask = 0x80;
+    let width = 1;
+    while (width <= 8 && !(first & mask)) { mask >>= 1; width += 1; }
+    if (width > 8 || offset + width > bytes.length) return null;
+    let value = first & (mask - 1);
+    for (let index = 1; index < width; index += 1) value = value * 256 + bytes[offset + index];
+    return { width, value: forSize && value === (2 ** (7 * width)) - 1 ? null : value };
+  };
+  const readId = (offset) => {
+    if (offset >= bytes.length) return null;
+    const first = bytes[offset];
+    let mask = 0x80;
+    let width = 1;
+    while (width <= 4 && !(first & mask)) { mask >>= 1; width += 1; }
+    if (width > 4 || offset + width > bytes.length) return null;
+    let value = 0;
+    for (let index = 0; index < width; index += 1) value = value * 256 + bytes[offset + index];
+    return { width, value };
+  };
+  const masters = new Set([0x1a45dfa3, 0x18538067, 0x1549a966, 0x1654ae6b, 0xae, 0xe0]);
+  const parseRange = (rangeStart, rangeEnd) => {
+    let offset = rangeStart;
+    while (offset + 2 <= rangeEnd) {
+      const idInfo = readId(offset);
+      if (!idInfo) break;
+      const sizeInfo = readVint(offset + idInfo.width, true);
+      if (!sizeInfo || sizeInfo.value === null) break;
+      const start = offset + idInfo.width + sizeInfo.width;
+      const end = Math.min(rangeEnd, start + sizeInfo.value);
+      elements.push({ id: idInfo.value, start, end });
+      if (masters.has(idInfo.value)) parseRange(start, end);
+      offset = end;
+    }
+  };
+  parseRange(0, bytes.length);
+  const integer = ({ start, end }) => {
+    let value = 0;
+    for (let index = start; index < end; index += 1) value = value * 256 + bytes[index];
+    return value;
+  };
+  const float = ({ start, end }) => {
+    const view = new DataView(bytes.buffer, bytes.byteOffset + start, end - start);
+    return end - start === 4 ? view.getFloat32(0, false) : view.getFloat64(0, false);
+  };
+  const find = (id, start = 0, end = bytes.length) => elements.find((element) =>
+    element.id === id && element.start >= start && element.end <= end);
+  const segment = find(0x18538067);
+  if (!segment) return null;
+  const info = find(0x1549a966, segment.start, segment.end);
+  const scale = info ? find(0x2ad7b1, info.start, info.end) : null;
+  const duration = info ? find(0x4489, info.start, info.end) : null;
+  const tracks = find(0x1654ae6b, segment.start, segment.end);
+  const entry = tracks ? find(0xae, tracks.start, tracks.end) : null;
+  const trackType = entry ? find(0x83, entry.start, entry.end) : null;
+  const trackNumber = entry ? find(0xd7, entry.start, entry.end) : null;
+  const codec = entry ? find(0x86, entry.start, entry.end) : null;
+  const video = entry ? find(0xe0, entry.start, entry.end) : null;
+  const width = video ? find(0xb0, video.start, video.end) : null;
+  const height = video ? find(0xba, video.start, video.end) : null;
+  const codecId = codec ? new TextDecoder().decode(bytes.subarray(codec.start, codec.end)) : null;
+  return {
+    container: 'webm',
+    durationInSeconds: duration && scale ? float(duration) * integer(scale) / 1e9 : null,
+    videoCodec: codecId,
+    videoTrackNumber: trackNumber ? integer(trackNumber) : null,
+    videoWidth: width ? integer(width) : null,
+    videoHeight: height ? integer(height) : null,
+    videoType: trackType ? integer(trackType) : null,
+  };
 }
 
 // Browser counterpart of the native bounded range reader used by the
