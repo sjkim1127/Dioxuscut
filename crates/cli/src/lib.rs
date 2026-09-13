@@ -1332,7 +1332,11 @@ pub async fn execute_render_command_with_registry_and_control(
             let browser_capacity = std::env::var("DIOXUSCUT_BROWSER_CONCURRENCY")
                 .ok()
                 .and_then(|value| value.parse::<usize>().ok())
-                .unwrap_or(1);
+                .unwrap_or_else(|| {
+                    std::thread::available_parallelism()
+                        .map(|parallelism| parallelism.get().min(4))
+                        .unwrap_or(1)
+                });
             let concurrency = request.effective_concurrency(browser_capacity);
             let node = std::env::var_os("DIOXUSCUT_BROWSER_NODE").unwrap_or_else(|| "node".into());
             let rasterizer = BrowserFrameBackend::with_concurrency(node, worker, url, concurrency)
