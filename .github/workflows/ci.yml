@@ -233,3 +233,9 @@ jobs:
           DIOXUSCUT_BROWSER_URL: http://127.0.0.1:1421
           CHROME_PATH: /usr/bin/chromium
         run: node benchmarks/browser/three-lifecycle-smoke.mjs
+
+      - name: Exercise WebCodecs contract
+        env:
+          DIOXUSCUT_BROWSER_URL: http://127.0.0.1:1421
+          CHROME_PATH: /usr/bin/chromium
+        run: node benchmarks/browser/webcodecs-contract-smoke.mjs
