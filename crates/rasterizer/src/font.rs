@@ -258,6 +258,14 @@ pub struct FontCache {
     font: Option<Arc<LoadedFont>>,
     path: Option<String>,
     assets: Mutex<HashMap<String, Arc<LoadedFont>>>,
+    rasterized: Mutex<HashMap<TextRasterKey, Arc<RenderedText>>>,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+struct TextRasterKey {
+    text: String,
+    font_size_bits: u32,
+    sources: Vec<String>,
 }
 
 pub(crate) struct LoadedFont {
@@ -308,6 +316,7 @@ impl FontCache {
                             font: Some(Arc::new(font)),
                             path: Some(path),
                             assets: Mutex::new(HashMap::new()),
+                            rasterized: Mutex::new(HashMap::new()),
                         };
                     }
                     Err(err) => {
@@ -334,6 +343,7 @@ impl FontCache {
                             font: Some(Arc::new(font)),
                             path: Some(path.to_string()),
                             assets: Mutex::new(HashMap::new()),
+                            rasterized: Mutex::new(HashMap::new()),
                         };
                     }
                 }
@@ -357,6 +367,7 @@ impl FontCache {
             font: Some(Arc::new(font)),
             path: Some("<bundled:NotoSans-Regular>".into()),
             assets: Mutex::new(HashMap::new()),
+            rasterized: Mutex::new(HashMap::new()),
         }
     }
 
@@ -366,6 +377,7 @@ impl FontCache {
             font: None,
             path: None,
             assets: Mutex::new(HashMap::new()),
+            rasterized: Mutex::new(HashMap::new()),
         }
     }
 
@@ -385,6 +397,10 @@ impl FontCache {
             .lock()
             .expect("font cache lock poisoned")
             .insert(name.to_string(), Arc::new(loaded));
+        self.rasterized
+            .lock()
+            .expect("font raster cache lock poisoned")
+            .clear();
         Ok(())
     }
 
@@ -405,6 +421,36 @@ impl FontCache {
 
     /// Rasterize text with ordered explicit local fonts followed by the system fallback.
     pub(crate) fn rasterize(
+        &self,
+        text: &str,
+        font_size: f32,
+        sources: &[String],
+    ) -> Result<Option<RenderedText>, FontLoadError> {
+        let key = TextRasterKey {
+            text: text.to_string(),
+            font_size_bits: font_size.to_bits(),
+            sources: sources.to_vec(),
+        };
+        if let Some(cached) = self
+            .rasterized
+            .lock()
+            .expect("font raster cache lock poisoned")
+            .get(&key)
+            .cloned()
+        {
+            return Ok(Some((*cached).clone()));
+        }
+        let rendered = self.rasterize_uncached(text, font_size, sources)?;
+        if let Some(rendered) = rendered.as_ref() {
+            self.rasterized
+                .lock()
+                .expect("font raster cache lock poisoned")
+                .insert(key, Arc::new(rendered.clone()));
+        }
+        Ok(rendered)
+    }
+
+    fn rasterize_uncached(
         &self,
         text: &str,
         font_size: f32,
@@ -1412,7 +1458,7 @@ fn shape_runs(
 }
 
 /// Rasterized text as a greyscale coverage map.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RenderedText {
     /// Single-channel (alpha coverage) pixel data, row-major.
     pub pixels: Vec<u8>,
@@ -1591,6 +1637,23 @@ mod tests {
         // At least some pixels should have coverage
         let has_coverage = rendered.pixels.iter().any(|&p| p > 0);
         assert!(has_coverage, "At least one pixel should have coverage");
+    }
+
+    #[test]
+    fn repeated_text_rasterization_reuses_bitmap_cache() {
+        let cache = FontCache::bundled();
+        let first = cache.rasterize("Atlas cache", 24.0, &[]).unwrap().unwrap();
+        let second = cache.rasterize("Atlas cache", 24.0, &[]).unwrap().unwrap();
+        assert_eq!(first.pixels, second.pixels);
+        assert_eq!(first.width, second.width);
+        assert_eq!(
+            cache
+                .rasterized
+                .lock()
+                .expect("font raster cache lock poisoned")
+                .len(),
+            1
+        );
     }
 
     #[test]
