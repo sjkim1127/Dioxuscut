@@ -1468,14 +1468,20 @@ impl RasterizerBackend for WgpuBackend {
                 .iter()
                 .all(|node| matches!(node, SceneNode::Shader { .. }))
         {
-            let image =
-                if scene.nodes.iter().all(
-                    |node| matches!(node, SceneNode::Shader { opacity, .. } if *opacity == 1.0),
-                ) {
-                    self.render_shader_layers_direct(scene, config)?
-                } else {
-                    self.render_shader_layers(scene, config)?
-                };
+            let image = if scene.nodes.iter().all(|node| {
+                matches!(node, SceneNode::Shader { x, y, w, h, opacity, .. }
+                        if *opacity == 1.0
+                            && *x >= 0.0
+                            && *y >= 0.0
+                            && *w > 0.0
+                            && *h > 0.0
+                            && *x + *w <= config.width as f32
+                            && *y + *h <= config.height as f32)
+            }) {
+                self.render_shader_layers_direct(scene, config)?
+            } else {
+                self.render_shader_layers(scene, config)?
+            };
             self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
             return Ok(image);
         }
@@ -3025,6 +3031,32 @@ mod tests {
             "overlap was {overlap:?}"
         );
         assert_eq!(image.get_pixel(10, 4)[3], 0);
+    }
+
+    #[test]
+    fn gpu_shader_region_outside_target_uses_compatibility_path() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping shader bounds test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Shader {
+                x: 14.0,
+                y: 2.0,
+                w: 8.0,
+                h: 4.0,
+                source: "return vec4<f32>(1.0, 0.0, 0.0, 1.0);".into(),
+                time: 0.0,
+                params: [0.0; 4],
+                opacity: 1.0,
+            }],
+        };
+        let image = gpu
+            .render_frame(&scene, &FrameConfig::new(16, 10, 0, 30.0))
+            .unwrap();
+        assert_eq!(image.width(), 16);
+        assert_eq!(image.height(), 10);
+        assert!(image.get_pixel(15, 3)[0] > 0);
     }
 
     #[test]
