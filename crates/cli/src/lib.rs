@@ -1339,7 +1339,7 @@ pub async fn execute_render_command_with_registry_and_control(
                 });
             let concurrency = request.effective_concurrency(browser_capacity);
             let node = std::env::var_os("DIOXUSCUT_BROWSER_NODE").unwrap_or_else(|| "node".into());
-            let rasterizer = BrowserFrameBackend::with_concurrency(node, worker, url, concurrency)
+            let mut rasterizer = BrowserFrameBackend::with_concurrency(node, worker, url, concurrency)
                 .map_err(|error| anyhow::anyhow!("Browser backend init failed: {error}"))?
                 .with_frame_cache_bytes(
                     std::env::var("DIOXUSCUT_FRAME_CACHE_BYTES")
@@ -1348,6 +1348,12 @@ pub async fn execute_render_command_with_registry_and_control(
                         .filter(|value| *value > 0)
                         .unwrap_or(dioxuscut_rasterizer::DEFAULT_MAX_CACHE_BYTES),
                 );
+            if !std::env::var("DIOXUSCUT_BROWSER_TRANSPORT")
+                .ok()
+                .is_some_and(|value| value.trim().eq_ignore_ascii_case("base64"))
+            {
+                rasterizer = rasterizer.with_file_transport(true);
+            }
             rasterizer.set_composition(
                 request
                     .composition
