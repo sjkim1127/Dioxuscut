@@ -445,10 +445,17 @@ fn mask_shape_coverage(position: vec2<f32>, rect: vec4<f32>, shape: vec4<f32>, k
         let delta = position - shape.xy;
         inside = dot(delta, delta) < shape.z * shape.z;
     }
+    if kind == 4u {
+        let delta = position - shape.xy;
+        inside = dot(delta, delta) < shape.z * shape.z;
+    }
     var shape_opacity = opacity;
-    if kind == 2u || kind == 3u {
+    if kind == 2u || kind == 3u || kind == 4u {
         let direction = shape.zw - shape.xy;
-        let t = clamp(dot(position - shape.xy, direction) / max(dot(direction, direction), 0.000001), 0.0, 1.0);
+        var t = clamp(dot(position - shape.xy, direction) / max(dot(direction, direction), 0.000001), 0.0, 1.0);
+        if kind == 4u {
+            t = clamp(length(position - shape.xy) / max(shape.z, 0.000001), 0.0, 1.0);
+        }
         let color = mix(color0, color1, t);
         shape_opacity = color.a;
         if kind == 3u {
@@ -2824,6 +2831,25 @@ fn gpu_mask_shapes(
                     color_to_f32(stops[1].color),
                 )
             }
+            SceneNode::RadialGradient { cx, cy, r, stops }
+                if [*cx, *cy, *r].iter().all(|v| v.is_finite())
+                    && *r > 0.0
+                    && stops.len() == 2
+                    && (stops[0].position - 0.0).abs() <= f32::EPSILON
+                    && (stops[1].position - 1.0).abs() <= f32::EPSILON =>
+            {
+                (
+                    *cx - *r,
+                    *cy - *r,
+                    *r * 2.0,
+                    *r * 2.0,
+                    Color::WHITE,
+                    4,
+                    [*cx, *cy, *r, 0.0],
+                    color_to_f32(stops[0].color),
+                    color_to_f32(stops[1].color),
+                )
+            }
             _ => return None,
         };
         let kind = if kind == 2 && mask_mode == crate::scene::MaskMode::Luminance {
@@ -2852,7 +2878,7 @@ fn gpu_mask_shapes(
         {
             return None;
         }
-        if kind == 1 && (transform.sx - transform.sy).abs() > f32::EPSILON {
+        if (kind == 1 || kind == 4) && (transform.sx - transform.sy).abs() > f32::EPSILON {
             return None;
         }
         let x0 = x * transform.sx + transform.tx;
@@ -2880,6 +2906,13 @@ fn gpu_mask_shapes(
                 shape[1] * transform.sy + transform.ty,
                 shape[2] * transform.sx + transform.tx,
                 shape[3] * transform.sy + transform.ty,
+            ]
+        } else if kind == 4 {
+            [
+                shape[0] * transform.sx + transform.tx,
+                shape[1] * transform.sy + transform.ty,
+                shape[2] * transform.sx.abs(),
+                0.0,
             ]
         } else {
             [0.0; 4]
@@ -4139,6 +4172,68 @@ mod tests {
                 (i16::from(gpu_pixel[channel]) - i16::from(cpu_pixel[channel])).abs() <= 3,
                 "GPU/CPU gradient mask mismatch: {gpu_pixel:?} vs {cpu_pixel:?}"
             );
+        }
+    }
+
+    #[test]
+    fn gpu_two_stop_radial_alpha_mask_matches_cpu() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping radial mask GPU test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Layer {
+                opacity: 1.0,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: None,
+                mask: Some(vec![SceneNode::RadialGradient {
+                    cx: 16.0,
+                    cy: 16.0,
+                    r: 12.0,
+                    stops: vec![
+                        crate::scene::GradientStop {
+                            position: 0.0,
+                            color: Color::WHITE,
+                        },
+                        crate::scene::GradientStop {
+                            position: 1.0,
+                            color: Color::rgba(255, 255, 255, 0),
+                        },
+                    ],
+                }]),
+                mask_mode: crate::scene::MaskMode::Alpha,
+                filters: Vec::new(),
+                shadow: None,
+                children: vec![SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 32.0,
+                    h: 32.0,
+                    fill: Color::rgb(255, 0, 0),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                }],
+            }],
+        };
+        assert!(gpu_supports_scene(&scene));
+        let config = FrameConfig::new(32, 32, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        for (x, y) in [(16, 16), (16, 20), (1, 1)] {
+            for channel in 0..4 {
+                assert!(
+                    (i16::from(gpu_image.get_pixel(x, y)[channel])
+                        - i16::from(cpu_image.get_pixel(x, y)[channel]))
+                    .abs()
+                        <= 3,
+                    "GPU/CPU radial mask mismatch at ({x},{y}): {:?} vs {:?}",
+                    gpu_image.get_pixel(x, y),
+                    cpu_image.get_pixel(x, y)
+                );
+            }
         }
     }
 
