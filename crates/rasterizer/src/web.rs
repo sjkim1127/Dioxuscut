@@ -56,6 +56,23 @@ pub struct WebVideoFrame {
 }
 
 impl WebVideoFrame {
+    /// Return the WebCodecs presentation timestamp in seconds.
+    pub fn timestamp_seconds(&self) -> f64 {
+        self.timestamp_us as f64 / 1_000_000.0
+    }
+
+    /// Map the presentation timestamp onto the composition timeline.
+    ///
+    /// The result is intentionally fractional: callers that need a discrete
+    /// output frame must choose an explicit rounding policy at the scheduling
+    /// boundary instead of silently changing the media timestamp here.
+    pub fn timeline_frame(&self, fps: f64) -> Option<f64> {
+        if !fps.is_finite() || fps <= 0.0 {
+            return None;
+        }
+        Some(self.timestamp_seconds() * fps)
+    }
+
     /// Return the required tightly packed RGBA8 payload size, or `None` when
     /// the dimensions overflow a host `usize`.
     pub fn expected_rgba_bytes(&self) -> Option<usize> {
@@ -168,6 +185,37 @@ mod tests {
         let parsed: WebWorkerMessage = serde_json::from_str(message).unwrap();
         assert!(matches!(parsed, WebWorkerMessage::Frame(response)
             if response.video_frame.as_ref().is_some_and(|frame| frame.timestamp_us == 1_250_000)));
+    }
+
+    #[test]
+    fn webcodecs_timestamp_maps_to_fractional_timeline_frame() {
+        let frame = WebVideoFrame {
+            width: 1,
+            height: 1,
+            timestamp_us: 1_250_000,
+            rgba_base64: String::new(),
+        };
+        assert_eq!(frame.timestamp_seconds(), 1.25);
+        assert_eq!(frame.timeline_frame(30.0), Some(37.5));
+
+        let ntsc = WebVideoFrame {
+            timestamp_us: 1_000_000,
+            ..frame
+        };
+        assert!((ntsc.timeline_frame(23.976).unwrap() - 23.976).abs() < 1e-12);
+    }
+
+    #[test]
+    fn webcodecs_timestamp_rejects_invalid_timeline_fps() {
+        let frame = WebVideoFrame {
+            width: 1,
+            height: 1,
+            timestamp_us: 1_000_000,
+            rgba_base64: String::new(),
+        };
+        assert_eq!(frame.timeline_frame(0.0), None);
+        assert_eq!(frame.timeline_frame(f64::NAN), None);
+        assert_eq!(frame.timeline_frame(f64::INFINITY), None);
     }
 
     #[test]
