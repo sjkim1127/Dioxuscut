@@ -57,6 +57,7 @@ async function ensureThree() {
 const compositions = new Map();
 const threeCompositions = new Map();
 const preloadedAssets = new Map();
+const preloadedSources = new Map();
 const imageDimensionsCache = new Map();
 const videoMetadataCache = new Map();
 const audioDurationCache = new Map();
@@ -382,7 +383,6 @@ export function prefetch(source, {
   if (typeof source !== 'string' || !source) throw new TypeError('prefetch expects a source URL');
   const hashIndex = source.indexOf('#');
   const base = hashIndex < 0 ? source : source.slice(0, hashIndex);
-  const suffix = hashIndex < 0 ? '' : source.slice(hashIndex);
   const controller = new AbortController();
   let released = false;
   let objectUrl = null;
@@ -409,19 +409,32 @@ export function prefetch(source, {
         binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)));
       }
       const type = contentType || blob.type || 'application/octet-stream';
-      return `data:${type};base64,${window.btoa(binary)}${suffix}`;
+      return `data:${type};base64,${window.btoa(binary)}`;
     }
     objectUrl = URL.createObjectURL(contentType ? new Blob([blob], { type: contentType }) : blob);
-    return `${objectUrl}${suffix}`;
+    return objectUrl;
   });
+  done.then((resolved) => {
+    if (!released) preloadedSources.set(base, resolved);
+  }).catch(() => undefined);
   return {
     free() {
       released = true;
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
+      preloadedSources.delete(base);
     },
     waitUntilDone: () => done,
   };
+}
+
+export function usePreload(source) {
+  if (typeof source !== 'string') return source;
+  const hashIndex = source.indexOf('#');
+  const base = hashIndex < 0 ? source : source.slice(0, hashIndex);
+  const suffix = hashIndex < 0 ? '' : source.slice(hashIndex);
+  const loaded = preloadedSources.get(base);
+  return loaded ? `${loaded}${suffix}` : source;
 }
 
 // Platform-neutral counterpart of Remotion's useWindowedAudioData. The host
@@ -1033,6 +1046,7 @@ window.dioxuscut = {
   useAudioData,
   audioBufferToDataUrl,
   prefetch,
+  usePreload,
   getWindowedAudioData,
   useWindowedAudioData,
   getWaveformPortion,
