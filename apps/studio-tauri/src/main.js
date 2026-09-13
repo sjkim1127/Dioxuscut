@@ -534,9 +534,9 @@ function webmCodec(codecId) {
   return null;
 }
 
-// Read VP8/VP9/AV1 SimpleBlock payloads from a WebM cluster. Laced blocks are
-// deliberately rejected until their per-codec frame duration semantics are
-// implemented; ordinary browser-recorded WebM uses one frame per block.
+// Read VP8/VP9/AV1 SimpleBlock payloads from a WebM cluster. Ordinary blocks
+// and fixed-laced blocks are supported; variable lacing remains bounded until
+// its per-frame size and timestamp semantics are implemented.
 export async function readWebmSamples(source, trackNumber = 1, options = {}) {
   const metadata = options.metadata?.cues ? options.metadata : await parseWebmHeader(source);
   if (!metadata?.cues?.length) return [];
@@ -588,15 +588,29 @@ export async function readWebmSamples(source, trackNumber = 1, options = {}) {
         const timecode = (bytes[payload + track.width] << 8) | bytes[payload + track.width + 1];
         const signedTimecode = timecode & 0x8000 ? timecode - 0x10000 : timecode;
         const flags = bytes[payload + track.width + 2];
-        if ((flags & 0x06) === 0) {
-          const dataStart = payload + track.width + 3;
+        const blockDataStart = payload + track.width + 3;
+        const lacing = flags & 0x06;
+        let dataStart = blockDataStart;
+        let frameSizes = [end - dataStart];
+        if (lacing === 0x04 && dataStart < end) {
+          const frameCount = bytes[dataStart] + 1;
+          dataStart += 1;
+          const payloadBytes = end - dataStart;
+          if (frameCount > 0 && payloadBytes % frameCount === 0) {
+            frameSizes = Array.from({ length: frameCount }, () => payloadBytes / frameCount);
+          } else frameSizes = [];
+        } else if (lacing !== 0) frameSizes = [];
+        let frameOffset = dataStart;
+        for (let frameIndex = 0; frameIndex < frameSizes.length; frameIndex += 1) {
+          const frameSize = frameSizes[frameIndex];
           samples.push({
             timestamp: (cues[cueIndex].timeInSeconds ?? 0) + signedTimecode * metadata.timecodeScale / 1e9,
-            keyframe: Boolean(flags & 0x80),
-            offset: start + dataStart,
-            size: end - dataStart,
-            data: bytes.slice(dataStart, end),
+            keyframe: Boolean(flags & 0x80) && frameIndex === 0,
+            offset: start + frameOffset,
+            size: frameSize,
+            data: bytes.slice(frameOffset, frameOffset + frameSize),
           });
+          frameOffset += frameSize;
         }
       }
     }
