@@ -15,7 +15,7 @@ pub mod metadata;
 pub mod scene;
 pub mod video;
 
-pub use audio::{Audio, AudioProps};
+pub use audio::{Audio, AudioProps, Html5Audio};
 pub use audio_viz::{
     create_smooth_svg_path, get_waveform_portion, get_waveform_portion_channel, load_audio_data,
     visualize_audio, AudioData, AudioVizError, VisualizeFor,

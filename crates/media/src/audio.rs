@@ -64,3 +64,12 @@ pub fn Audio(props: AudioProps) -> Element {
         }
     }
 }
+
+/// Remotion-compatible alias for preview-oriented HTML audio playback.
+///
+/// The shared component preserves the same trim, rate, volume, and timeline
+/// semantics for native export and browser preview.
+#[component]
+pub fn Html5Audio(props: AudioProps) -> Element {
+    Audio(props)
+}
