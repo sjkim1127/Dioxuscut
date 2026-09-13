@@ -115,6 +115,47 @@ rl.on('line', (line) => { queue = queue.then(async () => {
     const imageType = request.image_format === 'jpeg' ? 'jpeg' : 'png';
     const fileTransport = request.transport === 'file';
     const rgbaTransport = request.transport === 'rgba';
+    if (rgbaTransport) {
+      const directRgba = await page.evaluate(() => {
+        const canvas = [...document.querySelectorAll('canvas')]
+          .sort((a, b) => (b.width * b.height) - (a.width * a.height))[0];
+        if (!canvas || canvas.width <= 0 || canvas.height <= 0) return null;
+        const width = canvas.width;
+        const height = canvas.height;
+        let pixels;
+        const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+        if (gl) {
+          pixels = new Uint8Array(width * height * 4);
+          gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+          const row = new Uint8Array(width * 4);
+          for (let y = 0; y < Math.floor(height / 2); y += 1) {
+            const top = y * row.length;
+            const bottom = (height - 1 - y) * row.length;
+            row.set(pixels.subarray(top, top + row.length));
+            pixels.copyWithin(top, bottom, bottom + row.length);
+            pixels.set(row, bottom);
+          }
+        } else {
+          const context = canvas.getContext('2d', { willReadFrequently: true });
+          if (!context) return null;
+          pixels = context.getImageData(0, 0, width, height).data;
+        }
+        let binary = '';
+        const chunkSize = 0x8000;
+        for (let offset = 0; offset < pixels.length; offset += chunkSize) {
+          binary += String.fromCharCode(...pixels.subarray(offset, offset + chunkSize));
+        }
+        return { width, height, rgba_base64: btoa(binary) };
+      });
+      if (directRgba) {
+        write({ type: 'frame', frame: request.frame, width: directRgba.width, height: directRgba.height,
+          video_frame: {
+            ...directRgba,
+            timestamp_us: Math.round((request.frame / Math.max(request.fps ?? 30, 1)) * 1_000_000),
+          } });
+        return;
+      }
+    }
     const screenshot = await page.screenshot({ type: imageType, ...(fileTransport || rgbaTransport ? {} : { encoding: 'base64' }),
       omitBackground: imageType === 'png' && request.transparent === true,
       quality: imageType === 'jpeg' ? (request.jpeg_quality ?? 90) : undefined });
