@@ -185,31 +185,56 @@ async fn main() -> anyhow::Result<()> {
                 *concurrency,
             )?;
             backend.set_composition(composition.clone())?;
+            let frame_numbers = (0..*frames)
+                .map(|offset| {
+                    frame_start
+                        .checked_add(offset)
+                        .ok_or_else(|| anyhow::anyhow!("frame range overflows u32"))
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?;
             let mut samples = Vec::with_capacity(*frames as usize);
-            for offset in 0..*frames {
-                let frame = frame_start
-                    .checked_add(offset)
-                    .ok_or_else(|| anyhow::anyhow!("frame range overflows u32"))?;
-                let request = dioxuscut_rasterizer::WebFrameRequest {
-                    composition: Some(composition.clone()),
-                    frame,
-                    fps: *fps,
-                    width: *width,
-                    height: *height,
-                    props: serde_json::json!({}),
-                    assets: Vec::new(),
-                    timeline: Vec::new(),
-                    image_format: None,
-                    jpeg_quality: None,
-                    transparent: true,
-                    transport: Some("rgba".into()),
-                };
-                let (_, timing) = backend.render_web_frame_with_timing(&request)?;
-                let timing = timing.ok_or_else(|| {
-                    anyhow::anyhow!("frame {frame} did not return WebCodecs timing metadata")
+            for batch in frame_numbers.chunks(*concurrency) {
+                let backend_ref = &backend;
+                let batch_results = std::thread::scope(|scope| {
+                    let handles = batch.iter().map(|&frame| {
+                        let backend = backend_ref;
+                        scope.spawn(move || {
+                            let request = dioxuscut_rasterizer::WebFrameRequest {
+                                composition: Some(composition.clone()),
+                                frame,
+                                fps: *fps,
+                                width: *width,
+                                height: *height,
+                                props: serde_json::json!({}),
+                                assets: Vec::new(),
+                                timeline: Vec::new(),
+                                image_format: None,
+                                jpeg_quality: None,
+                                transparent: true,
+                                transport: Some("rgba".into()),
+                            };
+                            let (_, timing) = backend
+                                .render_web_frame_with_timing(&request)
+                                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                            let timing = timing.ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "frame {frame} did not return WebCodecs timing metadata"
+                                )
+                            })?;
+                            Ok::<_, anyhow::Error>((frame, timing))
+                        })
+                    });
+                    handles
+                        .map(|handle| {
+                            handle
+                                .join()
+                                .map_err(|_| anyhow::anyhow!("WebCodecs frame worker panicked"))?
+                        })
+                        .collect::<anyhow::Result<Vec<_>>>()
                 })?;
-                samples.push((frame, timing));
+                samples.extend(batch_results);
             }
+            samples.sort_by_key(|(frame, _)| *frame);
             let report = dioxuscut_rasterizer::WebFrameDriftReport::from_samples(&samples)
                 .ok_or_else(|| anyhow::anyhow!("no WebCodecs timing samples were collected"))?;
             std::fs::write(output, report.to_json()?)?;
