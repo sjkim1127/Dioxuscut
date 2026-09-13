@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::metadata::{read_media_range, MediaMetadataError};
+use crate::metadata::{read_media_range, MediaMetadataError, MAX_MEDIA_RANGE_BYTES};
 
 /// A single encoded sample location and timeline position.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -50,9 +50,31 @@ pub fn read_encoded_samples(
             "sample batch exceeds 1,000,000 entries".into(),
         ));
     }
+    use std::io::{Read, Seek, SeekFrom};
+    let path_ref = path.as_ref();
+    let mut file = std::fs::File::open(path_ref).map_err(|error| {
+        MediaMetadataError::FileNotFound(format!("{}: {error}", path_ref.display()))
+    })?;
     samples
         .iter()
-        .map(|sample| read_encoded_sample(path.as_ref(), sample))
+        .map(|sample| {
+            let end = sample.offset.checked_add(u64::from(sample.size)).ok_or_else(|| {
+                MediaMetadataError::InvalidRange("sample range overflow".into())
+            })?;
+            if u64::from(sample.size) > MAX_MEDIA_RANGE_BYTES {
+                return Err(MediaMetadataError::InvalidRange(format!(
+                    "sample size {} exceeds {MAX_MEDIA_RANGE_BYTES} bytes", sample.size
+                )));
+            }
+            file.seek(SeekFrom::Start(sample.offset)).map_err(|error| {
+                MediaMetadataError::FfprobeExecution(error.to_string())
+            })?;
+            let mut bytes = vec![0; (end - sample.offset) as usize];
+            file.read_exact(&mut bytes).map_err(|error| {
+                MediaMetadataError::InvalidRange(error.to_string())
+            })?;
+            Ok(bytes)
+        })
         .collect()
 }
 
