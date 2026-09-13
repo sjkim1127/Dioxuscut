@@ -19,13 +19,20 @@ const waitFor = async (predicate) => {
 try {
   const ready = await waitFor((message) => message.type === 'ready');
   assert.ok(ready.compositions.includes('three_lifecycle_preview'));
+  assert.ok(ready.compositions.includes('three_audio_reactive_preview'));
   for (const frame of [0, 15, 30]) {
     child.stdin.write(`${JSON.stringify({ type: 'render', composition: 'three_lifecycle_preview', frame, fps: 30, width: 640, height: 360, props: { color: '#ff8844' } })}\n`);
     const response = await waitFor((message) => message.type === 'frame' && message.frame === frame);
     assert.equal(response.width, 640);
     assert.equal(response.height, 360);
   }
-  console.log(JSON.stringify({ composition: 'three_lifecycle_preview', frames: 3, status: 'ok' }));
+  for (const frame of [0, 15, 30]) {
+    child.stdin.write(`${JSON.stringify({ type: 'render', composition: 'three_audio_reactive_preview', frame, fps: 30, width: 640, height: 360 })}\n`);
+    const response = await waitFor((message) => message.type === 'frame' && message.frame === frame);
+    assert.equal(response.width, 640);
+    assert.equal(response.height, 360);
+  }
+  console.log(JSON.stringify({ compositions: 2, frames: 6, status: 'ok' }));
 } finally {
   child.stdin.write('{"type":"shutdown"}\n');
   await new Promise((resolve) => child.once('exit', resolve));

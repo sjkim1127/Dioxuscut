@@ -36,4 +36,48 @@ export function register(api) {
       instance?.mesh?.material?.dispose?.();
     },
   });
+
+  // Deterministic audio-reactive reference: the same PCM shape exercises the
+  // browser media-utils contract without requiring a network asset in smoke
+  // tests or in AI-generated starter compositions.
+  const sampleRate = 48_000;
+  const audioWaveform = Float32Array.from({ length: sampleRate * 2 }, (_, index) =>
+    Math.sin((2 * Math.PI * 440 * index) / sampleRate) * 0.5);
+  const audioData = {
+    channelWaveforms: [audioWaveform],
+    sampleRate,
+    durationInSeconds: 2,
+    numberOfChannels: 1,
+    resultId: 'three-audio-reactive-fixture',
+  };
+  api.registerThreeComposition('three_audio_reactive_preview', {
+    setup({ THREE }) {
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(45, 16 / 9, 0.1, 100);
+      camera.position.z = 3;
+      const mesh = new THREE.Mesh(
+        new THREE.IcosahedronGeometry(0.6, 2),
+        new THREE.MeshStandardMaterial({ color: 0xff8a3d, roughness: 0.3, metalness: 0.2 }),
+      );
+      scene.add(new THREE.AmbientLight(0xffffff, 2));
+      scene.add(mesh);
+      return { scene, camera, mesh };
+    },
+    render({ renderer, scene, camera, mesh, frame, fps, width, height }) {
+      const spectrum = api.visualizeAudio({
+        audioData, frame, fps, numberOfSamples: 32, smoothing: false,
+      });
+      const energy = spectrum.reduce((sum, value) => sum + value, 0) / spectrum.length;
+      mesh.scale.setScalar(0.75 + energy * 2);
+      mesh.rotation.y = frame / Math.max(fps, 1);
+      renderer.setSize(width, height, false);
+      camera.aspect = width / Math.max(height, 1);
+      camera.updateProjectionMatrix();
+      renderer.render(scene, camera);
+    },
+    dispose(instance) {
+      instance?.mesh?.geometry?.dispose?.();
+      instance?.mesh?.material?.dispose?.();
+    },
+  });
 }
