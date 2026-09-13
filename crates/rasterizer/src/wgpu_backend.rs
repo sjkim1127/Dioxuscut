@@ -169,6 +169,7 @@ struct InstanceData {
     shape_bounds: vec4<f32>,
     color: vec4<f32>,
     color2: vec4<f32>,
+    brightness: vec4<f32>,
     // corner radius, stroke width, angle, inherited opacity
     params: vec4<f32>,
     // x' = dot(transform_x.xyz, vec3(x, y, 1))
@@ -329,13 +330,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         col = gradient_color(in.instance_index, t);
     }
 
+    col = vec4<f32>(col.rgb * instance.brightness.x, col.a);
     return vec4<f32>(col.rgb, col.a * instance.params.w * coverage);
 }
 
 @fragment
 fn fs_solid(in: VertexOutput) -> @location(0) vec4<f32> {
     let instance = instances[in.instance_index];
-    return vec4<f32>(instance.color.rgb, instance.color.a * instance.params.w);
+    return vec4<f32>(instance.color.rgb * instance.brightness.x, instance.color.a * instance.params.w);
 }
 
 @fragment
@@ -345,7 +347,7 @@ fn fs_image(in: VertexOutput) -> @location(0) vec4<f32> {
     let local = (in.local_position - bounds.xy) / max(bounds.zw, vec2<f32>(0.000001));
     let uv = mix(instance.params.xy, instance.params.zw, clamp(local, vec2<f32>(0.0), vec2<f32>(1.0)));
     let sampled = textureSample(image_texture, image_sampler, uv);
-    return vec4<f32>(sampled.rgb, sampled.a * instance.color.a * instance.params.w);
+    return vec4<f32>(sampled.rgb * instance.brightness.x, sampled.a * instance.color.a * instance.params.w);
 }
 
 @fragment
@@ -355,7 +357,7 @@ fn fs_text(in: VertexOutput) -> @location(0) vec4<f32> {
     let local = (in.local_position - bounds.xy) / max(bounds.zw, vec2<f32>(0.000001));
     let uv = mix(instance.params.xy, instance.params.zw, clamp(local, vec2<f32>(0.0), vec2<f32>(1.0)));
     let coverage = textureSample(image_texture, image_sampler, uv).r;
-    return vec4<f32>(instance.color.rgb, coverage * instance.color.a * instance.params.w);
+    return vec4<f32>(instance.color.rgb * instance.brightness.x, coverage * instance.color.a * instance.params.w);
 }
 "#;
 
@@ -2132,6 +2134,7 @@ struct GpuInstance {
     shape_bounds: [f32; 4],
     color: [f32; 4],
     color2: [f32; 4],
+    brightness: [f32; 4],
     params: [f32; 4],
     transform_x: [f32; 4],
     transform_y: [f32; 4],
@@ -2148,6 +2151,7 @@ impl GpuInstance {
             shape_bounds: [0.0; 4],
             color: color_to_f32(color),
             color2: [0.0; 4],
+            brightness: [1.0, 0.0, 0.0, 0.0],
             params: [0.0, 0.0, 0.0, opacity],
             transform_x,
             transform_y,
@@ -2202,6 +2206,16 @@ enum DrawCommand {
 
 impl DrawCommand {
     fn instance(&self) -> &GpuInstance {
+        match self {
+            Self::Analytic { instance }
+            | Self::Mesh { instance, .. }
+            | Self::Image { instance, .. }
+            | Self::Video { instance, .. }
+            | Self::Text { instance, .. } => instance,
+        }
+    }
+
+    fn instance_mut(&mut self) -> &mut GpuInstance {
         match self {
             Self::Analytic { instance }
             | Self::Mesh { instance, .. }
@@ -2459,10 +2473,10 @@ fn compile_nodes(
                 )?;
             }
 
-            // A layer with no offscreen-only effect is semantically just an
-            // opacity group. Keep it on the GPU instead of forcing the whole
-            // frame through tiny-skia; complex layers still take the fallback
-            // path below so their compositing semantics remain exact.
+            // A layer with no offscreen-only effect is semantically just a
+            // group of GPU instances. Keep opacity and brightness filters on
+            // the GPU while preserving child order; complex layers still take
+            // the fallback path below so their compositing semantics remain exact.
             SceneNode::Layer {
                 opacity: layer_opacity,
                 blend_mode: crate::scene::BlendMode::Normal,
@@ -2472,14 +2486,14 @@ fn compile_nodes(
                 shadow: None,
                 children,
                 ..
-            } if gpu_layer_opacity(filters, *layer_opacity).is_some() => {
-                compile_nodes(
-                    children,
-                    transform,
-                    opacity * gpu_layer_opacity(filters, *layer_opacity).unwrap(),
-                    output,
-                    font,
-                )?;
+            } if gpu_layer_effects(filters, *layer_opacity).is_some() => {
+                let (layer_opacity, brightness) =
+                    gpu_layer_effects(filters, *layer_opacity).unwrap();
+                let start = output.len();
+                compile_nodes(children, transform, opacity * layer_opacity, output, font)?;
+                for command in &mut output[start..] {
+                    command.instance_mut().brightness[0] *= brightness;
+                }
             }
 
             SceneNode::Audio { .. } => {}
@@ -2494,16 +2508,29 @@ fn compile_nodes(
     Some(())
 }
 
-fn gpu_layer_opacity(filters: &[crate::scene::SceneFilter], layer_opacity: f32) -> Option<f32> {
+fn gpu_layer_effects(
+    filters: &[crate::scene::SceneFilter],
+    layer_opacity: f32,
+) -> Option<(f32, f32)> {
     if !layer_opacity.is_finite() {
         return None;
     }
-    filters.iter().try_fold(layer_opacity, |opacity, filter| {
-        let crate::scene::SceneFilter::Opacity { amount } = filter else {
-            return None;
-        };
-        (amount.is_finite() && (0.0..=1.0).contains(amount)).then(|| opacity * amount)
-    })
+    filters.iter().try_fold(
+        (layer_opacity, 1.0),
+        |(opacity, brightness), filter| match filter {
+            crate::scene::SceneFilter::Opacity { amount }
+                if amount.is_finite() && (0.0..=1.0).contains(amount) =>
+            {
+                Some((opacity * amount, brightness))
+            }
+            crate::scene::SceneFilter::Brightness { amount }
+                if amount.is_finite() && (0.0..=10.0).contains(amount) =>
+            {
+                Some((opacity, brightness * amount))
+            }
+            _ => None,
+        },
+    )
 }
 
 #[cfg(test)]
@@ -3282,6 +3309,69 @@ mod tests {
         assert!(
             mean_alpha_error < 12.0,
             "GPU/CPU text alpha mean error was {mean_alpha_error}"
+        );
+    }
+
+    #[test]
+    fn gpu_brightness_filter_matches_cpu_for_normal_layer() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping brightness GPU test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![
+                SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 32.0,
+                    h: 32.0,
+                    fill: Color::BLACK,
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                },
+                SceneNode::Layer {
+                    opacity: 1.0,
+                    blend_mode: crate::scene::BlendMode::Normal,
+                    clip: None,
+                    mask: None,
+                    mask_mode: crate::scene::MaskMode::Alpha,
+                    filters: vec![crate::scene::SceneFilter::Brightness { amount: 0.5 }],
+                    shadow: None,
+                    children: vec![SceneNode::Rect {
+                        x: 8.0,
+                        y: 8.0,
+                        w: 16.0,
+                        h: 16.0,
+                        fill: Color::WHITE,
+                        stroke: None,
+                        stroke_width: 0.0,
+                        corner_radius: 0.0,
+                    }],
+                },
+            ],
+        };
+        assert!(gpu_supports_scene(&scene));
+        let config = FrameConfig::new(32, 32, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        let mean_error: f64 = gpu_image
+            .pixels()
+            .zip(cpu_image.pixels())
+            .map(|(a, b)| {
+                (0..4)
+                    .map(|channel| {
+                        (i16::from(a[channel]) - i16::from(b[channel])).unsigned_abs() as u64
+                    })
+                    .sum::<u64>()
+            })
+            .sum::<u64>() as f64
+            / (32 * 32 * 4) as f64;
+        assert!(
+            mean_error < 2.0,
+            "GPU/CPU brightness mean error was {mean_error}"
         );
     }
 
