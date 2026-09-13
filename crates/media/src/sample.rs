@@ -6,6 +6,7 @@ use crate::metadata::{read_media_range, MediaMetadataError, MAX_MEDIA_RANGE_BYTE
 
 /// A single encoded sample location and timeline position.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct EncodedSample {
     pub sample_index: u32,
     pub offset: u64,
@@ -108,5 +109,16 @@ mod tests {
         ];
         assert_eq!(super::read_encoded_samples(&path, &samples).unwrap(), vec![vec![4, 5], vec![1, 2]]);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn serializes_with_browser_wire_names() {
+        let sample = EncodedSample {
+            sample_index: 1, offset: 8, size: 4, timestamp: 0.0, duration: 0.1,
+            keyframe: true, composition_offset: 0,
+        };
+        let json = serde_json::to_string(&sample).unwrap();
+        assert!(json.contains("sampleIndex") && json.contains("compositionOffset"));
+        assert!(!json.contains("sample_index"));
     }
 }
