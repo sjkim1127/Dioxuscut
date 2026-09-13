@@ -3242,6 +3242,16 @@ mod tests {
             .unwrap();
         let generation = gpu.text_atlas_cache_generation();
         let first_upload_bytes = gpu.text_atlas_upload_bytes();
+        let same = gpu
+            .render_frame(&scene, &FrameConfig::new(96, 32, 0, 30.0))
+            .unwrap();
+        assert_eq!(gpu.text_atlas_cache_generation(), generation);
+        assert_eq!(gpu.text_atlas_upload_bytes(), first_upload_bytes);
+        assert_eq!(
+            same.pixels().collect::<Vec<_>>(),
+            image.pixels().collect::<Vec<_>>(),
+            "reusing an unchanged atlas must preserve the rendered pixels"
+        );
         let updated_scene = Scene {
             nodes: vec![SceneNode::Text {
                 x: 4.0,
@@ -3256,7 +3266,7 @@ mod tests {
         let second = gpu
             .render_frame(&updated_scene, &FrameConfig::new(96, 32, 1, 30.0))
             .unwrap();
-        assert_eq!(gpu.render_stats().gpu_frames, 2);
+        assert_eq!(gpu.render_stats().gpu_frames, 3);
         assert!(image.pixels().any(|pixel| pixel[3] > 0));
         assert!(second.pixels().any(|pixel| pixel[3] > 0));
         assert!(gpu.text_atlas_cache_generation().unwrap() > generation.unwrap());
