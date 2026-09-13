@@ -2178,7 +2178,10 @@ impl RasterizerBackend for WgpuBackend {
             .lock()
             .map_err(|_| RasterError::Init("GPU frame resource mutex poisoned".into()))?;
 
-        let mut in_flight: Option<InFlight> = None;
+        // Keep the whole readback ring occupied before waiting. The previous
+        // implementation retained only one in-flight frame, which serialized
+        // GPU submission with map/readback and left two persistent slots idle.
+        let mut in_flight = std::collections::VecDeque::with_capacity(RING_BUFFER_SIZE);
         let mut scratch = Vec::new();
 
         for frame in 0..total {
@@ -2187,7 +2190,7 @@ impl RasterizerBackend for WgpuBackend {
 
             let Some((commands, path_mask)) = compile_scene_with_path_mask(&scene, &self.fallback)
             else {
-                if let Some(prev) = in_flight.take() {
+                while let Some(prev) = in_flight.pop_front() {
                     self.drain_slot(prev, &res, width, height, &mut scratch, consume_fn)?;
                 }
                 self.cpu_fallback_frame_count
@@ -2199,13 +2202,14 @@ impl RasterizerBackend for WgpuBackend {
 
             let slot_idx = (frame as usize) % RING_BUFFER_SIZE;
 
-            // If the target slot is currently occupied by an in-flight frame, drain it now
-            if let Some(prev) = in_flight.take() {
-                if prev.slot_idx == slot_idx {
-                    self.drain_slot(prev, &res, width, height, &mut scratch, consume_fn)?;
-                } else {
-                    in_flight = Some(prev);
-                }
+            // Do not reuse a slot until its oldest submission has been
+            // consumed. FIFO draining preserves the stream's frame order.
+            if in_flight.len() == RING_BUFFER_SIZE {
+                let prev = in_flight
+                    .pop_front()
+                    .expect("in-flight ring length was checked");
+                debug_assert_eq!(prev.slot_idx, slot_idx);
+                self.drain_slot(prev, &res, width, height, &mut scratch, consume_fn)?;
             }
 
             // Submit this frame to GPU
@@ -2220,12 +2224,7 @@ impl RasterizerBackend for WgpuBackend {
             )?;
             self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
 
-            // Overlap: drain the previous frame while the newly submitted frame is being rendered on GPU
-            if let Some(prev) = in_flight.take() {
-                self.drain_slot(prev, &res, width, height, &mut scratch, consume_fn)?;
-            }
-
-            in_flight = Some(InFlight {
+            in_flight.push_back(InFlight {
                 frame_idx: frame,
                 slot_idx,
                 submission_index,
@@ -2234,7 +2233,7 @@ impl RasterizerBackend for WgpuBackend {
         }
 
         // Drain any remaining in-flight frame at the end of the stream
-        if let Some(prev) = in_flight.take() {
+        while let Some(prev) = in_flight.pop_front() {
             self.drain_slot(prev, &res, width, height, &mut scratch, consume_fn)?;
         }
 
