@@ -266,6 +266,9 @@ without reading payloads, while `parseIsoBmffMovieHeader()` also reads
 `mvhd` and `trak/mdia/mdhd/hdlr` to report movie and track timing. These APIs
 also expose bounded `stts`, `stsz`, `stco/co64`, and `stss` sample tables for
 each parsed track, before sample offsets are expanded through `stsc`. This is
+complemented by decoder-neutral `codecConfig` extraction for `avcC`, `hvcC`,
+`av1C`, and `esds`, allowing a WebCodecs adapter to construct its codec
+configuration without another whole-file read. This is
 the foundation for adding sample parsers without forcing a whole asset into
 memory.
 

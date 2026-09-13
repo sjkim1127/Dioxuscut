@@ -481,6 +481,19 @@ function isoPath(bytes, root, path) {
   return scope[0] ?? null;
 }
 
+function findCodecConfig(bytes, root) {
+  const types = new Set(['avcC', 'hvcC', 'av1C', 'esds']);
+  const start = root.offset + root.headerSize;
+  const end = root.offset + root.size;
+  for (let offset = start; offset + 8 <= end; offset += 1) {
+    const size = uint32be(bytes, offset);
+    const type = ascii(bytes, offset + 4, 4);
+    if (!types.has(type) || size < 8 || offset + size > end) continue;
+    return { type, data: bytes.slice(offset + 8, offset + size) };
+  }
+  return null;
+}
+
 // Read and decode only the movie header from an ISO-BMFF moov box. The box is
 // bounded by the same 16 MiB cap as all other media range reads.
 export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 16 * 1024 * 1024 } = {}) {
@@ -552,6 +565,7 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
       const sampleSizes = uniformSampleSize ? [] : readEntries(stsz, 4, 8);
       const keyframes = readEntries(stss, 4, 4);
       const keyframeSet = new Set(keyframes);
+      const codecConfig = findCodecConfig(bytes, trak);
       const sampleRanges = [];
       let sampleIndex = 0;
       for (let chunkIndex = 0; chunkIndex < chunkOffsets.length && sampleIndex < Math.min(sampleCount, 1_000_000); chunkIndex += 1) {
@@ -595,6 +609,7 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
           keyframes,
           sampleRanges,
         },
+        codecConfig,
       };
     }).filter(Boolean);
   return { ...structure, durationInSeconds: Number.isFinite(durationInSeconds) ? durationInSeconds : null, tracks };
