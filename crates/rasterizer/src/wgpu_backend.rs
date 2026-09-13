@@ -2695,14 +2695,13 @@ fn gpu_rect_mask(
         || *h <= 0.0
         || *stroke_width != 0.0
         || *corner_radius != 0.0
-        || fill.a != 255
     {
         return None;
     }
     let mask_opacity = match mask_mode {
-        crate::scene::MaskMode::Alpha => 1.0,
+        crate::scene::MaskMode::Alpha => f32::from(fill.a) / 255.0,
         crate::scene::MaskMode::Luminance if fill.r == fill.g && fill.g == fill.b => {
-            f32::from(fill.r) / 255.0
+            f32::from(fill.r) * f32::from(fill.a) / (255.0 * 255.0)
         }
         crate::scene::MaskMode::Luminance => return None,
     };
@@ -3790,6 +3789,73 @@ mod tests {
             assert!(
                 (i16::from(gpu_pixel[channel]) - i16::from(cpu_pixel[channel])).abs() <= 2,
                 "GPU/CPU luminance mask mismatch: {gpu_pixel:?} vs {cpu_pixel:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn gpu_translucent_alpha_rect_mask_matches_cpu() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping translucent mask GPU test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![
+                SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 32.0,
+                    h: 32.0,
+                    fill: Color::rgb(0, 0, 255),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                },
+                SceneNode::Layer {
+                    opacity: 1.0,
+                    blend_mode: crate::scene::BlendMode::Normal,
+                    clip: None,
+                    mask: Some(vec![SceneNode::Rect {
+                        x: 0.0,
+                        y: 0.0,
+                        w: 32.0,
+                        h: 32.0,
+                        fill: Color::rgba(255, 255, 255, 128),
+                        stroke: None,
+                        stroke_width: 0.0,
+                        corner_radius: 0.0,
+                    }]),
+                    mask_mode: crate::scene::MaskMode::Alpha,
+                    filters: Vec::new(),
+                    shadow: None,
+                    children: vec![SceneNode::Rect {
+                        x: 0.0,
+                        y: 0.0,
+                        w: 32.0,
+                        h: 32.0,
+                        fill: Color::rgb(255, 0, 0),
+                        stroke: None,
+                        stroke_width: 0.0,
+                        corner_radius: 0.0,
+                    }],
+                },
+            ],
+        };
+        assert!(gpu_supports_scene(&scene));
+        let config = FrameConfig::new(32, 32, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        for channel in 0..4 {
+            assert!(
+                (i16::from(gpu_image.get_pixel(16, 16)[channel])
+                    - i16::from(cpu_image.get_pixel(16, 16)[channel]))
+                .abs()
+                    <= 2,
+                "GPU/CPU translucent mask mismatch: {:?} vs {:?}",
+                gpu_image.get_pixel(16, 16),
+                cpu_image.get_pixel(16, 16)
             );
         }
     }
