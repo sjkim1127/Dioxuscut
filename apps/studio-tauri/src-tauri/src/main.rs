@@ -584,10 +584,9 @@ fn backend_capabilities() -> BackendCapabilities {
     BackendCapabilities {
         native_scene: true,
         browser_runtime: true,
-        // Tauri currently delegates preview frames to Chromium. The native
-        // WGPU backend is an opt-in CLI feature and is not linked into this
-        // application target, so do not advertise GPU acceleration here.
-        gpu_accelerated: false,
+        // Preview remains Chromium-backed; native WGPU export is optional.
+        // Only advertise it when this Tauri target was built with `gpu`.
+        gpu_accelerated: cfg!(feature = "gpu"),
         supports_streaming: false,
     }
 }

@@ -21,3 +21,4 @@ tokio = { workspace = true }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+gpu = ["dioxuscut-cli/gpu", "dioxuscut-rasterizer/gpu"]
