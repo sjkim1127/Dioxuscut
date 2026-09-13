@@ -355,6 +355,10 @@ fn bench_gpu_video_frames(c: &mut Criterion) {
         eprintln!("GPU backend unavailable, skipping GPU video benchmark");
         return;
     };
+    let Ok(warm_backend) = WgpuBackend::new() else {
+        eprintln!("GPU backend unavailable, skipping warm video benchmark");
+        return;
+    };
     let dir =
         std::env::temp_dir().join(format!("dioxuscut-gpu-video-bench-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -384,6 +388,30 @@ fn bench_gpu_video_frames(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("gpu_video_frames_1080p");
     group.sample_size(10);
+    let warm_scene = Scene {
+        nodes: vec![SceneNode::Video {
+            src: source.display().to_string(),
+            time: 0.0,
+            looped: false,
+            x: 0.0,
+            y: 0.0,
+            w: 1920.0,
+            h: 1080.0,
+            fit: dioxuscut_rasterizer::scene::ImageFit::Cover,
+            opacity: 1.0,
+        }],
+    };
+    let warm_config = FrameConfig::new(1920, 1080, 0, 30.0);
+    warm_backend
+        .render_frame(&warm_scene, &warm_config)
+        .unwrap();
+    group.bench_function("warm_cached_frame", |b| {
+        b.iter(|| {
+            warm_backend
+                .render_frame(&warm_scene, &warm_config)
+                .unwrap()
+        })
+    });
     let mut frame = 0u32;
     group.bench_function("native_decode_upload_30_frames", |b| {
         b.iter(|| {
@@ -409,6 +437,21 @@ fn bench_gpu_video_frames(c: &mut Criterion) {
         })
     });
     group.finish();
+    let cold_stats = backend.render_stats();
+    let warm_stats = warm_backend.render_stats();
+    eprintln!(
+        "video benchmark stats: cold_sequence frames={} cache_hits={} cache_misses={} uploads={} upload_bytes={}; warm_frame frames={} cache_hits={} cache_misses={} uploads={} upload_bytes={}",
+        cold_stats.gpu_frames,
+        cold_stats.texture_cache_hits,
+        cold_stats.texture_cache_misses,
+        backend.gpu_texture_uploads(),
+        backend.gpu_texture_upload_bytes(),
+        warm_stats.gpu_frames,
+        warm_stats.texture_cache_hits,
+        warm_stats.texture_cache_misses,
+        warm_backend.gpu_texture_uploads(),
+        warm_backend.gpu_texture_upload_bytes(),
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 
