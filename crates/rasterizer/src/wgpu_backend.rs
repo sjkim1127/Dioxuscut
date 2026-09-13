@@ -102,15 +102,20 @@ fn image_placement(
     let (draw_width, draw_height, source_uv) = match fit {
         ImageFit::Fill => (width, height, [0.0, 0.0, 1.0, 1.0]),
         ImageFit::None => {
+            // Match the CPU backend's centered natural-size overlay into a
+            // transparent destination box. Oversized source dimensions are
+            // center-cropped; undersized dimensions remain letterboxed.
             let draw_width = image_width.min(width);
             let draw_height = image_height.min(height);
-            let source_uv = [
-                0.0,
-                0.0,
-                draw_width / image_width,
-                draw_height / image_height,
-            ];
-            (draw_width, draw_height, source_uv)
+            let visible_width = draw_width / image_width;
+            let visible_height = draw_height / image_height;
+            let left = (1.0 - visible_width) * 0.5;
+            let top = (1.0 - visible_height) * 0.5;
+            (
+                draw_width,
+                draw_height,
+                [left, top, left + visible_width, top + visible_height],
+            )
         }
         ImageFit::Contain | ImageFit::ScaleDown => {
             let scale = if matches!(fit, ImageFit::ScaleDown) {
@@ -2605,7 +2610,7 @@ mod support_tests {
     fn image_fit_none_and_scale_down_never_upscale() {
         let none = image_placement(ImageFit::None, 200.0, 100.0, 0.0, 0.0, 80.0, 80.0).unwrap();
         assert_eq!(none.destination, [0.0, 0.0, 80.0, 80.0]);
-        assert_eq!(none.source_uv, [0.0, 0.0, 0.4, 0.8]);
+        assert_eq!(none.source_uv, [0.3, 0.0, 0.7, 1.0]);
 
         let scale_down =
             image_placement(ImageFit::ScaleDown, 20.0, 10.0, 0.0, 0.0, 100.0, 100.0).unwrap();
@@ -3014,6 +3019,58 @@ mod tests {
                 "GPU/CPU {fit:?} mean error was {mean_error}"
             );
         }
+        // `none` must keep the natural image size even when it is larger than
+        // the destination box. This exercises target clipping and catches a
+        // top-left crop masquerading as a centered natural-size draw.
+        let oversized_path = std::env::temp_dir().join(format!(
+            "dioxuscut-image-fit-oversized-{}.png",
+            std::process::id()
+        ));
+        let mut oversized = image::RgbaImage::new(80, 40);
+        for (x, y, pixel) in oversized.enumerate_pixels_mut() {
+            *pixel = if x < 40 && y < 20 {
+                image::Rgba([255, 0, 0, 255])
+            } else if x >= 40 && y < 20 {
+                image::Rgba([0, 255, 0, 255])
+            } else if x < 40 {
+                image::Rgba([0, 0, 255, 255])
+            } else {
+                image::Rgba([255, 255, 0, 255])
+            };
+        }
+        oversized.save(&oversized_path).unwrap();
+        let oversized_scene = Scene {
+            nodes: vec![SceneNode::Image {
+                src: oversized_path.to_string_lossy().into_owned(),
+                x: 8.0,
+                y: 8.0,
+                w: 48.0,
+                h: 24.0,
+                fit: ImageFit::None,
+                opacity: 1.0,
+            }],
+        };
+        let gpu_image = gpu.render_frame(&oversized_scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&oversized_scene, &config)
+            .unwrap();
+        let mean_error: f64 = gpu_image
+            .pixels()
+            .zip(cpu_image.pixels())
+            .map(|(a, b)| {
+                (0..4)
+                    .map(|channel| {
+                        (i16::from(a[channel]) - i16::from(b[channel])).unsigned_abs() as u64
+                    })
+                    .sum::<u64>()
+            })
+            .sum::<u64>() as f64
+            / (64 * 64 * 4) as f64;
+        assert!(
+            mean_error < 18.0,
+            "GPU/CPU oversized none error was {mean_error}"
+        );
+        let _ = std::fs::remove_file(oversized_path);
         let _ = std::fs::remove_file(path);
     }
 
