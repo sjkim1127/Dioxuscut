@@ -301,15 +301,16 @@ export const getAudioDuration = getAudioDurationInSeconds;
 // Browser counterpart of @remotion/media-utils/getAudioData. Decode once per
 // source and expose channel-major PCM data so audio visualizers can share the
 // same frame-driven contract as native compositions.
-export async function getAudioData(source) {
+export async function getAudioData(source, { sampleRate = 48_000, requestInit } = {}) {
   if (typeof source !== 'string' || !source) throw new TypeError('getAudioData expects a source URL');
+  if (!Number.isFinite(sampleRate) || sampleRate <= 0) throw new TypeError('sampleRate must be positive');
   if (audioDataCache.has(source)) return audioDataCache.get(source);
   const task = (async () => {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     if (!AudioContext) throw new Error('Web Audio API is unavailable');
-    const response = await fetch(source);
+    const response = await fetch(source, requestInit);
     if (!response.ok) throw new Error(`failed to load audio data: ${source}`);
-    const context = new AudioContext();
+    const context = new AudioContext({ sampleRate });
     try {
       const buffer = await context.decodeAudioData(await response.arrayBuffer());
       const channelWaveforms = Array.from({ length: buffer.numberOfChannels }, (_, channel) =>
@@ -323,6 +324,7 @@ export async function getAudioData(source) {
         durationInSeconds: buffer.duration,
         numberOfChannels: buffer.numberOfChannels,
         resultId: source,
+        isRemote: /^https?:\/\//i.test(source),
       };
     } finally {
       await context.close();
