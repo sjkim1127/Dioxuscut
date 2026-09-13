@@ -139,6 +139,21 @@ The worker writes tightly packed RGBA8 bytes to a process-scoped temporary file
 and returns only its path, avoiding base64 expansion while preserving lossless
 pixel transport. The Rust backend removes the file after reading it.
 
+On the local macOS arm64 host, a repeated 1280x720 / 30-frame / 3-repeat
+measurement produced the following browser-only baseline (median sample):
+
+| transport | workers | median | equivalent FPS |
+| --- | ---: | ---: | ---: |
+| PNG/base64 | 1 | 500.19 ms | 59.98 |
+| PNG/base64 | 2 | 499.74 ms | 60.03 |
+| PNG/base64 | 4 | 296.42 ms | 101.21 |
+| raw RGBA file | 1 | 2339.47 ms | 12.82 |
+| raw RGBA file | 2 | 1261.47 ms | 23.78 |
+| raw RGBA file | 4 | 773.86 ms | 38.77 |
+
+These numbers measure Chromium transport/render behavior only; they are not a
+Remotion end-to-end comparison and should be re-run after renderer changes.
+
 For browser compositions that intentionally render transparency, set
 `DIOXUSCUT_BROWSER_TRANSPARENT=1`. This forwards Remotion's `omitBackground`
 behavior to Playwright for PNG frames; JPEG transport remains opaque by
