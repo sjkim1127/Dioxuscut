@@ -359,8 +359,8 @@ fn fs_text(in: VertexOutput) -> @location(0) vec4<f32> {
 
 /// GPU render context: device, queue, pipeline, and bind group layouts.
 struct GpuContext {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    device: Arc<wgpu::Device>,
+    queue: Arc<wgpu::Queue>,
     pipeline: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
     image_pipeline: wgpu::RenderPipeline,
@@ -600,8 +600,8 @@ impl GpuContext {
         });
 
         Ok(Self {
-            device,
-            queue,
+            device: Arc::new(device),
+            queue: Arc::new(queue),
             pipeline,
             mesh_pipeline,
             image_pipeline,
@@ -810,7 +810,7 @@ impl WgpuBackend {
     /// Create a new GPU backend. Initialises the device and render pipeline.
     pub fn new() -> Result<Self, RasterError> {
         let ctx = GpuContext::new()?;
-        let shader_runner = crate::shader::WgpuShaderRunner::new()?;
+        let shader_runner = crate::shader::WgpuShaderRunner::from_device(&ctx.device, &ctx.queue);
         Ok(Self {
             ctx,
             shader_runner,

@@ -141,8 +141,8 @@ pub fn render_shader_cpu(width: u32, height: u32, time: f32, params: [f32; 4]) -
 
 #[cfg(feature = "gpu")]
 pub struct WgpuShaderRunner {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    device: std::sync::Arc<wgpu::Device>,
+    queue: std::sync::Arc<wgpu::Queue>,
     uniform_layout: wgpu::BindGroupLayout,
     pipeline_cache: std::sync::Mutex<std::collections::HashMap<String, Arc<wgpu::RenderPipeline>>>,
 }
@@ -183,6 +183,26 @@ impl WgpuShaderRunner {
             .await
             .map_err(|e| RasterError::Init(format!("Failed to create GPU device: {e}")))?;
 
+        Ok(Self::with_device_queue(
+            std::sync::Arc::new(device),
+            std::sync::Arc::new(queue),
+        ))
+    }
+
+    /// Construct a shader runner on an existing WGPU device. Sharing the
+    /// device is required before shader output can be rendered into a texture
+    /// owned by the main scene compositor.
+    pub fn from_device(
+        device: &std::sync::Arc<wgpu::Device>,
+        queue: &std::sync::Arc<wgpu::Queue>,
+    ) -> Self {
+        Self::with_device_queue(std::sync::Arc::clone(device), std::sync::Arc::clone(queue))
+    }
+
+    fn with_device_queue(
+        device: std::sync::Arc<wgpu::Device>,
+        queue: std::sync::Arc<wgpu::Queue>,
+    ) -> Self {
         let uniform_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("shader_uniform_layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -197,12 +217,12 @@ impl WgpuShaderRunner {
             }],
         });
 
-        Ok(Self {
+        Self {
             device,
             queue,
             uniform_layout,
             pipeline_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
-        })
+        }
     }
 
     /// Render a single frame with the custom WGSL shader to an [`RgbaImage`].
