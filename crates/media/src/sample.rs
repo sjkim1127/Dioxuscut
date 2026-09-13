@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::metadata::{read_media_range, MediaMetadataError};
+
 /// A single encoded sample location and timeline position.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EncodedSample {
@@ -20,6 +22,19 @@ impl EncodedSample {
     pub fn presentation_timestamp(&self, timescale: u32) -> Option<f64> {
         (timescale > 0).then(|| self.timestamp + self.composition_offset as f64 / timescale as f64)
     }
+}
+
+/// Read one encoded sample using the same bounded range contract as the
+/// browser `readIsoBmffSample()` adapter.
+pub fn read_encoded_sample(
+    path: impl AsRef<std::path::Path>,
+    sample: &EncodedSample,
+) -> Result<Vec<u8>, MediaMetadataError> {
+    let end = sample
+        .offset
+        .checked_add(u64::from(sample.size))
+        .ok_or_else(|| MediaMetadataError::InvalidRange("sample range overflow".into()))?;
+    read_media_range(path, sample.offset, end)
 }
 
 #[cfg(test)]

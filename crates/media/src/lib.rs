@@ -34,5 +34,5 @@ pub use metadata::{
     VideoMetadata, MAX_MEDIA_RANGE_BYTES,
 };
 pub use scene::{SceneAudio, SceneGif, SceneImage, SceneVideo};
-pub use sample::EncodedSample;
+pub use sample::{read_encoded_sample, EncodedSample};
 pub use video::{Html5Video, OffthreadVideo, Video, VideoProps};
