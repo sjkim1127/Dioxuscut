@@ -742,24 +742,28 @@ fn render_node(
                         }
 
                         let idx = (py as u32 * pixmap_width + px as u32) as usize;
-                        // Alpha-composite glyph pixel over existing pixel
-                        let src_a = (coverage as f32 / 255.0) * (text_color.alpha() / 255.0);
-                        let dst = pixels_rgba[idx];
-                        let dst_a = dst.alpha() as f32 / 255.0;
-                        let out_a = src_a + dst_a * (1.0 - src_a);
-                        if out_a > 0.0 {
-                            let blend = |src_c: f32, dst_c: f32| -> u8 {
-                                ((src_c * src_a + dst_c * dst_a * (1.0 - src_a)) / out_a * 255.0)
-                                    .clamp(0.0, 255.0) as u8
-                            };
-                            let r = blend(text_color.red(), dst.red() as f32);
-                            let g = blend(text_color.green(), dst.green() as f32);
-                            let b = blend(text_color.blue(), dst.blue() as f32);
-                            let a = (out_a * 255.0).clamp(0.0, 255.0) as u8;
-                            pixels_rgba[idx] =
-                                tiny_skia::PremultipliedColorU8::from_rgba(r, g, b, a)
-                                    .unwrap_or(pixels_rgba[idx]);
+                        let glyph_coverage = coverage as f32 / 255.0;
+                        let src_alpha = glyph_coverage * text_color.alpha();
+                        if src_alpha <= 0.0 {
+                            continue;
                         }
+                        let inv_src_alpha = 1.0 - src_alpha;
+
+                        // Premultiplied source channels in 0..=255
+                        let src_r = text_color.red() * 255.0 * src_alpha;
+                        let src_g = text_color.green() * 255.0 * src_alpha;
+                        let src_b = text_color.blue() * 255.0 * src_alpha;
+                        let src_a = 255.0 * src_alpha;
+
+                        let dst = pixels_rgba[idx];
+                        let out_r = (src_r + dst.red() as f32 * inv_src_alpha).round().min(255.0) as u8;
+                        let out_g = (src_g + dst.green() as f32 * inv_src_alpha).round().min(255.0) as u8;
+                        let out_b = (src_b + dst.blue() as f32 * inv_src_alpha).round().min(255.0) as u8;
+                        let out_a = (src_a + dst.alpha() as f32 * inv_src_alpha).round().min(255.0) as u8;
+
+                        pixels_rgba[idx] =
+                            tiny_skia::PremultipliedColorU8::from_rgba(out_r, out_g, out_b, out_a)
+                                .unwrap_or(pixels_rgba[idx]);
                     }
                 }
             } else {
