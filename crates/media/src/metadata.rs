@@ -61,6 +61,59 @@ pub struct AudioMetadata {
     pub duration_in_frames: u32,
 }
 
+/// Unified metadata result used by the native equivalent of Remotion
+/// `parseMedia()`. Each track is optional because still images and silent
+/// videos are valid media sources.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ParsedMediaMetadata {
+    pub duration_in_seconds: f64,
+    pub video: Option<VideoMetadata>,
+    pub audio: Option<AudioMetadata>,
+    pub image: Option<ImageDimensions>,
+}
+
+/// Inspect a media source once and return the metadata fields available for
+/// its container. Existing bounded image and ffprobe probes remain the
+/// canonical implementations for each track.
+pub fn parse_media(
+    path: impl AsRef<Path>,
+    fps: f64,
+) -> Result<ParsedMediaMetadata, MediaMetadataError> {
+    let path_ref = path.as_ref();
+    if !path_ref.exists() {
+        return Err(MediaMetadataError::FileNotFound(
+            path_ref.display().to_string(),
+        ));
+    }
+    if let Ok(image) = get_image_dimensions(path_ref) {
+        return Ok(ParsedMediaMetadata {
+            duration_in_seconds: 0.0,
+            video: None,
+            audio: None,
+            image: Some(image),
+        });
+    }
+    let video = get_video_metadata(path_ref).ok();
+    let audio = get_audio_metadata(path_ref, fps).ok();
+    if video.is_none() && audio.is_none() {
+        return Err(MediaMetadataError::FfprobeParse(format!(
+            "unsupported media source: {}",
+            path_ref.display()
+        )));
+    }
+    let duration_in_seconds = video
+        .as_ref()
+        .map(|metadata| metadata.duration_in_seconds)
+        .or_else(|| audio.as_ref().map(|metadata| metadata.duration_in_seconds))
+        .unwrap_or(0.0);
+    Ok(ParsedMediaMetadata {
+        duration_in_seconds,
+        video,
+        audio,
+        image: None,
+    })
+}
+
 /// Resolves an asset path relative to the public/assets directory, matching Remotion's `staticFile()`.
 ///
 /// Looks in:
@@ -306,5 +359,15 @@ mod tests {
         let dimensions = get_image_dimensions(path).unwrap();
         assert!(dimensions.width > 0);
         assert!(dimensions.height > 0);
+    }
+
+    #[test]
+    fn test_parse_media_returns_image_variant() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/logo.png");
+        let parsed = parse_media(path, 30.0).unwrap();
+        assert!(parsed.image.is_some());
+        assert!(parsed.video.is_none());
+        assert!(parsed.audio.is_none());
+        assert_eq!(parsed.duration_in_seconds, 0.0);
     }
 }

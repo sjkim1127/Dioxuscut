@@ -28,8 +28,8 @@ pub use ducking::{
 pub use gif::{Gif, GifProps};
 pub use img::{ImageFit, Img, ImgProps};
 pub use metadata::{
-    get_audio_metadata, get_image_dimensions, get_video_metadata, static_file, AudioMetadata,
-    ImageDimensions, MediaMetadataError, VideoMetadata,
+    get_audio_metadata, get_image_dimensions, get_video_metadata, parse_media, static_file,
+    AudioMetadata, ImageDimensions, MediaMetadataError, ParsedMediaMetadata, VideoMetadata,
 };
 pub use scene::{SceneAudio, SceneGif, SceneImage, SceneVideo};
 pub use video::{Html5Video, OffthreadVideo, Video, VideoProps};
