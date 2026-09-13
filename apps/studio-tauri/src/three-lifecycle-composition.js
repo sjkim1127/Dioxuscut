@@ -28,6 +28,10 @@ export async function register(api) {
     if (!prefetchedUrl.startsWith('data:text/plain;base64,')) {
       throw new Error('prefetch did not return a base64 data URL');
     }
+    const resolvedPrefetch = api.usePreload?.('data:text/plain,three-prefetch-fixture#media');
+    if (resolvedPrefetch !== `${prefetchedUrl}#media`) {
+      throw new Error('usePreload did not resolve the prefetched source');
+    }
     if (prefetchProgressCalls === 0) throw new Error('prefetch did not report progress');
     prefetched.free();
   }
