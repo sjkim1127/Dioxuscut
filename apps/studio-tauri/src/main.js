@@ -686,6 +686,27 @@ export async function readIsoBmffSample(source, trackIndex, sampleIndex, options
   return { ...sample, data, trackIndex };
 }
 
+// Convert a fetched sample to the WebCodecs encoded-chunk contract. Keeping
+// this small adapter separate from the parser lets native hosts consume the
+// same sample metadata without depending on browser globals.
+export function createIsoBmffEncodedChunk(sample, type = 'video') {
+  if (!sample?.data || !(sample.data instanceof Uint8Array)) {
+    throw new TypeError('createIsoBmffEncodedChunk expects a sample with Uint8Array data');
+  }
+  if (typeof EncodedVideoChunk === 'undefined' && type === 'video') {
+    throw new Error('EncodedVideoChunk is not available in this runtime');
+  }
+  if (typeof EncodedAudioChunk === 'undefined' && type === 'audio') {
+    throw new Error('EncodedAudioChunk is not available in this runtime');
+  }
+  const timestamp = Math.round((sample.presentationTimestamp ?? sample.timestamp ?? 0) * 1_000_000);
+  const duration = sample.duration == null ? undefined : Math.max(0, Math.round(sample.duration * 1_000_000));
+  if (type === 'audio') return new EncodedAudioChunk({ timestamp, duration, data: sample.data });
+  return new EncodedVideoChunk({
+    type: sample.keyframe ? 'key' : 'delta', timestamp, duration, data: sample.data,
+  });
+}
+
 function uint32be(bytes, offset) {
   return ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0;
 }
@@ -1466,6 +1487,7 @@ window.dioxuscut = {
   probeIsoBmff,
   parseIsoBmffMovieHeader,
   readIsoBmffSample,
+  createIsoBmffEncodedChunk,
   readMediaRange,
   getAudioDurationInSeconds,
   getAudioDuration,
