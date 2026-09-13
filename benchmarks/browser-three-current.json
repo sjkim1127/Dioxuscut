@@ -1,0 +1,22 @@
+{
+  "backend": "chromium-three-worker",
+  "url": "http://127.0.0.1:1421",
+  "frames": 180,
+  "width": 1280,
+  "height": 720,
+  "repeats": 3,
+  "workers": 1,
+  "image_format": "png",
+  "jpeg_quality": null,
+  "transparent": false,
+  "samples_ms": [
+    6065.6253750000005,
+    6031.972292,
+    5999.431916999998
+  ],
+  "median_ms": 6031.972292,
+  "fps_equivalent": 29.840985880974266,
+  "node": "v24.11.1",
+  "platform": "darwin",
+  "arch": "arm64"
+}
