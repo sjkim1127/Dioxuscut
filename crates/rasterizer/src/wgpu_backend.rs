@@ -58,7 +58,7 @@ use lyon_tessellation::math::point;
 use lyon_tessellation::path::Path as LyonPath;
 use lyon_tessellation::{FillOptions, FillTessellator, FillVertex};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tiny_skia::{Path as TinyPath, PathSegment, Stroke, Transform};
 use wgpu::util::DeviceExt;
 
@@ -659,6 +659,17 @@ struct InFlight {
 
 type GpuResourcePool = Mutex<HashMap<(u32, u32), std::sync::Arc<Mutex<GpuFrameResources>>>>;
 
+struct GpuImageResource {
+    _texture: wgpu::Texture,
+    _view: wgpu::TextureView,
+    _sampler: wgpu::Sampler,
+    bind_group: wgpu::BindGroup,
+    width: u32,
+    height: u32,
+}
+
+type GpuImageCache = Mutex<HashMap<String, Arc<GpuImageResource>>>;
+
 // ────────────────────────────────────────────────────────────────────────────
 // Backend
 // ────────────────────────────────────────────────────────────────────────────
@@ -681,6 +692,10 @@ pub struct WgpuBackend {
     /// fallback implementation details while allowing both paths to share
     /// decoded pixels during the transition.
     image_cache: ImageCache,
+    /// Persistent GPU texture and bind-group cache keyed by the same source
+    /// identity as `ImageCache`. Texture uploads therefore happen once per
+    /// source, rather than once per rendered frame.
+    gpu_images: GpuImageCache,
     gpu_frame_count: AtomicU64,
     cpu_fallback_frame_count: AtomicU64,
 }
@@ -715,6 +730,7 @@ impl WgpuBackend {
             frame_resources: Mutex::new(HashMap::new()),
             fallback: TinySkiaBackend::new(),
             image_cache: ImageCache::default(),
+            gpu_images: Mutex::new(HashMap::new()),
             gpu_frame_count: AtomicU64::new(0),
             cpu_fallback_frame_count: AtomicU64::new(0),
         })
@@ -733,6 +749,87 @@ impl WgpuBackend {
         self.fallback = self.fallback.with_image_cache_bytes(max_bytes);
         self.image_cache = ImageCache::with_max_bytes(max_bytes);
         self
+    }
+
+    fn gpu_image(&self, src: &str) -> Result<Arc<GpuImageResource>, RasterError> {
+        if let Some(image) = self
+            .gpu_images
+            .lock()
+            .expect("GPU image cache lock poisoned")
+            .get(src)
+            .cloned()
+        {
+            return Ok(image);
+        }
+
+        let decoded = self.image_cache.load(src)?;
+        let device = &self.ctx.device;
+        let queue = &self.ctx.queue;
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("image_texture"),
+            size: wgpu::Extent3d {
+                width: decoded.width(),
+                height: decoded.height(),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            texture.as_image_copy(),
+            decoded.as_raw(),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(decoded.width() * 4),
+                rows_per_image: Some(decoded.height()),
+            },
+            wgpu::Extent3d {
+                width: decoded.width(),
+                height: decoded.height(),
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("image_bg"),
+            layout: &self.ctx.image_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+        let resource = Arc::new(GpuImageResource {
+            _texture: texture,
+            _view: view,
+            _sampler: sampler,
+            bind_group,
+            width: decoded.width(),
+            height: decoded.height(),
+        });
+        let mut cache = self.gpu_images.lock().expect("GPU image cache lock poisoned");
+        Ok(cache
+            .entry(src.to_string())
+            .or_insert_with(|| Arc::clone(&resource))
+            .clone())
+    }
+
+    #[cfg(test)]
+    fn gpu_image_cache_len(&self) -> usize {
+        self.gpu_images
+            .lock()
+            .expect("GPU image cache lock poisoned")
+            .len()
     }
 
     fn submit_frame_to_slot(
@@ -778,11 +875,11 @@ impl WgpuBackend {
                 image_resources.push(None);
                 continue;
             };
-            let image = self.image_cache.load(src)?;
+            let image = self.gpu_image(src)?;
             let placement = image_placement(
                 *fit,
-                image.width() as f32,
-                image.height() as f32,
+                image.width as f32,
+                image.height as f32,
                 all_instances[index].shape_bounds[0],
                 all_instances[index].shape_bounds[1],
                 all_instances[index].shape_bounds[2],
@@ -796,51 +893,7 @@ impl WgpuBackend {
             all_instances[index].shape_bounds = placement.destination;
             all_instances[index].params[0..4].copy_from_slice(&placement.source_uv);
 
-            let texture = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("image_texture"),
-                size: wgpu::Extent3d {
-                    width: image.width(),
-                    height: image.height(),
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8Unorm,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
-            queue.write_texture(
-                texture.as_image_copy(),
-                image.as_raw(),
-                wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(image.width() * 4),
-                    rows_per_image: Some(image.height()),
-                },
-                wgpu::Extent3d {
-                    width: image.width(),
-                    height: image.height(),
-                    depth_or_array_layers: 1,
-                },
-            );
-            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-            let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("image_bg"),
-                layout: &self.ctx.image_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&sampler),
-                    },
-                ],
-            });
-            image_resources.push(Some((texture, view, sampler, bind_group)));
+            image_resources.push(Some(image));
         }
 
         if !all_instances.is_empty() {
@@ -970,7 +1023,10 @@ impl WgpuBackend {
                         pass.set_pipeline(&self.ctx.image_pipeline);
                         pass.set_bind_group(
                             2,
-                            &image_resources[i].as_ref().expect("image resource").3,
+                            &image_resources[i]
+                                .as_ref()
+                                .expect("image resource")
+                                .bind_group,
                             &[],
                         );
                         pass.draw(0..6, i as u32..i as u32 + 1);
@@ -2015,7 +2071,9 @@ mod tests {
         };
         let config = FrameConfig::new(32, 32, 0, 30.0);
         let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let _second_gpu_image = gpu.render_frame(&scene, &config).unwrap();
         let cpu_image = TinySkiaBackend::headless().render_frame(&scene, &config).unwrap();
+        assert_eq!(gpu.gpu_image_cache_len(), 1);
         assert!(gpu_image.get_pixel(16, 16)[3] > 0);
         assert_eq!(gpu_image.get_pixel(2, 2), cpu_image.get_pixel(2, 2));
         let mean_error = gpu_image
