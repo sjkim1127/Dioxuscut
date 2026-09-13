@@ -312,6 +312,70 @@ fn bench_gpu_image_cache(c: &mut Criterion) {
 }
 
 #[cfg(feature = "gpu")]
+fn bench_gpu_video_frames(c: &mut Criterion) {
+    use dioxuscut_rasterizer::wgpu_backend::WgpuBackend;
+
+    if std::process::Command::new("ffmpeg")
+        .arg("-version")
+        .output()
+        .is_err()
+    {
+        eprintln!("FFmpeg unavailable, skipping GPU video benchmark");
+        return;
+    }
+    let Ok(backend) = WgpuBackend::new() else {
+        eprintln!("GPU backend unavailable, skipping GPU video benchmark");
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("dioxuscut-gpu-video-bench-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("gradient.mkv");
+    let generated = std::process::Command::new("ffmpeg")
+        .args([
+            "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+            "testsrc2=size=64x64:rate=30:duration=2", "-an", "-c:v", "ffv1",
+        ])
+        .arg(&source)
+        .status()
+        .unwrap();
+    if !generated.success() {
+        let _ = std::fs::remove_dir_all(&dir);
+        eprintln!("Could not create video benchmark input");
+        return;
+    }
+
+    let mut group = c.benchmark_group("gpu_video_frames_1080p");
+    group.sample_size(10);
+    let mut frame = 0u32;
+    group.bench_function("native_decode_upload_30_frames", |b| {
+        b.iter(|| {
+            for _ in 0..30 {
+                let scene = Scene {
+                    nodes: vec![SceneNode::Video {
+                        src: source.display().to_string(),
+                        time: frame as f64 / 30.0,
+                        looped: false,
+                        x: 0.0,
+                        y: 0.0,
+                        w: 1920.0,
+                        h: 1080.0,
+                        fit: dioxuscut_rasterizer::scene::ImageFit::Cover,
+                        opacity: 1.0,
+                    }],
+                };
+                backend
+                    .render_frame(&scene, &FrameConfig::new(1920, 1080, frame, 30.0))
+                    .unwrap();
+                frame = (frame + 1) % 60;
+            }
+        })
+    });
+    group.finish();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[cfg(feature = "gpu")]
 fn bench_gpu_resolutions(c: &mut Criterion) {
     use dioxuscut_rasterizer::wgpu_backend::WgpuBackend;
 
@@ -438,6 +502,7 @@ criterion_group!(
     bench_cpu_resolutions,
     bench_gpu_scenes,
     bench_gpu_image_cache,
+    bench_gpu_video_frames,
     bench_gpu_resolutions,
     bench_gpu_streaming,
     bench_gpu_concurrent_resolutions
