@@ -62,6 +62,8 @@ const imageDimensionsCache = new Map();
 const videoMetadataCache = new Map();
 const webmMetadataCache = new Map();
 const webmClusterCache = new Map();
+let webmClusterCacheBytes = 0;
+const WEBM_CLUSTER_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 const audioDurationCache = new Map();
 const audioDataCache = new Map();
 const videoTextureCache = new Map();
@@ -622,7 +624,12 @@ async function readWebmSamplesFromCue(source, trackNumber = 1, options = {}) {
   const start = cues[cueIndex]?.clusterPosition;
   if (!Number.isSafeInteger(start)) return [];
   const cacheKey = `${source}|${trackNumber}|${cueIndex}`;
-  if (options.cache !== false && webmClusterCache.has(cacheKey)) return webmClusterCache.get(cacheKey);
+  if (options.cache !== false && webmClusterCache.has(cacheKey)) {
+    const cached = webmClusterCache.get(cacheKey);
+    webmClusterCache.delete(cacheKey);
+    webmClusterCache.set(cacheKey, cached);
+    return cached.samples;
+  }
   const next = cues.slice(cueIndex + 1).find((cue) => cue.clusterPosition > start)?.clusterPosition;
   const requestedEnd = (next ?? start + 16 * 1024 * 1024);
   const response = await fetch(source, { headers: { Range: `bytes=${start}-${requestedEnd - 1}` } });
@@ -725,9 +732,18 @@ async function readWebmSamplesFromCue(source, trackNumber = 1, options = {}) {
   };
   parseRange(0, bytes.length);
   if (options.cache !== false) {
+    const bytes = samples.reduce((total, sample) => total + sample.data.byteLength, 0);
+    const previous = webmClusterCache.get(cacheKey);
+    if (previous) webmClusterCacheBytes -= previous.bytes;
     webmClusterCache.delete(cacheKey);
-    webmClusterCache.set(cacheKey, samples);
-    while (webmClusterCache.size > 8) webmClusterCache.delete(webmClusterCache.keys().next().value);
+    webmClusterCacheBytes += bytes;
+    webmClusterCache.set(cacheKey, { samples, bytes });
+    while (webmClusterCacheBytes > WEBM_CLUSTER_CACHE_MAX_BYTES && webmClusterCache.size > 1) {
+      const oldestKey = webmClusterCache.keys().next().value;
+      const oldest = webmClusterCache.get(oldestKey);
+      webmClusterCacheBytes -= oldest.bytes;
+      webmClusterCache.delete(oldestKey);
+    }
   }
   return samples;
 }
