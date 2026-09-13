@@ -144,4 +144,18 @@ mod tests {
         assert!(atlas.insert("a".into(), &[1, 2, 3, 4], 2, 2, 0).is_some());
         assert!(atlas.insert("b".into(), &[1], 1, 1, 0).is_none());
     }
+
+    #[test]
+    fn snapshot_is_stable_and_clear_resets_storage() {
+        let mut atlas = TextAtlas::new(4, 2);
+        atlas.insert("text".into(), &[9, 8], 2, 1, 1).unwrap();
+        let snapshot = atlas.snapshot();
+        assert_eq!((snapshot.width, snapshot.height), (4, 2));
+        assert_eq!(&snapshot.pixels[..2], &[9, 8]);
+
+        atlas.clear();
+        assert!(atlas.entry("text").is_none());
+        assert!(atlas.snapshot().pixels.iter().all(|pixel| *pixel == 0));
+        assert_eq!(&snapshot.pixels[..2], &[9, 8]);
+    }
 }
