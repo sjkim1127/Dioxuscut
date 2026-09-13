@@ -274,8 +274,22 @@ export async function getVideoMetadata(source) {
 // parseMedia(). It reuses the existing cached probes and intentionally does
 // not download sample payloads; callers that need samples use getAudioData or
 // the video texture adapters.
-export async function parseMedia({ src, fields } = {}) {
+export async function parseMedia({
+  src,
+  fields,
+  onDimensions,
+  onDurationInSeconds,
+  onParseProgress,
+} = {}) {
   if (typeof src !== 'string' || !src) throw new TypeError('parseMedia expects {src}');
+  for (const [name, callback] of Object.entries({ onDimensions, onDurationInSeconds, onParseProgress })) {
+    if (callback !== undefined && typeof callback !== 'function') {
+      throw new TypeError(`parseMedia expects ${name} to be a function`);
+    }
+  }
+  // This metadata facade does not yet expose container byte counts. Report the
+  // same progress shape as @remotion/media-parser with an unknown total.
+  await onParseProgress?.({ bytes: 0, percentage: 0, totalBytes: null });
   const [video, image, audioDuration] = await Promise.all([
     getVideoMetadata(src).catch(() => null),
     getImageDimensions(src).catch(() => null),
@@ -284,9 +298,14 @@ export async function parseMedia({ src, fields } = {}) {
   if (!video && !image && audioDuration === null) {
     throw new Error(`unable to parse media metadata: ${src}`);
   }
+  const dimensions = video ? { width: video.width, height: video.height } : image;
+  const durationInSeconds = video?.durationInSeconds ?? audioDuration ?? 0;
+  await onDimensions?.(dimensions);
+  await onDurationInSeconds?.(durationInSeconds);
+  await onParseProgress?.({ bytes: 0, percentage: 1, totalBytes: null });
   const result = {
-    durationInSeconds: video?.durationInSeconds ?? audioDuration ?? 0,
-    dimensions: video ? { width: video.width, height: video.height } : image,
+    durationInSeconds,
+    dimensions,
     videoTracks: video ? [{ width: video.width, height: video.height, aspectRatio: video.aspectRatio }] : [],
     audioTracks: audioDuration !== null ? [{ durationInSeconds: audioDuration }] : [],
     isRemote: /^https?:\/\//i.test(src),

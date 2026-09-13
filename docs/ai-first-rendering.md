@@ -257,8 +257,11 @@ For container inspection, the browser exposes `parseMedia({src, fields})` and
 provides `parse_media()` and `read_media_range()` with the same half-open range
 contract and a 16 MiB per-read bound. Browser reads use HTTP `Range` and verify
 the returned length; native reads seek locally and read exactly the requested
-bytes. These APIs are the foundation for adding incremental sample parsers
-without forcing a whole asset into memory.
+bytes. `parseMedia()` also accepts Remotion-shaped `onDimensions`,
+`onDurationInSeconds`, and `onParseProgress` callbacks; progress is currently
+metadata-level (the byte total remains unknown) until the incremental container
+parser lands. These APIs are the foundation for adding sample parsers without
+forcing a whole asset into memory.
 
 Studio integrations may use `watchStaticFile(fileName, callback)` and dispatch
 `remotion_staticFilesChanged` with `{files: [{name, lastModified}]}`. The
