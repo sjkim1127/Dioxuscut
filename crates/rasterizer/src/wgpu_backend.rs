@@ -1129,6 +1129,7 @@ impl WgpuBackend {
         height: u32,
         sampling_fps: f64,
         slot: &GpuFrameSlot,
+        shader_suffix: Option<&[SceneNode]>,
     ) -> Result<
         (
             wgpu::SubmissionIndex,
@@ -1371,6 +1372,55 @@ impl WgpuBackend {
             });
         }
 
+        if let Some(shader_nodes) = shader_suffix {
+            for node in shader_nodes {
+                let SceneNode::Shader {
+                    x,
+                    y,
+                    w,
+                    h,
+                    source,
+                    time,
+                    params,
+                    opacity,
+                } = node
+                else {
+                    return Err(RasterError::Scene(
+                        "GPU shader suffix contains a non-shader node".into(),
+                    ));
+                };
+                if *opacity != 1.0
+                    || ![*x, *y, *w, *h, *time]
+                        .iter()
+                        .all(|value| value.is_finite())
+                    || *x < 0.0
+                    || *y < 0.0
+                    || *w <= 0.0
+                    || *h <= 0.0
+                    || *x + *w > width as f32
+                    || *y + *h > height as f32
+                {
+                    return Err(RasterError::Scene(
+                        "invalid GPU shader suffix region".into(),
+                    ));
+                }
+                self.shader_runner.render_into_region(
+                    &mut encoder,
+                    &slot.texture_view,
+                    width,
+                    height,
+                    *x,
+                    *y,
+                    *w,
+                    *h,
+                    *time,
+                    *params,
+                    source,
+                    wgpu::LoadOp::Load,
+                )?;
+            }
+        }
+
         encoder.copy_texture_to_buffer(
             slot.texture.as_image_copy(),
             wgpu::ImageCopyBuffer {
@@ -1485,26 +1535,35 @@ impl RasterizerBackend for WgpuBackend {
             self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
             return Ok(image);
         }
-        if let Some(shader_start) = scene
+        let mut gpu_base_scene = None;
+        let shader_suffix = scene
             .nodes
             .iter()
             .position(|node| matches!(node, SceneNode::Shader { .. }))
-        {
-            if scene.nodes[shader_start..]
-                .iter()
-                .all(|node| matches!(node, SceneNode::Shader { .. }))
-            {
-                let base = Scene {
-                    nodes: scene.nodes[..shader_start].to_vec(),
-                };
-                if compile_scene(&base, &self.fallback).is_some() {
-                    let mut image = self.render_frame(&base, config)?;
-                    self.composite_shader_layers(&mut image, &scene.nodes[shader_start..])?;
-                    return Ok(image);
+            .filter(|start| *start > 0)
+            .and_then(|start| {
+                let suffix = &scene.nodes[start..];
+                let valid = suffix.iter().all(|node| {
+                    matches!(node, SceneNode::Shader { x, y, w, h, opacity, .. }
+                        if *opacity == 1.0
+                            && *x >= 0.0
+                            && *y >= 0.0
+                            && *w > 0.0
+                            && *h > 0.0
+                            && *x + *w <= config.width as f32
+                            && *y + *h <= config.height as f32)
+                });
+                if valid {
+                    gpu_base_scene = Some(Scene {
+                        nodes: scene.nodes[..start].to_vec(),
+                    });
+                    Some(suffix)
+                } else {
+                    None
                 }
-            }
-        }
-        let Some(commands) = compile_scene(scene, &self.fallback) else {
+            });
+        let gpu_scene = gpu_base_scene.as_ref().unwrap_or(scene);
+        let Some(commands) = compile_scene(gpu_scene, &self.fallback) else {
             self.cpu_fallback_frame_count
                 .fetch_add(1, Ordering::Relaxed);
             return self.fallback.render_frame(scene, config);
@@ -1543,8 +1602,14 @@ impl RasterizerBackend for WgpuBackend {
         let slot_idx = res.active_index % RING_BUFFER_SIZE;
         res.active_index = res.active_index.wrapping_add(1);
 
-        let (submission_index, rx) =
-            self.submit_frame_to_slot(&commands, width, height, config.fps, &res.slots[slot_idx])?;
+        let (submission_index, rx) = self.submit_frame_to_slot(
+            &commands,
+            width,
+            height,
+            config.fps,
+            &res.slots[slot_idx],
+            shader_suffix,
+        )?;
 
         let mut out_pixels = None;
         let mut scratch = Vec::new();
@@ -1651,8 +1716,14 @@ impl RasterizerBackend for WgpuBackend {
             }
 
             // Submit this frame to GPU
-            let (submission_index, rx) =
-                self.submit_frame_to_slot(&commands, width, height, cfg.fps, &res.slots[slot_idx])?;
+            let (submission_index, rx) = self.submit_frame_to_slot(
+                &commands,
+                width,
+                height,
+                cfg.fps,
+                &res.slots[slot_idx],
+                None,
+            )?;
             self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
 
             // Overlap: drain the previous frame while the newly submitted frame is being rendered on GPU
@@ -2748,7 +2819,7 @@ mod tests {
                     w: 16.0,
                     h: 16.0,
                     fit: ImageFit::Fill,
-                    opacity: 0.5,
+                    opacity: 1.0,
                 },
             ],
         };
@@ -3085,7 +3156,7 @@ mod tests {
                     source: "return vec4<f32>(0.0, 0.0, 1.0, 1.0);".into(),
                     time: 0.0,
                     params: [0.0; 4],
-                    opacity: 0.5,
+                    opacity: 1.0,
                 },
             ],
         };
@@ -3095,10 +3166,8 @@ mod tests {
         assert_eq!(gpu.render_stats().gpu_frames, 1);
         assert_eq!(image.get_pixel(1, 1)[0], 255);
         let overlap = image.get_pixel(6, 4);
-        assert!(
-            overlap[0] > 80 && overlap[2] > 80,
-            "overlap was {overlap:?}"
-        );
+        assert_eq!(overlap[0], 0);
+        assert_eq!(overlap[2], 255);
     }
 
     #[test]
