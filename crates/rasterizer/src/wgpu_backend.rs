@@ -453,6 +453,15 @@ fn mask_shape_coverage(position: vec2<f32>, rect: vec4<f32>, shape: vec4<f32>, k
         let delta = position - shape.xy;
         inside = dot(delta, delta) < shape.z * shape.z;
     }
+    if kind == 5u {
+        let half_size = rect.zw * 0.5;
+        let radius = min(shape.x, min(half_size.x, half_size.y));
+        let delta = abs(position - (rect.xy + half_size)) -
+            (half_size - vec2<f32>(radius, radius));
+        let distance = length(max(delta, vec2<f32>(0.0))) +
+            min(max(delta.x, delta.y), 0.0) - radius;
+        inside = distance <= 0.0;
+    }
     var shape_opacity = opacity;
     if kind == 2u || kind == 3u || kind == 4u {
         let direction = shape.zw - shape.xy;
@@ -2830,10 +2839,16 @@ fn gpu_mask_shapes(
                     && *w > 0.0
                     && *h > 0.0
                     && *stroke_width == 0.0
-                    && *corner_radius == 0.0 =>
+                    && *corner_radius >= 0.0 =>
                 {
+                    let kind = if *corner_radius > 0.0 { 5 } else { 0 };
+                    let shape = if kind == 5 {
+                        [*corner_radius, 0.0, 0.0, 0.0]
+                    } else {
+                        [0.0; 4]
+                    };
                     (
-                        *x, *y, *w, *h, *fill, 0, [0.0; 4], [0.0; 4], [0.0; 4], [0.0; 4], [0.0; 4],
+                        *x, *y, *w, *h, *fill, kind, shape, [0.0; 4], [0.0; 4], [0.0; 4], [0.0; 4],
                         [0.0; 4], 0,
                     )
                 }
@@ -2965,7 +2980,9 @@ fn gpu_mask_shapes(
         {
             return None;
         }
-        if (kind == 1 || kind == 4) && (transform.sx - transform.sy).abs() > f32::EPSILON {
+        if (kind == 1 || kind == 4 || kind == 5)
+            && (transform.sx - transform.sy).abs() > f32::EPSILON
+        {
             return None;
         }
         let x0 = x * transform.sx + transform.tx;
@@ -3001,6 +3018,8 @@ fn gpu_mask_shapes(
                 shape[2] * transform.sx.abs(),
                 0.0,
             ]
+        } else if kind == 5 {
+            [shape[0] * transform.sx.abs(), 0.0, 0.0, 0.0]
         } else {
             [0.0; 4]
         };
@@ -4187,6 +4206,53 @@ mod tests {
                     fill: Color::WHITE,
                     stroke: None,
                     stroke_width: 0.0,
+                }]),
+                mask_mode: crate::scene::MaskMode::Alpha,
+                filters: Vec::new(),
+                shadow: None,
+                children: vec![SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 32.0,
+                    h: 32.0,
+                    fill: Color::rgb(255, 0, 0),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                }],
+            }],
+        };
+        assert!(gpu_supports_scene(&scene));
+        let config = FrameConfig::new(32, 32, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        for (x, y) in [(16, 16), (1, 1)] {
+            assert_eq!(gpu_image.get_pixel(x, y), cpu_image.get_pixel(x, y));
+        }
+    }
+
+    #[test]
+    fn gpu_rounded_rect_alpha_mask_matches_cpu_at_stable_pixels() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping rounded mask GPU test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Layer {
+                opacity: 1.0,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: None,
+                mask: Some(vec![SceneNode::Rect {
+                    x: 4.0,
+                    y: 4.0,
+                    w: 24.0,
+                    h: 24.0,
+                    fill: Color::WHITE,
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 6.0,
                 }]),
                 mask_mode: crate::scene::MaskMode::Alpha,
                 filters: Vec::new(),
