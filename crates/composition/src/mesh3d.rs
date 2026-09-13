@@ -104,15 +104,13 @@ impl SceneEmitter for SceneMesh3D {
         _props: &Value,
         scene: &mut Scene,
     ) -> Result<(), CompositionError> {
-        let mut mesh = (*self.mesh).clone();
         let frame = context.frame as f32;
         let rotation = Vec3::new(
             self.rotation.x + self.rotation_per_frame.x * frame,
             self.rotation.y + self.rotation_per_frame.y * frame,
             self.rotation.z + self.rotation_per_frame.z * frame,
         );
-        mesh.rotate(rotation.x, rotation.y, rotation.z);
-        mesh.render_to_scene(
+        self.mesh.render_rotated_to_scene(
             scene,
             self.center_x,
             self.center_y,
@@ -120,6 +118,7 @@ impl SceneEmitter for SceneMesh3D {
             self.color,
             self.light_direction,
             self.wireframe,
+            rotation,
         );
         Ok(())
     }

@@ -417,8 +417,64 @@ impl Mesh3D {
 
     /// Render this 3D mesh into a [`Scene`] with perspective projection and Lambertian diffuse shading.
     #[allow(clippy::too_many_arguments)]
+    /// Render with a per-frame rotation without cloning the mesh topology.
+    /// The source vertices remain shared and only the projected coordinates
+    /// are materialized for this frame.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_rotated_to_scene(
+        &self,
+        scene: &mut Scene,
+        center_x: f32,
+        center_y: f32,
+        camera_dist: f32,
+        base_color: Color,
+        light_dir: Vec3,
+        wireframe: bool,
+        rotation: Vec3,
+    ) {
+        let rotated: Vec<Vec3> = self
+            .vertices
+            .iter()
+            .map(|vertex| vertex.rotate(rotation.x, rotation.y, rotation.z))
+            .collect();
+        self.render_vertices_to_scene(
+            &rotated,
+            scene,
+            center_x,
+            center_y,
+            camera_dist,
+            base_color,
+            light_dir,
+            wireframe,
+        );
+    }
+
     pub fn render_to_scene(
         &self,
+        scene: &mut Scene,
+        center_x: f32,
+        center_y: f32,
+        camera_dist: f32,
+        base_color: Color,
+        light_dir: Vec3,
+        wireframe: bool,
+    ) {
+        self.render_vertices_to_scene(
+            &self.vertices,
+            scene,
+            center_x,
+            center_y,
+            camera_dist,
+            base_color,
+            light_dir,
+            wireframe,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_vertices_to_scene(
+        &self,
+        vertices: &[Vec3],
         scene: &mut Scene,
         center_x: f32,
         center_y: f32,
@@ -431,8 +487,8 @@ impl Mesh3D {
         let cam_dist = camera_dist.max(100.0);
 
         // Project vertices
-        let mut projected: Vec<(f32, f32, f32)> = Vec::with_capacity(self.vertices.len());
-        for v in &self.vertices {
+        let mut projected: Vec<(f32, f32, f32)> = Vec::with_capacity(vertices.len());
+        for v in vertices {
             let z_eye = v.z + cam_dist;
             let scale = if z_eye > 1.0 { cam_dist / z_eye } else { 1.0 };
             let sx = center_x + v.x * scale;
@@ -454,9 +510,9 @@ impl Mesh3D {
                 continue;
             }
 
-            let v0 = self.vertices[face[0]];
-            let v1 = self.vertices[face[1]];
-            let v2 = self.vertices[face[2]];
+            let v0 = vertices[face[0]];
+            let v1 = vertices[face[1]];
+            let v2 = vertices[face[2]];
 
             let edge1 = Vec3::new(v1.x - v0.x, v1.y - v0.y, v1.z - v0.z);
             let edge2 = Vec3::new(v2.x - v0.x, v2.y - v0.y, v2.z - v0.z);
