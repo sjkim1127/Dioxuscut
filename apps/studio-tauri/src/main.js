@@ -655,16 +655,23 @@ export async function readWebmSamples(source, trackNumber = 1, options = {}) {
   if (maxSamples <= 0) return [];
   const matchingCues = metadata.cues.filter((cue) => cue.trackNumber === trackNumber || cue.trackNumber == null);
   const startCue = Math.max(0, Number(options.cueIndex ?? 0));
-  const samples = [];
-  for (let cueIndex = startCue; cueIndex < matchingCues.length && samples.length < maxSamples; cueIndex += 1) {
-    const clusterSamples = await readWebmSamplesFromCue(source, trackNumber, {
-      ...options,
-      metadata,
-      cueIndex,
-    });
-    samples.push(...clusterSamples.slice(0, maxSamples - samples.length));
-  }
-  return samples;
+  const maxCues = Number.isInteger(options.maxCues) ? Math.max(1, options.maxCues) : 32;
+  const cueIndexes = matchingCues.slice(startCue, startCue + maxCues).map((_, index) => startCue + index);
+  const concurrency = Number.isInteger(options.concurrency) ? Math.max(1, options.concurrency) : 4;
+  const results = new Array(cueIndexes.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < cueIndexes.length) {
+      const resultIndex = next++;
+      results[resultIndex] = await readWebmSamplesFromCue(source, trackNumber, {
+        ...options,
+        metadata,
+        cueIndex: cueIndexes[resultIndex],
+      });
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, cueIndexes.length) }, worker));
+  return results.flat().slice(0, maxSamples);
 }
 
 export function createWebmEncodedVideoChunk(sample, duration = 0) {
