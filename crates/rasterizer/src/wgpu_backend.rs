@@ -2402,6 +2402,34 @@ mod tests {
     }
 
     #[test]
+    fn gpu_image_fits_match_cpu_for_all_modes() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping image fit parity test");
+            return;
+        };
+        let path = std::env::temp_dir().join(format!("dioxuscut-image-fit-{}.png", std::process::id()));
+        let mut source = image::RgbaImage::new(2, 1);
+        source.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));
+        source.put_pixel(1, 0, image::Rgba([0, 0, 255, 255]));
+        source.save(&path).unwrap();
+        let fits = [ImageFit::Cover, ImageFit::Contain, ImageFit::Fill, ImageFit::None, ImageFit::ScaleDown];
+        let config = FrameConfig::new(64, 64, 0, 30.0);
+        for fit in fits {
+            let scene = Scene { nodes: vec![SceneNode::Image {
+                src: path.to_string_lossy().into_owned(),
+                x: 8.0, y: 8.0, w: 48.0, h: 48.0, fit, opacity: 1.0,
+            }] };
+            let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+            let cpu_image = TinySkiaBackend::new().render_frame(&scene, &config).unwrap();
+            let mean_error: f64 = gpu_image.pixels().zip(cpu_image.pixels())
+                .map(|(a, b)| (0..4).map(|channel| (i16::from(a[channel]) - i16::from(b[channel])).unsigned_abs() as u64).sum::<u64>())
+                .sum::<u64>() as f64 / (64 * 64 * 4) as f64;
+            assert!(mean_error < 18.0, "GPU/CPU {fit:?} mean error was {mean_error}");
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn gpu_text_uses_gpu_texture_path() {
         let Ok(gpu) = WgpuBackend::new() else {
             println!("GPU backend unavailable; skipping text GPU test");
