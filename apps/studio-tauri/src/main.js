@@ -315,7 +315,10 @@ export async function parseMedia({
     if (!requested || requested.length === 0) return result;
     return Object.fromEntries(requested.filter((field) => field in result).map((field) => [field, result[field]]));
   };
-  const container = await parseIsoBmffMovieHeader(src).catch(() => null);
+  const [container, webm] = await Promise.all([
+    parseIsoBmffMovieHeader(src).catch(() => null),
+    detectWebmContainer(src).catch(() => false),
+  ]);
   const wav = await parseWavMetadata(src).catch(() => null);
   if (wav) {
     await onDimensions?.(null);
@@ -337,8 +340,16 @@ export async function parseMedia({
     throw new Error(`unable to parse media metadata: ${src}`);
   }
   const dimensions = video ? { width: video.width, height: video.height } : image;
+  const webmTrack = webm && video ? {
+    type: 'video',
+    width: video.width,
+    height: video.height,
+    fps: video.fps,
+    durationInSeconds: video.durationInSeconds,
+    codec: null,
+  } : null;
   const durationInSeconds = video?.durationInSeconds ?? audioDuration ?? container?.durationInSeconds ?? 0;
-  const videoTrack = container?.tracks?.find((track) => track.type === 'video');
+  const videoTrack = container?.tracks?.find((track) => track.type === 'video') ?? webmTrack;
   const audioTrack = container?.tracks?.find((track) => track.type === 'audio');
   const fps = videoTrack?.fps ?? null;
   const videoCodec = videoTrack?.codecConfig
@@ -355,6 +366,7 @@ export async function parseMedia({
   if (audioTrack?.sampleRate != null) await onSampleRate?.(audioTrack.sampleRate);
   if (audioTrack?.numberOfChannels != null) await onNumberOfAudioChannels?.(audioTrack.numberOfChannels);
   if (container?.container != null) await onContainer?.(container.container);
+  else if (webm) await onContainer?.('webm');
   if (videoTrack) {
     await onVideoTrack?.({
       ...videoTrack,
@@ -383,18 +395,25 @@ export async function parseMedia({
       }));
     await onKeyframes?.(keyframes);
   }
-  await onTracks?.(container?.tracks ?? []);
+  const tracks = container?.tracks ?? (webmTrack ? [webmTrack] : []);
+  await onTracks?.(tracks);
   await onParseProgress?.({ bytes: 0, percentage: 1, totalBytes: null });
   const result = {
     durationInSeconds,
     dimensions,
     videoTracks: video ? [{ width: video.width, height: video.height, aspectRatio: video.aspectRatio }] : [],
     audioTracks: audioDuration !== null ? [{ durationInSeconds: audioDuration }] : [],
-    container: container?.container ?? null,
-    tracks: container?.tracks ?? [],
+    container: container?.container ?? (webm ? 'webm' : null),
+    tracks,
     isRemote: /^https?:\/\//i.test(src),
   };
   return selectFields(result);
+}
+
+async function detectWebmContainer(source) {
+  const bytes = await readMediaRange(source, 0, 4);
+  return bytes.length === 4 && bytes[0] === 0x1a && bytes[1] === 0x45
+    && bytes[2] === 0xdf && bytes[3] === 0xa3;
 }
 
 // Browser counterpart of the native bounded range reader used by the
