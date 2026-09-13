@@ -167,6 +167,13 @@ The `file` transport writes each encoded PNG/JPEG frame to a process-scoped
 temporary file and deletes it after Rust decodes it; omit the option to retain
 the JSON/base64 compatibility path.
 
+On the Apple M4 Pro reference machine, a 1280x720 Three.js workload rendered
+180 frames with four workers at about 89 FPS using PNG/base64, 110 FPS using
+PNG/file, and 116 FPS using JPEG quality 90. Use `file` for lossless local
+Tauri/CLI rendering, and use JPEG only when the composition is opaque and a
+small lossy transport trade-off is acceptable. The base64 path remains the
+portable default for hosts that cannot share a process-scoped file.
+
 When the packaged Tauri app runs without `DIOXUSCUT_BROWSER_URL`, the host
 serves its bundled `dist` directory from a dynamic loopback port and points the
 Chromium workers at that server. Production browser rendering therefore does
