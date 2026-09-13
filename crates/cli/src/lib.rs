@@ -637,6 +637,45 @@ pub enum Commands {
     /// List compositions available to the native registry.
     ListCompositions,
 
+    /// Render browser WebCodecs frames and write a timeline-drift report.
+    WebcodecsDrift {
+        /// Browser worker executable/script implementing the Dioxuscut protocol.
+        #[arg(long)]
+        worker: PathBuf,
+
+        /// Node or compatible worker host executable.
+        #[arg(long, default_value = "node")]
+        node: String,
+
+        /// Browser composition URL.
+        #[arg(long, default_value = "http://localhost:1420")]
+        url: String,
+
+        /// Browser-side composition identifier.
+        #[arg(long, default_value = "BrowserComposition")]
+        composition: String,
+
+        #[arg(long, default_value_t = 1920)]
+        width: u32,
+        #[arg(long, default_value_t = 1080)]
+        height: u32,
+        #[arg(long, default_value_t = 30.0)]
+        fps: f64,
+        #[arg(long, default_value_t = 0)]
+        frame_start: u32,
+        /// Number of consecutive output frames to validate.
+        #[arg(long, default_value_t = 60)]
+        frames: u32,
+        #[arg(long, default_value_t = 1)]
+        concurrency: usize,
+        /// JSON report output path.
+        #[arg(long, short, default_value = "webcodecs-drift.json")]
+        output: PathBuf,
+        /// Optional CSV report output path.
+        #[arg(long)]
+        csv: Option<PathBuf>,
+    },
+
     /// Validate a versioned Dioxuscut project file without rendering.
     ValidateProject {
         /// Path to the `.dioxuscut.json` project file.

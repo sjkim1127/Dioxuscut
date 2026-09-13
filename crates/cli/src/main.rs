@@ -155,6 +155,76 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
+        Commands::WebcodecsDrift {
+            worker,
+            node,
+            url,
+            composition,
+            width,
+            height,
+            fps,
+            frame_start,
+            frames,
+            concurrency,
+            output,
+            csv,
+        } => {
+            if *frames == 0 {
+                anyhow::bail!("--frames must be greater than zero");
+            }
+            if *concurrency == 0 {
+                anyhow::bail!("--concurrency must be greater than zero");
+            }
+            if !fps.is_finite() || *fps <= 0.0 {
+                anyhow::bail!("--fps must be finite and greater than zero");
+            }
+            let backend = dioxuscut_rasterizer::BrowserFrameBackend::with_concurrency(
+                node,
+                worker,
+                url.clone(),
+                *concurrency,
+            )?;
+            backend.set_composition(composition.clone())?;
+            let mut samples = Vec::with_capacity(*frames as usize);
+            for offset in 0..*frames {
+                let frame = frame_start
+                    .checked_add(offset)
+                    .ok_or_else(|| anyhow::anyhow!("frame range overflows u32"))?;
+                let request = dioxuscut_rasterizer::WebFrameRequest {
+                    composition: Some(composition.clone()),
+                    frame,
+                    fps: *fps,
+                    width: *width,
+                    height: *height,
+                    props: serde_json::json!({}),
+                    assets: Vec::new(),
+                    timeline: Vec::new(),
+                    image_format: None,
+                    jpeg_quality: None,
+                    transparent: true,
+                    transport: None,
+                };
+                let (_, timing) = backend.render_web_frame_with_timing(&request)?;
+                let timing = timing.ok_or_else(|| {
+                    anyhow::anyhow!("frame {frame} did not return WebCodecs timing metadata")
+                })?;
+                samples.push((frame, timing));
+            }
+            let report = dioxuscut_rasterizer::WebFrameDriftReport::from_samples(&samples)
+                .ok_or_else(|| anyhow::anyhow!("no WebCodecs timing samples were collected"))?;
+            std::fs::write(output, report.to_json()?)?;
+            if let Some(csv_path) = csv {
+                std::fs::write(
+                    csv_path,
+                    format!(
+                        "{}\n{}\n",
+                        dioxuscut_rasterizer::WebFrameDriftReport::csv_header(),
+                        report.to_csv_row()
+                    ),
+                )?;
+            }
+            println!("validated {} WebCodecs frames", report.sample_count);
+        }
         Commands::ValidateProject { input } => {
             let project = dioxuscut_project::Project::load(input)
                 .map_err(|error| anyhow::anyhow!("Project validation failed: {error}"))?;

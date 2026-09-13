@@ -83,8 +83,8 @@ pub use render::{
     RenderProgress, StillImageFormat, VideoCodec,
 };
 pub use web::{
-    WebFrameRequest, WebFrameResponse, WebTimelineClip, WebWorkerMessage,
-    WEB_WORKER_PROTOCOL_VERSION,
+    WebFrameDriftReport, WebFrameRequest, WebFrameResponse, WebFrameTiming, WebTimelineClip,
+    WebWorkerMessage, WEB_WORKER_PROTOCOL_VERSION,
 };
 pub use web_backend::BrowserFrameBackend;
 

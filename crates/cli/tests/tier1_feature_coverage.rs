@@ -321,3 +321,43 @@ fn test_cli_render_project_accepts_remote_asset_cache() {
         _ => panic!("Expected Commands::RenderProject"),
     }
 }
+
+#[test]
+fn test_cli_webcodecs_drift_accepts_validation_options() {
+    let cli = Cli::try_parse_from([
+        "dioxuscut",
+        "webcodecs-drift",
+        "--worker",
+        "worker.mjs",
+        "--fps",
+        "23.976",
+        "--frame-start",
+        "12",
+        "--frames",
+        "48",
+        "--output",
+        "drift.json",
+        "--csv",
+        "drift.csv",
+    ])
+    .expect("Failed to parse webcodecs-drift options");
+    match cli.command {
+        Commands::WebcodecsDrift {
+            worker,
+            fps,
+            frame_start,
+            frames,
+            output,
+            csv,
+            ..
+        } => {
+            assert_eq!(worker, PathBuf::from("worker.mjs"));
+            assert_eq!(fps, 23.976);
+            assert_eq!(frame_start, 12);
+            assert_eq!(frames, 48);
+            assert_eq!(output, PathBuf::from("drift.json"));
+            assert_eq!(csv, Some(PathBuf::from("drift.csv")));
+        }
+        _ => panic!("Expected Commands::WebcodecsDrift"),
+    }
+}
