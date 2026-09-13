@@ -315,6 +315,19 @@ export async function getVideoTexture(source, options = {}) {
 // Naming-compatible entry point for adapters ported from @remotion/three.
 export const useVideoTexture = getVideoTexture;
 
+// Browser-compatible counterpart of @remotion/three's
+// useOffthreadVideoTexture. The worker owns deterministic frame seeking, so
+// this reuses the cached texture while injecting the current composition frame.
+export async function getOffthreadVideoTexture(source, options = {}) {
+  return getVideoTexture(source, {
+    ...options,
+    frame: options.frame ?? frame,
+    fps: options.fps ?? videoConfig.fps,
+  });
+}
+
+export const useOffthreadVideoTexture = getOffthreadVideoTexture;
+
 function seekVideoTexture(video, options) {
   const frame = Number(options.frame);
   const fps = Number(options.fps ?? 30);
@@ -625,6 +638,8 @@ window.dioxuscut = {
   registerLottieAdapter,
   getVideoTexture,
   useVideoTexture,
+  getOffthreadVideoTexture,
+  useOffthreadVideoTexture,
   getImageDimensions,
   getVideoMetadata,
   getAudioDurationInSeconds,
