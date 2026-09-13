@@ -765,7 +765,21 @@ export function makeIsoBmffWebCodecsConfig(track) {
   }
   if (config.type === 'hvcC') return { codec: 'hvc1.1.6.L93.B0', description: config.data, format: 'hevc' };
   if (config.type === 'av1C') return { codec: 'av01.0.08M.08', description: config.data, format: 'av1' };
-  if (config.type === 'esds') return { codec: 'mp4a.40.2', description: config.data, format: 'aac' };
+  if (config.type === 'esds') {
+    for (let offset = 4; offset < config.data.length - 2; offset += 1) {
+      if (config.data[offset] !== 0x05) continue;
+      let length = 0; let cursor = offset + 1; let byte;
+      do {
+        if (cursor >= config.data.length) break;
+        byte = config.data[cursor++];
+        length = (length << 7) | (byte & 0x7f);
+      } while (byte & 0x80);
+      if (cursor + length <= config.data.length) {
+        return { codec: 'mp4a.40.2', description: config.data.slice(cursor, cursor + length), format: 'aac' };
+      }
+    }
+    throw new Error('AAC esds does not contain an AudioSpecificConfig descriptor');
+  }
   throw new Error(`unsupported ISO-BMFF codec configuration: ${config.type}`);
 }
 
@@ -831,7 +845,7 @@ export async function decodeIsoBmffVideo(source, {
     for (const frame of frames) frame.close();
     throw error;
   } finally {
-    decoder.close();
+    if (decoder.state !== 'closed') decoder.close();
   }
 }
 
@@ -872,6 +886,7 @@ export async function decodeIsoBmffAudio(source, {
       ...options, parsed, concurrency: options.concurrency ?? 4,
     });
     for (const sample of payloads) {
+      if (failure) throw failure;
       decoder.decode(createIsoBmffEncodedChunk(sample, 'audio'));
     }
     await decoder.flush();
@@ -881,7 +896,7 @@ export async function decodeIsoBmffAudio(source, {
     for (const chunk of chunks) chunk.close();
     throw error;
   } finally {
-    decoder.close();
+    if (decoder.state !== 'closed') decoder.close();
   }
 }
 

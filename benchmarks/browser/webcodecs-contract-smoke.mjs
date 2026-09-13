@@ -1,15 +1,24 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { readFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
 const require = createRequire(new URL('../../apps/studio-tauri/package.json', import.meta.url));
 const { chromium } = require('playwright-core');
 const url = process.env.DIOXUSCUT_BROWSER_URL ?? 'http://127.0.0.1:1421';
 const executablePath = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const run = promisify(execFile);
+const audioFixturePath = `/tmp/dioxuscut-webcodecs-audio-${process.pid}.m4a`;
+await run(process.env.FFMPEG_PATH ?? 'ffmpeg', [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1',
+  '-c:a', 'aac', '-b:a', '96k', '-ar', '48000', '-ac', '1', '-f', 'ipod', '-y', audioFixturePath,
+]);
 const browser = await chromium.launch({ executablePath, headless: true });
 try {
   const page = await browser.newPage();
   const fixture = await readFile(new URL('../../assets/showcase.mp4', import.meta.url));
+  const audioFixture = await readFile(audioFixturePath);
   const rangeFixture = Buffer.from([0, 1, 2, 3, 4, 5, 6, 7]);
   await page.route('**/range.bin', (route) => {
     const range = /^bytes=(\d+)-(\d+)$/.exec(route.request().headers().range ?? '');
@@ -23,6 +32,9 @@ try {
   });
   await page.route('**/assets/showcase.mp4', (route) => route.fulfill({
     status: 200, contentType: 'video/mp4', body: fixture,
+  }));
+  await page.route('**/assets/audio-fixture.m4a', (route) => route.fulfill({
+    status: 200, contentType: 'audio/mp4', body: audioFixture,
   }));
   await page.addInitScript(() => { window.__DIOXUSCUT_HEADLESS_RENDER__ = true; });
   await page.goto(url, { waitUntil: 'domcontentloaded' });
@@ -56,6 +68,15 @@ try {
     });
     const decoded = frames.map((frame) => ({ width: frame.displayWidth, height: frame.displayHeight, timestamp: frame.timestamp }));
     for (const frame of frames) frame.close();
+    const audioParsed = await window.dioxuscut.parseIsoBmffMovieHeader('/assets/audio-fixture.m4a');
+    const audioConfig = window.dioxuscut.makeIsoBmffWebCodecsConfig(audioParsed.tracks[0]);
+    const audioData = await window.dioxuscut.decodeIsoBmffAudio('/assets/audio-fixture.m4a', {
+      trackIndex: 0, startSample: 0, endSample: 3, maxSamples: 3,
+      codec: audioConfig.codec, description: audioConfig.description,
+      numberOfChannels: 1, sampleRate: 48000, options: { parsed: audioParsed },
+    });
+    const decodedAudio = audioData.map((audio) => ({ frames: audio.numberOfFrames, timestamp: audio.timestamp }));
+    for (const audio of audioData) audio.close();
     return {
       type: chunk.type, timestamp: chunk.timestamp, duration: chunk.duration, supported: support.supported,
       annexB: [...annexB],
@@ -74,6 +95,7 @@ try {
       })),
       ranged: [...ranged],
       decoded,
+      decodedAudio,
     };
   });
   assert.equal(result.type, 'key');
@@ -102,7 +124,10 @@ try {
   assert.equal(result.decoded.length, 3);
   assert.ok(result.decoded.every(({ width, height }) => width > 0 && height > 0));
   assert.ok(result.decoded.every(({ timestamp }, index, frames) => index === 0 || timestamp > frames[index - 1].timestamp));
+  assert.ok(result.decodedAudio.length > 0);
+  assert.ok(result.decodedAudio.every(({ frames }) => frames > 0));
   console.log(JSON.stringify({ status: 'ok', ...result }));
 } finally {
   await browser.close();
+  await rm(audioFixturePath, { force: true });
 }
