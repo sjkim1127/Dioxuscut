@@ -270,6 +270,31 @@ export async function getVideoMetadata(source) {
   return metadata;
 }
 
+// Metadata-first browser facade corresponding to @remotion/media-parser's
+// parseMedia(). It reuses the existing cached probes and intentionally does
+// not download sample payloads; callers that need samples use getAudioData or
+// the video texture adapters.
+export async function parseMedia({ src, fields } = {}) {
+  if (typeof src !== 'string' || !src) throw new TypeError('parseMedia expects {src}');
+  const [video, image, audioDuration] = await Promise.all([
+    getVideoMetadata(src).catch(() => null),
+    getImageDimensions(src).catch(() => null),
+    getAudioDurationInSeconds(src).catch(() => null),
+  ]);
+  if (!video && !image && audioDuration === null) {
+    throw new Error(`unable to parse media metadata: ${src}`);
+  }
+  const result = {
+    durationInSeconds: video?.durationInSeconds ?? audioDuration ?? 0,
+    dimensions: video ? { width: video.width, height: video.height } : image,
+    videoTracks: video ? [{ width: video.width, height: video.height, aspectRatio: video.aspectRatio }] : [],
+    audioTracks: audioDuration !== null ? [{ durationInSeconds: audioDuration }] : [],
+    isRemote: /^https?:\/\//i.test(src),
+  };
+  if (!Array.isArray(fields) || fields.length === 0) return result;
+  return Object.fromEntries(fields.filter((field) => field in result).map((field) => [field, result[field]]));
+}
+
 // Browser equivalent of @remotion/media-utils/getAudioDurationInSeconds.
 export async function getAudioDurationInSeconds(source) {
   if (typeof source !== 'string' || !source) throw new TypeError('getAudioDurationInSeconds expects a source URL');
@@ -1041,6 +1066,7 @@ window.dioxuscut = {
   useOffthreadVideoTexture,
   getImageDimensions,
   getVideoMetadata,
+  parseMedia,
   getAudioDurationInSeconds,
   getAudioDuration,
   getAudioData,
