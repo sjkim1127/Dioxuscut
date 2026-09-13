@@ -558,6 +558,18 @@ pub struct WgpuRenderStats {
     pub cpu_fallback_frames: u64,
 }
 
+impl WgpuRenderStats {
+    /// Fraction of observed frames that used the CPU fallback.
+    pub fn cpu_fallback_ratio(self) -> f64 {
+        let total = self.gpu_frames.saturating_add(self.cpu_fallback_frames);
+        if total == 0 {
+            0.0
+        } else {
+            self.cpu_fallback_frames as f64 / total as f64
+        }
+    }
+}
+
 impl WgpuBackend {
     /// Create a new GPU backend. Initialises the device and render pipeline.
     pub fn new() -> Result<Self, RasterError> {
@@ -1642,6 +1654,7 @@ mod tests {
             gpu_frames: 1,
             cpu_fallback_frames: 1,
         });
+        assert!((backend.render_stats().cpu_fallback_ratio() - 0.5).abs() < f64::EPSILON);
     }
 
     #[test]
