@@ -44,6 +44,7 @@ pub mod scene;
 pub mod security;
 pub mod shader;
 pub mod text_layout;
+pub(crate) mod text_atlas;
 pub mod tiny_skia_backend;
 mod video_cache;
 pub mod web;

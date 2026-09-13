@@ -18,6 +18,7 @@
 const BUNDLED_FONT: &[u8] = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
 
 use crate::backend::RasterError;
+use crate::text_atlas::TextAtlas;
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -259,6 +260,7 @@ pub struct FontCache {
     path: Option<String>,
     assets: Mutex<HashMap<String, Arc<LoadedFont>>>,
     rasterized: Mutex<HashMap<TextRasterKey, Arc<RenderedText>>>,
+    atlas: Mutex<TextAtlas>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -317,6 +319,7 @@ impl FontCache {
                             path: Some(path),
                             assets: Mutex::new(HashMap::new()),
                             rasterized: Mutex::new(HashMap::new()),
+                            atlas: Mutex::new(TextAtlas::new(2048, 2048)),
                         };
                     }
                     Err(err) => {
@@ -344,6 +347,7 @@ impl FontCache {
                             path: Some(path.to_string()),
                             assets: Mutex::new(HashMap::new()),
                             rasterized: Mutex::new(HashMap::new()),
+                            atlas: Mutex::new(TextAtlas::new(2048, 2048)),
                         };
                     }
                 }
@@ -368,6 +372,7 @@ impl FontCache {
             path: Some("<bundled:NotoSans-Regular>".into()),
             assets: Mutex::new(HashMap::new()),
             rasterized: Mutex::new(HashMap::new()),
+            atlas: Mutex::new(TextAtlas::new(2048, 2048)),
         }
     }
 
@@ -378,6 +383,7 @@ impl FontCache {
             path: None,
             assets: Mutex::new(HashMap::new()),
             rasterized: Mutex::new(HashMap::new()),
+            atlas: Mutex::new(TextAtlas::new(2048, 2048)),
         }
     }
 
@@ -400,6 +406,10 @@ impl FontCache {
         self.rasterized
             .lock()
             .expect("font raster cache lock poisoned")
+            .clear();
+        self.atlas
+            .lock()
+            .expect("text atlas lock poisoned")
             .clear();
         Ok(())
     }
@@ -442,6 +452,18 @@ impl FontCache {
         }
         let rendered = self.rasterize_uncached(text, font_size, sources)?;
         if let Some(rendered) = rendered.as_ref() {
+            let atlas_key = format!("{}:{}:{:?}", key.text, key.font_size_bits, key.sources);
+            let _ = self
+                .atlas
+                .lock()
+                .expect("text atlas lock poisoned")
+                .insert(
+                    atlas_key,
+                    &rendered.pixels,
+                    rendered.width,
+                    rendered.height,
+                    rendered.baseline,
+                );
             self.rasterized
                 .lock()
                 .expect("font raster cache lock poisoned")
