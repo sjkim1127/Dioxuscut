@@ -6,6 +6,16 @@ export async function register(api) {
   const unblock = buffer?.delayPlayback?.().unblock;
   if (unblock) setTimeout(unblock, 0);
 
+  let staticFileChanges = 0;
+  const staticWatcher = api.watchStaticFile?.('fixture.png', () => { staticFileChanges += 1; });
+  if (staticWatcher) {
+    window.dispatchEvent(new CustomEvent('remotion_staticFilesChanged', {
+      detail: { files: [{ name: 'fixture.png', lastModified: 1 }] },
+    }));
+    if (staticFileChanges !== 1) throw new Error('watchStaticFile did not receive a change');
+    staticWatcher.cancel();
+  }
+
   let prefetchProgressCalls = 0;
   const prefetched = api.prefetch?.('data:text/plain,three-prefetch-fixture', {
     method: 'base64',
