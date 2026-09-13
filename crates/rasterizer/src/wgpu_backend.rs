@@ -173,6 +173,8 @@ struct InstanceData {
     grayscale: vec4<f32>,
     contrast: vec4<f32>,
     saturation: vec4<f32>,
+    // x = offset, y = darkness, z = roundness, w = enabled
+    vignette: vec4<f32>,
     clip_rects: array<vec4<f32>, 4>,
     mask_opacity: vec4<f32>,
     mask_kinds: vec4<u32>,
@@ -318,6 +320,24 @@ fn apply_color_filters(color: vec4<f32>, instance: InstanceData) -> vec4<f32> {
     return vec4<f32>(clamp(srgb, vec3<f32>(0.0), vec3<f32>(1.0)), color.a);
 }
 
+fn vignette_factor(position: vec2<f32>, bounds: vec4<f32>, settings: vec4<f32>) -> f32 {
+    if settings.w < 0.5 {
+        return 1.0;
+    }
+    let local = clamp((position - bounds.xy) / max(bounds.zw, vec2<f32>(0.000001)), vec2<f32>(0.0), vec2<f32>(1.0));
+    let px = 2.0 * abs(local.x - 0.5);
+    let py = 2.0 * abs(local.y - 0.5);
+    let offset = clamp(settings.x, 0.0, 2.0);
+    let darkness = clamp(settings.y, 0.0, 1.0);
+    let roundness = clamp(settings.z, 0.0, 1.0);
+    let max_diag = (1.0 - roundness) + roundness * sqrt(2.0);
+    let span = max(max_diag - offset, 0.00001);
+    let d = mix(max(px, py), sqrt(px * px + py * py), roundness);
+    let t = clamp((d - offset) / span, 0.0, 1.0);
+    let smooth_factor = t * t * (3.0 - 2.0 * t);
+    return 1.0 - darkness * smooth_factor;
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let instance = instances[in.instance_index];
@@ -381,7 +401,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     col = apply_color_filters(col, instance);
-    return vec4<f32>(col.rgb, col.a * instance.params.w * coverage * mask_coverage_value);
+    let vignette = vignette_factor(in.local_position, instance.shape_bounds, instance.vignette);
+    return vec4<f32>(col.rgb * vignette, col.a * instance.params.w * coverage * mask_coverage_value);
 }
 
 @fragment
@@ -392,7 +413,8 @@ fn fs_solid(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     let color = apply_color_filters(instance.color, instance);
-    return vec4<f32>(color.rgb, color.a * instance.params.w * mask_coverage_value);
+    let vignette = vignette_factor(in.local_position, instance.shape_bounds, instance.vignette);
+    return vec4<f32>(color.rgb * vignette, color.a * instance.params.w * mask_coverage_value);
 }
 
 @fragment
@@ -407,7 +429,8 @@ fn fs_image(in: VertexOutput) -> @location(0) vec4<f32> {
     let uv = mix(instance.params.xy, instance.params.zw, clamp(local, vec2<f32>(0.0), vec2<f32>(1.0)));
     let sampled = textureSample(image_texture, image_sampler, uv);
     let color = apply_color_filters(vec4<f32>(sampled.rgb, instance.color.a), instance);
-    return vec4<f32>(color.rgb, sampled.a * instance.color.a * instance.params.w * mask_coverage_value);
+    let vignette = vignette_factor(in.local_position, instance.shape_bounds, instance.vignette);
+    return vec4<f32>(color.rgb * vignette, sampled.a * instance.color.a * instance.params.w * mask_coverage_value);
 }
 
 @fragment
@@ -422,7 +445,8 @@ fn fs_text(in: VertexOutput) -> @location(0) vec4<f32> {
     let uv = mix(instance.params.xy, instance.params.zw, clamp(local, vec2<f32>(0.0), vec2<f32>(1.0)));
     let coverage = textureSample(image_texture, image_sampler, uv).r;
     let color = apply_color_filters(instance.color, instance);
-    return vec4<f32>(color.rgb, coverage * color.a * instance.params.w * mask_coverage_value);
+    let vignette = vignette_factor(in.local_position, instance.shape_bounds, instance.vignette);
+    return vec4<f32>(color.rgb * vignette, coverage * color.a * instance.params.w * mask_coverage_value);
 }
 
 fn mask_coverage(position: vec2<f32>, instance: InstanceData) -> f32 {
@@ -2741,6 +2765,7 @@ struct GpuInstance {
     grayscale: [f32; 4],
     contrast: [f32; 4],
     saturation: [f32; 4],
+    vignette: [f32; 4],
     clip_rects: [[f32; 4]; 4],
     mask_opacity: [f32; 4],
     mask_kinds: [u32; 4],
@@ -2771,6 +2796,7 @@ impl GpuInstance {
             grayscale: [0.0, 0.0, 0.0, 0.0],
             contrast: [1.0, 0.0, 0.0, 0.0],
             saturation: [1.0, 0.0, 0.0, 0.0],
+            vignette: [0.0, 0.0, 0.0, 0.0],
             clip_rects: [[-1.0; 4]; 4],
             mask_opacity: [-1.0; 4],
             mask_kinds: [0; 4],
@@ -3209,6 +3235,9 @@ fn compile_nodes(
                     instance.grayscale[0] = 1.0 - (1.0 - instance.grayscale[0]) * (1.0 - grayscale);
                     instance.contrast[0] *= contrast;
                     instance.saturation[0] *= saturation;
+                    if let Some(vignette) = gpu_vignette(filters) {
+                        instance.vignette = vignette;
+                    }
                 }
             }
 
@@ -3251,6 +3280,9 @@ fn compile_nodes(
                     instance.grayscale[0] = 1.0 - (1.0 - instance.grayscale[0]) * (1.0 - grayscale);
                     instance.contrast[0] *= contrast;
                     instance.saturation[0] *= saturation;
+                    if let Some(vignette) = gpu_vignette(filters) {
+                        instance.vignette = vignette;
+                    }
                 }
             }
 
@@ -3307,6 +3339,9 @@ fn compile_nodes(
                     instance.grayscale[0] = 1.0 - (1.0 - instance.grayscale[0]) * (1.0 - grayscale);
                     instance.contrast[0] *= contrast;
                     instance.saturation[0] *= saturation;
+                    if let Some(vignette) = gpu_vignette(filters) {
+                        instance.vignette = vignette;
+                    }
                     if let Some(mask_info) = mask_info {
                         apply_gpu_mask_info(instance, mask_info);
                     }
@@ -3344,6 +3379,9 @@ fn compile_nodes(
                     instance.grayscale[0] = 1.0 - (1.0 - instance.grayscale[0]) * (1.0 - grayscale);
                     instance.contrast[0] *= contrast;
                     instance.saturation[0] *= saturation;
+                    if let Some(vignette) = gpu_vignette(filters) {
+                        instance.vignette = vignette;
+                    }
                     if let Some(mask_info) = mask_info {
                         apply_gpu_mask_info(instance, mask_info);
                     }
@@ -3426,9 +3464,46 @@ fn gpu_layer_effects(
                     saturation * factor,
                 ))
             }
+            crate::scene::SceneFilter::Vignette {
+                offset,
+                darkness,
+                roundness,
+            } if offset.is_finite()
+                && darkness.is_finite()
+                && roundness.is_finite()
+                && (0.0..=2.0).contains(offset)
+                && (0.0..=1.0).contains(darkness)
+                && (0.0..=1.0).contains(roundness) =>
+            {
+                Some((opacity, brightness, grayscale, contrast, saturation))
+            }
             _ => None,
         },
     )
+}
+
+fn gpu_vignette(filters: &[crate::scene::SceneFilter]) -> Option<[f32; 4]> {
+    let mut result = None;
+    for filter in filters {
+        if let crate::scene::SceneFilter::Vignette {
+            offset,
+            darkness,
+            roundness,
+        } = filter
+        {
+            if !offset.is_finite()
+                || !darkness.is_finite()
+                || !roundness.is_finite()
+                || !(0.0..=2.0).contains(offset)
+                || !(0.0..=1.0).contains(darkness)
+                || !(0.0..=1.0).contains(roundness)
+            {
+                return None;
+            }
+            result = Some([*offset, *darkness, *roundness, 1.0]);
+        }
+    }
+    result
 }
 
 type GpuMaskInfo = (
@@ -4680,6 +4755,63 @@ mod tests {
         assert!(
             mean_alpha_error < 12.0,
             "GPU/CPU text alpha mean error was {mean_alpha_error}"
+        );
+    }
+
+    #[test]
+    fn gpu_vignette_filter_matches_cpu_layer_falloff() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping vignette GPU test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Layer {
+                opacity: 1.0,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: None,
+                mask: None,
+                mask_mode: crate::scene::MaskMode::Alpha,
+                filters: vec![crate::scene::SceneFilter::Vignette {
+                    offset: 0.1,
+                    darkness: 0.8,
+                    roundness: 0.5,
+                }],
+                shadow: None,
+                children: vec![SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 64.0,
+                    h: 64.0,
+                    fill: Color::rgba(220, 120, 40, 255),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                }],
+            }],
+        };
+        assert!(gpu_supports_scene(&scene));
+        let config = FrameConfig::new(64, 64, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        let center = gpu_image.get_pixel(32, 32);
+        let corner = gpu_image.get_pixel(1, 1);
+        assert!(center[0] > corner[0]);
+        let cpu_center = cpu_image.get_pixel(32, 32);
+        let cpu_corner = cpu_image.get_pixel(1, 1);
+        let attenuation_error: f64 = (0..3)
+            .map(|channel| {
+                let gpu_ratio = f64::from(corner[channel]) / f64::from(center[channel].max(1));
+                let cpu_ratio =
+                    f64::from(cpu_corner[channel]) / f64::from(cpu_center[channel].max(1));
+                (gpu_ratio - cpu_ratio).abs()
+            })
+            .sum::<f64>()
+            / 3.0;
+        assert!(
+            attenuation_error < 0.03,
+            "GPU/CPU vignette attenuation error was {attenuation_error}"
         );
     }
 
