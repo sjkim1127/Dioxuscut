@@ -50,6 +50,17 @@ renders. Output media and browser bundles go under `target/remotion-benchmark-*`
 Pinned npm versions and their lockfile are isolated under `benchmarks/remotion`;
 production Dioxuscut gains no Node dependency.
 
+### Three.js lifecycle smoke test
+
+`apps/studio-tauri/src/three-lifecycle-composition.js` demonstrates the
+framework-free `setup/render/dispose` contract. With the Studio Vite server
+running, validate composition registration, persistent scene state, frame
+rendering, and screenshot capture with:
+
+```sh
+node benchmarks/browser/three-lifecycle-smoke.mjs
+```
+
 Both scene definitions render 32 opaque moving rectangles at 1280x720, 30 fps,
 180 frames, using the same spring parameters. Each uses four render workers,
 H.264, CRF 18, and the fast x264 preset. Both use the same system FFmpeg binary;
