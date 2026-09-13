@@ -376,7 +376,9 @@ export function audioBufferToDataUrl(buffer) {
   return `data:audio/wav;base64,${window.btoa(binary)}`;
 }
 
-export function prefetch(source, { method = 'blob-url', credentials, contentType } = {}) {
+export function prefetch(source, {
+  method = 'blob-url', credentials, contentType, onProgress,
+} = {}) {
   if (typeof source !== 'string' || !source) throw new TypeError('prefetch expects a source URL');
   const hashIndex = source.indexOf('#');
   const base = hashIndex < 0 ? source : source.slice(0, hashIndex);
@@ -386,7 +388,19 @@ export function prefetch(source, { method = 'blob-url', credentials, contentType
   let objectUrl = null;
   const done = fetch(base, { credentials, signal: controller.signal }).then(async (response) => {
     if (!response.ok) throw new Error(`prefetch failed: ${response.status} ${response.statusText}`);
-    const blob = await response.blob();
+    if (!response.body) throw new Error('prefetch response has no body');
+    const reader = response.body.getReader();
+    const chunks = [];
+    let received = 0;
+    const total = Number(response.headers.get('content-length')) || null;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.byteLength;
+      onProgress?.({ loadedBytes: received, totalBytes: total });
+    }
+    const blob = new Blob(chunks, { type: response.headers.get('content-type') || undefined });
     if (released) return base;
     if (method === 'base64') {
       const bytes = new Uint8Array(await blob.arrayBuffer());
