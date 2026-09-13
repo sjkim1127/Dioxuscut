@@ -2562,14 +2562,16 @@ fn compile_nodes(
                 children,
                 ..
             } if gpu_layer_effects(filters, *layer_opacity).is_some()
-                && transform == Transform::identity()
                 && (*mask_mode == crate::scene::MaskMode::Alpha)
                 && (mask.is_none()
-                    || gpu_alpha_rect_mask(mask.as_deref().unwrap_or(&[])).is_some()) =>
+                    || gpu_alpha_rect_mask(mask.as_deref().unwrap_or(&[]), transform)
+                        .is_some()) =>
             {
                 let (layer_opacity, brightness, grayscale, contrast, saturation) =
                     gpu_layer_effects(filters, *layer_opacity).unwrap();
-                let clip_rect = mask.as_deref().and_then(gpu_alpha_rect_mask);
+                let clip_rect = mask
+                    .as_deref()
+                    .and_then(|nodes| gpu_alpha_rect_mask(nodes, transform));
                 let start = output.len();
                 compile_nodes(children, transform, opacity * layer_opacity, output, font)?;
                 for command in &mut output[start..] {
@@ -2666,7 +2668,7 @@ fn gpu_layer_effects(
     )
 }
 
-fn gpu_alpha_rect_mask(mask: &[SceneNode]) -> Option<[f32; 4]> {
+fn gpu_alpha_rect_mask(mask: &[SceneNode], transform: Transform) -> Option<[f32; 4]> {
     let [SceneNode::Rect {
         x,
         y,
@@ -2691,7 +2693,27 @@ fn gpu_alpha_rect_mask(mask: &[SceneNode]) -> Option<[f32; 4]> {
     {
         return None;
     }
-    Some([*x, *y, *w, *h])
+    // Translation and axis-aligned scale remain exact rectangular clips in
+    // screen space. Rotation/shear falls back: a bounding box would overdraw.
+    if !transform.sx.is_finite()
+        || !transform.sy.is_finite()
+        || !transform.tx.is_finite()
+        || !transform.ty.is_finite()
+        || transform.kx != 0.0
+        || transform.ky != 0.0
+    {
+        return None;
+    }
+    let x0 = *x * transform.sx + transform.tx;
+    let x1 = (*x + *w) * transform.sx + transform.tx;
+    let y0 = *y * transform.sy + transform.ty;
+    let y1 = (*y + *h) * transform.sy + transform.ty;
+    let width = (x1 - x0).abs();
+    let height = (y1 - y0).abs();
+    if width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+    Some([x0.min(x1), y0.min(y1), width, height])
 }
 
 #[cfg(test)]
