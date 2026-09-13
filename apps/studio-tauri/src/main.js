@@ -701,7 +701,9 @@ export function createIsoBmffEncodedChunk(sample, type = 'video') {
   }
   const timestamp = Math.round((sample.presentationTimestamp ?? sample.timestamp ?? 0) * 1_000_000);
   const duration = sample.duration == null ? undefined : Math.max(0, Math.round(sample.duration * 1_000_000));
-  if (type === 'audio') return new EncodedAudioChunk({ timestamp, duration, data: sample.data });
+  if (type === 'audio') return new EncodedAudioChunk({
+    type: sample.keyframe === false ? 'delta' : 'key', timestamp, duration, data: sample.data,
+  });
   return new EncodedVideoChunk({
     type: sample.keyframe ? 'key' : 'delta', timestamp, duration, data: sample.data,
   });
@@ -775,7 +777,8 @@ export async function decodeIsoBmffVideo(source, {
 }
 
 export async function decodeIsoBmffAudio(source, {
-  trackIndex = 0, startSample = 0, endSample = Infinity, maxSamples = 256, codec, description, options = {},
+  trackIndex = 0, startSample = 0, endSample = Infinity, maxSamples = 256, codec, description,
+  numberOfChannels, sampleRate, options = {},
 } = {}) {
   if (typeof AudioDecoder === 'undefined') throw new Error('AudioDecoder is not available in this runtime');
   if (typeof codec !== 'string' || !codec) throw new TypeError('decodeIsoBmffAudio requires a codec string');
@@ -791,7 +794,12 @@ export async function decodeIsoBmffAudio(source, {
     output: (audio) => chunks.push(audio),
     error: (error) => { failure = error; },
   });
-  const decoderConfig = { codec, ...(description ? { description } : {}) };
+  const decoderConfig = {
+    codec,
+    ...(description ? { description } : {}),
+    ...(Number.isInteger(numberOfChannels) ? { numberOfChannels } : {}),
+    ...(Number.isInteger(sampleRate) ? { sampleRate } : {}),
+  };
   if (typeof AudioDecoder.isConfigSupported === 'function') {
     const support = await AudioDecoder.isConfigSupported(decoderConfig);
     if (!support.supported) {
