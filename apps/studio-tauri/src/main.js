@@ -1996,6 +1996,15 @@ export function releaseVideoTexture(source) {
 }
 
 export function clearMediaCaches() {
+  for (const { video, texture } of videoTextureCache.values()) {
+    texture.dispose();
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+  }
+  videoTextureCache.clear();
+  preloadedAssets.clear();
+  preloadedSources.clear();
   imageDimensionsCache.clear();
   videoMetadataCache.clear();
   audioDurationCache.clear();
