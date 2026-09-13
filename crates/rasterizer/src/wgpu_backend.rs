@@ -351,7 +351,9 @@ fn composited_color(rgb: vec3<f32>, alpha: f32, instance: InstanceData) -> vec4<
     // A frame containing fixed-function blend operations must keep every
     // source and destination in the same sRGB domain. The regular renderer
     // remains linear-light for compatibility with its existing path.
-    if (instance.kind_data.w & 2u) != 0u {
+    // Image/video/Lottie samples are already stored as normalized sRGB
+    // texels; analytic colors are stored in linear space.
+    if (instance.kind_data.w & 2u) != 0u && instance.kind_data.x != 5u {
         output_rgb = vec3<f32>(
             linear_to_srgb(clamp(rgb.r, 0.0, 1.0)),
             linear_to_srgb(clamp(rgb.g, 0.0, 1.0)),
