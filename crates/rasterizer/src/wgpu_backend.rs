@@ -175,6 +175,8 @@ struct InstanceData {
     saturation: vec4<f32>,
     clip_rects: array<vec4<f32>, 4>,
     mask_opacity: vec4<f32>,
+    mask_kinds: vec4<u32>,
+    mask_shapes: array<vec4<f32>, 4>,
     // corner radius, stroke width, angle, inherited opacity
     params: vec4<f32>,
     // x' = dot(transform_x.xyz, vec3(x, y, 1))
@@ -426,17 +428,22 @@ fn mask_coverage(position: vec2<f32>, instance: InstanceData) -> f32 {
     let opacity1 = instance.mask_opacity[1];
     let opacity2 = instance.mask_opacity[2];
     let opacity3 = instance.mask_opacity[3];
-    if opacity0 >= 0.0 { has_mask = true; coverage = mask_rect_coverage(position, rect0, opacity0, coverage); }
-    if opacity1 >= 0.0 { has_mask = true; coverage = mask_rect_coverage(position, rect1, opacity1, coverage); }
-    if opacity2 >= 0.0 { has_mask = true; coverage = mask_rect_coverage(position, rect2, opacity2, coverage); }
-    if opacity3 >= 0.0 { has_mask = true; coverage = mask_rect_coverage(position, rect3, opacity3, coverage); }
+    if opacity0 >= 0.0 { has_mask = true; coverage = mask_shape_coverage(position, rect0, instance.mask_shapes[0], instance.mask_kinds.x, opacity0, coverage); }
+    if opacity1 >= 0.0 { has_mask = true; coverage = mask_shape_coverage(position, rect1, instance.mask_shapes[1], instance.mask_kinds.y, opacity1, coverage); }
+    if opacity2 >= 0.0 { has_mask = true; coverage = mask_shape_coverage(position, rect2, instance.mask_shapes[2], instance.mask_kinds.z, opacity2, coverage); }
+    if opacity3 >= 0.0 { has_mask = true; coverage = mask_shape_coverage(position, rect3, instance.mask_shapes[3], instance.mask_kinds.w, opacity3, coverage); }
     if has_mask { return coverage; }
     return 1.0;
 }
 
-fn mask_rect_coverage(position: vec2<f32>, rect: vec4<f32>, opacity: f32, current: f32) -> f32 {
-    if position.x >= rect.x && position.y >= rect.y &&
-        position.x < rect.x + rect.z && position.y < rect.y + rect.w {
+fn mask_shape_coverage(position: vec2<f32>, rect: vec4<f32>, shape: vec4<f32>, kind: u32, opacity: f32, current: f32) -> f32 {
+    var inside = position.x >= rect.x && position.y >= rect.y &&
+        position.x < rect.x + rect.z && position.y < rect.y + rect.w;
+    if kind == 1u {
+        let delta = position - shape.xy;
+        inside = dot(delta, delta) < shape.z * shape.z;
+    }
+    if inside {
         return 1.0 - (1.0 - current) * (1.0 - clamp(opacity, 0.0, 1.0));
     }
     return current;
@@ -2222,6 +2229,8 @@ struct GpuInstance {
     saturation: [f32; 4],
     clip_rects: [[f32; 4]; 4],
     mask_opacity: [f32; 4],
+    mask_kinds: [u32; 4],
+    mask_shapes: [[f32; 4]; 4],
     params: [f32; 4],
     transform_x: [f32; 4],
     transform_y: [f32; 4],
@@ -2244,6 +2253,8 @@ impl GpuInstance {
             saturation: [1.0, 0.0, 0.0, 0.0],
             clip_rects: [[-1.0; 4]; 4],
             mask_opacity: [-1.0; 4],
+            mask_kinds: [0; 4],
+            mask_shapes: [[0.0; 4]; 4],
             params: [0.0, 0.0, 0.0, opacity],
             transform_x,
             transform_y,
@@ -2599,9 +2610,11 @@ fn compile_nodes(
                     instance.grayscale[0] = 1.0 - (1.0 - instance.grayscale[0]) * (1.0 - grayscale);
                     instance.contrast[0] *= contrast;
                     instance.saturation[0] *= saturation;
-                    if let Some((clip_rects, mask_opacity)) = mask_info {
+                    if let Some((clip_rects, mask_opacity, mask_kinds, mask_shapes)) = mask_info {
                         instance.clip_rects = clip_rects;
                         instance.mask_opacity = mask_opacity;
+                        instance.mask_kinds = mask_kinds;
+                        instance.mask_shapes = mask_shapes;
                     }
                 }
             }
@@ -2692,36 +2705,58 @@ fn gpu_rect_masks(
     mask: &[SceneNode],
     transform: Transform,
     mask_mode: crate::scene::MaskMode,
-) -> Option<([[f32; 4]; 4], [f32; 4])> {
+) -> Option<([[f32; 4]; 4], [f32; 4], [u32; 4], [[f32; 4]; 4])> {
     if mask.is_empty() || mask.len() > 4 {
         return None;
     }
     let mut rects = [[-1.0; 4]; 4];
     let mut opacities = [-1.0; 4];
+    let mut kinds = [0; 4];
+    let mut shapes = [[0.0; 4]; 4];
     for (index, node) in mask.iter().enumerate() {
-        let SceneNode::Rect {
-            x,
-            y,
-            w,
-            h,
-            fill,
-            stroke: None,
-            stroke_width,
-            corner_radius,
-        } = node
-        else {
-            return None;
+        let (x, y, w, h, fill, kind, shape) = match node {
+            SceneNode::Rect {
+                x,
+                y,
+                w,
+                h,
+                fill,
+                stroke: None,
+                stroke_width,
+                corner_radius,
+            } if [*x, *y, *w, *h, *stroke_width, *corner_radius]
+                .iter()
+                .all(|v| v.is_finite())
+                && *w > 0.0
+                && *h > 0.0
+                && *stroke_width == 0.0
+                && *corner_radius == 0.0 =>
+            {
+                (*x, *y, *w, *h, *fill, 0, [0.0; 4])
+            }
+            SceneNode::Circle {
+                cx,
+                cy,
+                r,
+                fill,
+                stroke: None,
+                stroke_width,
+            } if [*cx, *cy, *r, *stroke_width].iter().all(|v| v.is_finite())
+                && *r > 0.0
+                && *stroke_width == 0.0 =>
+            {
+                (
+                    *cx - *r,
+                    *cy - *r,
+                    *r * 2.0,
+                    *r * 2.0,
+                    *fill,
+                    1,
+                    [*cx, *cy, *r, 0.0],
+                )
+            }
+            _ => return None,
         };
-        if ![*x, *y, *w, *h, *stroke_width, *corner_radius]
-            .iter()
-            .all(|value| value.is_finite())
-            || *w <= 0.0
-            || *h <= 0.0
-            || *stroke_width != 0.0
-            || *corner_radius != 0.0
-        {
-            return None;
-        }
         let mask_opacity = match mask_mode {
             crate::scene::MaskMode::Alpha => f32::from(fill.a) / 255.0,
             crate::scene::MaskMode::Luminance if fill.r == fill.g && fill.g == fill.b => {
@@ -2740,10 +2775,13 @@ fn gpu_rect_masks(
         {
             return None;
         }
-        let x0 = *x * transform.sx + transform.tx;
-        let x1 = (*x + *w) * transform.sx + transform.tx;
-        let y0 = *y * transform.sy + transform.ty;
-        let y1 = (*y + *h) * transform.sy + transform.ty;
+        if kind == 1 && (transform.sx - transform.sy).abs() > f32::EPSILON {
+            return None;
+        }
+        let x0 = x * transform.sx + transform.tx;
+        let x1 = (x + w) * transform.sx + transform.tx;
+        let y0 = y * transform.sy + transform.ty;
+        let y1 = (y + h) * transform.sy + transform.ty;
         let width = (x1 - x0).abs();
         let height = (y1 - y0).abs();
         if width <= 0.0 || height <= 0.0 {
@@ -2751,8 +2789,15 @@ fn gpu_rect_masks(
         }
         rects[index] = [x0.min(x1), y0.min(y1), width, height];
         opacities[index] = mask_opacity;
+        kinds[index] = kind;
+        shapes[index] = [
+            shape[0] * transform.sx + transform.tx,
+            shape[1] * transform.sy + transform.ty,
+            shape[2] * transform.sx.abs(),
+            0.0,
+        ];
     }
-    Some((rects, opacities))
+    Some((rects, opacities, kinds, shapes))
 }
 
 #[cfg(test)]
@@ -3896,6 +3941,51 @@ mod tests {
                 gpu_image.get_pixel(16, 16),
                 cpu_image.get_pixel(16, 16)
             );
+        }
+    }
+
+    #[test]
+    fn gpu_circle_alpha_mask_matches_cpu_at_stable_pixels() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping circle mask GPU test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Layer {
+                opacity: 1.0,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: None,
+                mask: Some(vec![SceneNode::Circle {
+                    cx: 16.0,
+                    cy: 16.0,
+                    r: 10.0,
+                    fill: Color::WHITE,
+                    stroke: None,
+                    stroke_width: 0.0,
+                }]),
+                mask_mode: crate::scene::MaskMode::Alpha,
+                filters: Vec::new(),
+                shadow: None,
+                children: vec![SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 32.0,
+                    h: 32.0,
+                    fill: Color::rgb(255, 0, 0),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                }],
+            }],
+        };
+        assert!(gpu_supports_scene(&scene));
+        let config = FrameConfig::new(32, 32, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        for (x, y) in [(16, 16), (1, 1)] {
+            assert_eq!(gpu_image.get_pixel(x, y), cpu_image.get_pixel(x, y));
         }
     }
 
