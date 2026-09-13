@@ -595,6 +595,27 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
         }
         return entries;
       })() : [];
+      const sampleTimestamps = [];
+      let decodeTime = 0;
+      let timedSamples = 0;
+      for (const entry of timeToSample) {
+        for (let index = 0; index < entry.count && timedSamples < sampleRanges.length; index += 1) {
+          sampleTimestamps.push({
+            sampleIndex: timedSamples,
+            timestamp: trackTimescale ? decodeTime / trackTimescale : 0,
+            duration: trackTimescale ? entry.delta / trackTimescale : 0,
+          });
+          decodeTime += entry.delta;
+          timedSamples += 1;
+        }
+        if (timedSamples >= sampleRanges.length) break;
+      }
+      const timedSampleMap = new Map(sampleTimestamps.map((sample) => [sample.sampleIndex, sample]));
+      const timedRanges = sampleRanges.map((sample) => ({
+        ...sample,
+        timestamp: timedSampleMap.get(sample.sampleIndex)?.timestamp ?? null,
+        duration: timedSampleMap.get(sample.sampleIndex)?.duration ?? null,
+      }));
       return {
         type: handler === 'vide' ? 'video' : handler === 'soun' ? 'audio' : 'unknown',
         handler,
@@ -607,7 +628,8 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
           sampleSizes,
           chunkOffsets,
           keyframes,
-          sampleRanges,
+          sampleRanges: timedRanges,
+          sampleTimestamps,
         },
         codecConfig,
       };
