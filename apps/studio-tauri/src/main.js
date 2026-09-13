@@ -771,6 +771,27 @@ export function getStaticFiles() {
   return [...activeAssets];
 }
 
+// Studio-compatible watcher. Vite/Tauri integrations can dispatch the same
+// event with `{files: [{name, lastModified}]}` when a static asset changes;
+// headless export naturally remains a no-op because no watcher is attached.
+export function watchStaticFile(fileName, callback) {
+  if (typeof fileName !== 'string' || typeof callback !== 'function') {
+    throw new TypeError('watchStaticFile expects a file name and callback');
+  }
+  const normalized = fileName.replace(/^\/+/, '');
+  let previous;
+  const listener = (event) => {
+    const files = event.detail?.files;
+    if (!Array.isArray(files)) return;
+    const next = files.find((file) => file?.name === normalized);
+    if (!next && previous) callback(null);
+    if (next && (!previous || next.lastModified !== previous.lastModified)) callback(next);
+    previous = next;
+  };
+  window.addEventListener('remotion_staticFilesChanged', listener);
+  return { cancel: () => window.removeEventListener('remotion_staticFilesChanged', listener) };
+}
+
 // Remotion-compatible access to the current composition input props.
 export function getInputProps() {
   return typeof structuredClone === 'function'
@@ -1009,6 +1030,7 @@ window.dioxuscut = {
   useVideoConfig,
   staticFile,
   getStaticFiles,
+  watchStaticFile,
   getInputProps,
   getRemotionEnvironment,
   useRemotionEnvironment,
