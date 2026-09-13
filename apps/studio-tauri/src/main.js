@@ -521,11 +521,53 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
         : BigInt(uint32be(bytes, mdhdPayload + 16));
       const handlerPayload = hdlr.offset + hdlr.headerSize;
       const handler = ascii(bytes, handlerPayload + 8, 4);
+      const table = (name) => isoPath(bytes, trak, ['mdia', 'minf', 'stbl', name]);
+      const stts = table('stts');
+      const stsz = table('stsz');
+      const stco = table('stco') ?? table('co64');
+      const stss = table('stss');
+      const readEntries = (box, width, valueOffset) => {
+        if (!box) return [];
+        const payload = box.offset + box.headerSize;
+        const count = uint32be(bytes, payload + valueOffset);
+        if (!Number.isSafeInteger(count) || count > 1_000_000) return [];
+        const values = [];
+        let cursor = payload + valueOffset + 4;
+        for (let index = 0; index < count && cursor + width <= box.offset + box.size; index += 1) {
+          values.push(width === 8
+            ? Number((BigInt(uint32be(bytes, cursor)) << 32n) | BigInt(uint32be(bytes, cursor + 4)))
+            : uint32be(bytes, cursor));
+          cursor += width;
+        }
+        return values;
+      };
+      const sampleSizePayload = stsz && stsz.offset + stsz.headerSize;
+      const uniformSampleSize = sampleSizePayload ? uint32be(bytes, sampleSizePayload + 4) : 0;
+      const sampleCount = sampleSizePayload ? uint32be(bytes, sampleSizePayload + 8) : 0;
+      const timeToSample = stts ? (() => {
+        const payload = stts.offset + stts.headerSize;
+        const count = uint32be(bytes, payload + 4);
+        const entries = [];
+        for (let index = 0; index < count && index < 1_000_000; index += 1) {
+          const cursor = payload + 8 + index * 8;
+          if (cursor + 8 > stts.offset + stts.size) break;
+          entries.push({ count: uint32be(bytes, cursor), delta: uint32be(bytes, cursor + 4) });
+        }
+        return entries;
+      })() : [];
       return {
         type: handler === 'vide' ? 'video' : handler === 'soun' ? 'audio' : 'unknown',
         handler,
         timescale: trackTimescale,
         durationInSeconds: trackTimescale ? Number(trackDuration) / trackTimescale : null,
+        sampleTables: {
+          timeToSample,
+          sampleCount: Number.isSafeInteger(sampleCount) ? sampleCount : 0,
+          uniformSampleSize: uniformSampleSize || null,
+          sampleSizes: uniformSampleSize ? [] : readEntries(stsz, 4, 8),
+          chunkOffsets: readEntries(stco, stco?.type === 'co64' ? 8 : 4, 4),
+          keyframes: readEntries(stss, 4, 4),
+        },
       };
     }).filter(Boolean);
   return { ...structure, durationInSeconds: Number.isFinite(durationInSeconds) ? durationInSeconds : null, tracks };
