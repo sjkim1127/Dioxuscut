@@ -544,6 +544,32 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
       const sampleSizePayload = stsz && stsz.offset + stsz.headerSize;
       const uniformSampleSize = sampleSizePayload ? uint32be(bytes, sampleSizePayload + 4) : 0;
       const sampleCount = sampleSizePayload ? uint32be(bytes, sampleSizePayload + 8) : 0;
+      const stscEntries = readEntries(table('stsc'), 8, 4).map((value) => ({
+        firstChunk: Math.floor(value / 0x100000000),
+        samplesPerChunk: value >>> 0,
+      }));
+      const chunkOffsets = readEntries(stco, stco?.type === 'co64' ? 8 : 4, 4);
+      const sampleSizes = uniformSampleSize ? [] : readEntries(stsz, 4, 8);
+      const keyframes = readEntries(stss, 4, 4);
+      const keyframeSet = new Set(keyframes);
+      const sampleRanges = [];
+      let sampleIndex = 0;
+      for (let chunkIndex = 0; chunkIndex < chunkOffsets.length && sampleIndex < Math.min(sampleCount, 1_000_000); chunkIndex += 1) {
+        const chunkNumber = chunkIndex + 1;
+        let entry = stscEntries[0];
+        for (const candidate of stscEntries) {
+          if (candidate.firstChunk <= chunkNumber) entry = candidate;
+          else break;
+        }
+        if (!entry) continue;
+        let cursor = chunkOffsets[chunkIndex];
+        for (let inChunk = 0; inChunk < entry.samplesPerChunk && sampleIndex < sampleCount && sampleIndex < 1_000_000; inChunk += 1) {
+          const size = uniformSampleSize || sampleSizes[sampleIndex] || 0;
+          sampleRanges.push({ sampleIndex, offset: cursor, size, keyframe: !stss || keyframeSet.has(sampleIndex + 1) });
+          cursor += size;
+          sampleIndex += 1;
+        }
+      }
       const timeToSample = stts ? (() => {
         const payload = stts.offset + stts.headerSize;
         const count = uint32be(bytes, payload + 4);
@@ -564,9 +590,10 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
           timeToSample,
           sampleCount: Number.isSafeInteger(sampleCount) ? sampleCount : 0,
           uniformSampleSize: uniformSampleSize || null,
-          sampleSizes: uniformSampleSize ? [] : readEntries(stsz, 4, 8),
-          chunkOffsets: readEntries(stco, stco?.type === 'co64' ? 8 : 4, 4),
-          keyframes: readEntries(stss, 4, 4),
+          sampleSizes,
+          chunkOffsets,
+          keyframes,
+          sampleRanges,
         },
       };
     }).filter(Boolean);
