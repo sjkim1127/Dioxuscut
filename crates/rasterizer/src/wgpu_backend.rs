@@ -179,6 +179,8 @@ struct InstanceData {
     invert: vec4<f32>,
     // x = hue rotation in degrees
     hue: vec4<f32>,
+    // rgb = tint color in sRGB, w = amount
+    tint: vec4<f32>,
     clip_rects: array<vec4<f32>, 4>,
     mask_opacity: vec4<f32>,
     mask_kinds: vec4<u32>,
@@ -308,6 +310,7 @@ fn apply_color_filters(color: vec4<f32>, instance: InstanceData) -> vec4<f32> {
         && instance.saturation.x == 1.0
         && instance.invert.x == 0.0
         && instance.hue.x == 0.0
+        && instance.tint.w == 0.0
     {
         return color;
     }
@@ -366,6 +369,7 @@ fn apply_color_filters(color: vec4<f32>, instance: InstanceData) -> vec4<f32> {
         rotated = vec3<f32>(chroma, 0.0, x);
     }
     srgb = rotated + vec3<f32>(match_value);
+    srgb = mix(srgb, instance.tint.rgb, clamp(instance.tint.w, 0.0, 1.0));
     return vec4<f32>(clamp(srgb, vec3<f32>(0.0), vec3<f32>(1.0)), color.a);
 }
 
@@ -3034,6 +3038,7 @@ struct GpuInstance {
     vignette: [f32; 4],
     invert: [f32; 4],
     hue: [f32; 4],
+    tint: [f32; 4],
     clip_rects: [[f32; 4]; 4],
     mask_opacity: [f32; 4],
     mask_kinds: [u32; 4],
@@ -3067,6 +3072,7 @@ impl GpuInstance {
             vignette: [0.0, 0.0, 0.0, 0.0],
             invert: [0.0, 0.0, 0.0, 0.0],
             hue: [0.0, 0.0, 0.0, 0.0],
+            tint: [0.0, 0.0, 0.0, 0.0],
             clip_rects: [[-1.0; 4]; 4],
             mask_opacity: [-1.0; 4],
             mask_kinds: [0; 4],
@@ -3523,6 +3529,9 @@ fn compile_nodes(
                     instance.saturation[0] *= saturation;
                     instance.invert[0] = invert;
                     instance.hue[0] = hue;
+                    if let Some(tint) = gpu_tint(filters) {
+                        instance.tint = tint;
+                    }
                     if let Some(vignette) = gpu_vignette(filters) {
                         instance.vignette = vignette;
                     }
@@ -3570,6 +3579,9 @@ fn compile_nodes(
                     instance.saturation[0] *= saturation;
                     instance.invert[0] = invert;
                     instance.hue[0] = hue;
+                    if let Some(tint) = gpu_tint(filters) {
+                        instance.tint = tint;
+                    }
                     if let Some(vignette) = gpu_vignette(filters) {
                         instance.vignette = vignette;
                     }
@@ -3648,6 +3660,9 @@ fn compile_nodes(
                     instance.saturation[0] *= saturation;
                     instance.invert[0] = invert;
                     instance.hue[0] = hue;
+                    if let Some(tint) = gpu_tint(filters) {
+                        instance.tint = tint;
+                    }
                     if let Some(vignette) = gpu_vignette(filters) {
                         instance.vignette = vignette;
                     }
@@ -3690,6 +3705,9 @@ fn compile_nodes(
                     instance.saturation[0] *= saturation;
                     instance.invert[0] = invert;
                     instance.hue[0] = hue;
+                    if let Some(tint) = gpu_tint(filters) {
+                        instance.tint = tint;
+                    }
                     if let Some(vignette) = gpu_vignette(filters) {
                         instance.vignette = vignette;
                     }
@@ -3826,9 +3844,34 @@ fn gpu_layer_effects(
                 invert,
                 hue + *degrees,
             )),
+            crate::scene::SceneFilter::Tint { color, amount }
+                if amount.is_finite() && (0.0..=1.0).contains(amount) =>
+            {
+                Some((
+                    opacity, brightness, grayscale, contrast, saturation, invert, hue,
+                ))
+            }
             _ => None,
         },
     )
+}
+
+fn gpu_tint(filters: &[crate::scene::SceneFilter]) -> Option<[f32; 4]> {
+    let mut tint = None;
+    for filter in filters {
+        if let crate::scene::SceneFilter::Tint { color, amount } = filter {
+            if !amount.is_finite() || !(0.0..=1.0).contains(amount) {
+                return None;
+            }
+            tint = Some([
+                f32::from(color[0]) / 255.0,
+                f32::from(color[1]) / 255.0,
+                f32::from(color[2]) / 255.0,
+                f32::from(color[3]) / 255.0 * *amount,
+            ]);
+        }
+    }
+    tint
 }
 
 fn gpu_blend_children_supported(nodes: &[SceneNode]) -> bool {
@@ -5336,6 +5379,55 @@ mod tests {
             pixel[0] < 8 && pixel[1] > 247 && pixel[2] < 8,
             "pixel={pixel:?}"
         );
+        assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
+    }
+
+    #[test]
+    fn gpu_tint_filter_matches_cpu_for_opaque_rect() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping tint GPU test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Layer {
+                opacity: 1.0,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: None,
+                mask: None,
+                mask_mode: crate::scene::MaskMode::Alpha,
+                filters: vec![crate::scene::SceneFilter::Tint {
+                    color: [0, 0, 255, 255],
+                    amount: 0.5,
+                }],
+                shadow: None,
+                children: vec![SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 16.0,
+                    h: 16.0,
+                    fill: Color::rgb(255, 0, 0),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                }],
+            }],
+        };
+        assert!(gpu_supports_scene(&scene));
+        let config = FrameConfig::new(16, 16, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        let gpu_pixel = gpu_image.get_pixel(8, 8);
+        let cpu_pixel = cpu_image.get_pixel(8, 8);
+        for channel in 0..4 {
+            assert!(
+                (i32::from(gpu_pixel[channel]) - i32::from(cpu_pixel[channel])).abs() <= 2,
+                "channel {channel}: GPU {:?}, CPU {:?}",
+                gpu_pixel,
+                cpu_pixel
+            );
+        }
         assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
     }
 
