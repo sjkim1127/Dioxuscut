@@ -1468,7 +1468,14 @@ impl RasterizerBackend for WgpuBackend {
                 .iter()
                 .all(|node| matches!(node, SceneNode::Shader { .. }))
         {
-            let image = self.render_shader_layers(scene, config)?;
+            let image =
+                if scene.nodes.iter().all(
+                    |node| matches!(node, SceneNode::Shader { opacity, .. } if *opacity == 1.0),
+                ) {
+                    self.render_shader_layers_direct(scene, config)?
+                } else {
+                    self.render_shader_layers(scene, config)?
+                };
             self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
             return Ok(image);
         }
@@ -1665,6 +1672,131 @@ impl RasterizerBackend for WgpuBackend {
 }
 
 impl WgpuBackend {
+    /// Render opaque shader layers directly into one GPU target and read it
+    /// back once. Opacity layers retain the compatibility path until opacity
+    /// is carried as a target-pass uniform.
+    fn render_shader_layers_direct(
+        &self,
+        scene: &Scene,
+        config: &FrameConfig,
+    ) -> Result<RgbaImage, RasterError> {
+        let width = config.width;
+        let height = config.height;
+        let texture = self.ctx.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("shader_scene_target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self
+            .ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("shader_scene_encoder"),
+            });
+        for (index, node) in scene.nodes.iter().enumerate() {
+            let SceneNode::Shader {
+                x,
+                y,
+                w,
+                h,
+                source,
+                time,
+                params,
+                opacity,
+            } = node
+            else {
+                unreachable!("direct shader path was checked before rendering");
+            };
+            if ![*x, *y, *w, *h, *time]
+                .iter()
+                .all(|value| value.is_finite())
+                || *w <= 0.0
+                || *h <= 0.0
+                || *x < 0.0
+                || *y < 0.0
+                || *opacity != 1.0
+            {
+                return Err(RasterError::Scene("invalid direct shader region".into()));
+            }
+            self.shader_runner.render_into_region(
+                &mut encoder,
+                &view,
+                width,
+                height,
+                *x,
+                *y,
+                *w,
+                *h,
+                *time,
+                *params,
+                source,
+                if index == 0 {
+                    wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
+                } else {
+                    wgpu::LoadOp::Load
+                },
+            )?;
+        }
+        let bytes_per_row = (width * 4 + 255) & !255;
+        let staging = self.ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("shader_scene_readback"),
+            size: (bytes_per_row * height) as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::ImageCopyBuffer {
+                buffer: &staging,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.ctx.queue.submit(Some(encoder.finish()));
+        let slice = staging.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+        self.ctx.device.poll(wgpu::Maintain::Wait);
+        rx.recv()
+            .map_err(|error| RasterError::Scene(format!("GPU readback channel failed: {error}")))?
+            .map_err(|error| RasterError::Scene(format!("GPU readback map failed: {error}")))?;
+        let mapped = slice.get_mapped_range();
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+        for row in 0..height {
+            let start = (row * bytes_per_row) as usize;
+            pixels.extend_from_slice(&mapped[start..start + (width * 4) as usize]);
+        }
+        drop(mapped);
+        staging.unmap();
+        RgbaImage::from_raw(width, height, pixels)
+            .ok_or_else(|| RasterError::ImageEncode("Invalid shader scene readback".into()))
+    }
+
     /// Render shader nodes on the GPU and composite their rectangular outputs
     /// in scene order. Non-shader nodes deliberately remain outside this path
     /// until an offscreen GPU texture is available for general scene blending.
