@@ -436,6 +436,33 @@ fn bench_gpu_video_frames(c: &mut Criterion) {
             }
         })
     });
+    let stream_backend = WgpuBackend::new().expect("GPU backend initialized above");
+    group.bench_function("native_stream_no_readback_30_frames", |b| {
+        b.iter(|| {
+            stream_backend
+                .render_stream_gpu(
+                    30,
+                    &|frame| {
+                        Ok(Scene {
+                            nodes: vec![SceneNode::Video {
+                                src: source.display().to_string(),
+                                time: frame as f64 / 30.0,
+                                looped: false,
+                                x: 0.0,
+                                y: 0.0,
+                                w: 1920.0,
+                                h: 1080.0,
+                                fit: dioxuscut_rasterizer::scene::ImageFit::Cover,
+                                opacity: 1.0,
+                            }],
+                        })
+                    },
+                    &|frame| FrameConfig::new(1920, 1080, frame, 30.0),
+                    |_frame, _view, _width, _height| {},
+                )
+                .unwrap();
+        })
+    });
     group.finish();
     let cold_stats = backend.render_stats();
     let warm_stats = warm_backend.render_stats();

@@ -5653,6 +5653,73 @@ mod tests {
     }
 
     #[test]
+    fn gpu_native_video_stream_delivers_ordered_frames_without_readback() {
+        if std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .is_err()
+        {
+            println!("FFmpeg unavailable; skipping GPU native video stream test");
+            return;
+        }
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping GPU native video stream test");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!(
+            "dioxuscut-wgpu-video-stream-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("gradient.mkv");
+        let generated = std::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=16x16:rate=2:duration=1",
+                "-an",
+                "-c:v",
+                "ffv1",
+            ])
+            .arg(&source)
+            .status()
+            .unwrap();
+        assert!(generated.success());
+        let frames = 2;
+        let mut delivered = Vec::new();
+        gpu.render_stream_gpu(
+            frames,
+            &|frame| {
+                Ok(Scene {
+                    nodes: vec![SceneNode::Video {
+                        src: source.display().to_string(),
+                        time: frame as f64 / 2.0,
+                        looped: false,
+                        x: 0.0,
+                        y: 0.0,
+                        w: 16.0,
+                        h: 16.0,
+                        fit: ImageFit::Fill,
+                        opacity: 1.0,
+                    }],
+                })
+            },
+            &|frame| FrameConfig::new(16, 16, frame, 2.0),
+            |frame, _view, width, height| delivered.push((frame, width, height)),
+        )
+        .unwrap();
+        assert_eq!(delivered, vec![(0, 16, 16), (1, 16, 16)]);
+        assert_eq!(gpu.render_stats().gpu_frames, frames as u64);
+        assert_eq!(gpu.gpu_texture_cache_misses(), frames as u64);
+        assert_eq!(gpu.gpu_texture_uploads(), frames as u64);
+    }
+
+    #[test]
     fn gpu_video_frame_uses_decoded_texture_path() {
         if std::process::Command::new("ffmpeg")
             .arg("-version")
