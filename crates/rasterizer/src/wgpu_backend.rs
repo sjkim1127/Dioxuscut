@@ -1382,8 +1382,19 @@ impl RasterizerBackend for WgpuBackend {
 
     fn render_frame(&self, scene: &Scene, config: &FrameConfig) -> Result<RgbaImage, RasterError> {
         if let [SceneNode::Shader { x, y, w, h, source, time, params, opacity }] = scene.nodes.as_slice() {
-            if *x == 0.0 && *y == 0.0 && *w == config.width as f32 && *h == config.height as f32 && *opacity == 1.0 {
-                let image = self.shader_runner.render(config.width, config.height, *time as f32, *params, source)?;
+            if *x == 0.0
+                && *y == 0.0
+                && *w == config.width as f32
+                && *h == config.height as f32
+                && opacity.is_finite()
+                && (0.0..=1.0).contains(opacity)
+            {
+                let mut image = self.shader_runner.render(config.width, config.height, *time, *params, source)?;
+                if *opacity < 1.0 {
+                    for pixel in image.pixels_mut() {
+                        pixel[3] = (f32::from(pixel[3]) * *opacity).round() as u8;
+                    }
+                }
                 self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
                 return Ok(image);
             }
@@ -2544,12 +2555,13 @@ mod tests {
                 source: "return vec4<f32>(uv.x, uv.y, 0.25, 1.0);".into(),
                 time: 0.0,
                 params: [1.0, 1.0, 1.0, 1.0],
-                opacity: 1.0,
+                opacity: 0.5,
             }],
         };
         let image = gpu.render_frame(&scene, &FrameConfig::new(32, 16, 0, 30.0)).unwrap();
         assert_eq!(gpu.render_stats().gpu_frames, 1);
         assert!(image.get_pixel(1, 1)[2] > 0);
+        assert!((120..=136).contains(&image.get_pixel(1, 1)[3]));
         assert_ne!(image.get_pixel(1, 1), image.get_pixel(30, 14));
     }
 
