@@ -266,6 +266,23 @@ mod tests {
     }
 
     #[test]
+    fn cache_reuses_decoded_pixels_until_lru_eviction() {
+        let source_a = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221%22%20height%3D%221%22%3E%3Crect%20width%3D%221%22%20height%3D%221%22%20fill%3D%22%23f00%22%2F%3E%3C%2Fsvg%3E";
+        let source_b = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221%22%20height%3D%221%22%3E%3Crect%20width%3D%221%22%20height%3D%221%22%20fill%3D%22%2300f%22%2F%3E%3C%2Fsvg%3E";
+        let cache = ImageCache::with_max_bytes(4);
+
+        let first = cache.load(source_a).unwrap();
+        let second = cache.load(source_a).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
+        assert_eq!(cache.len(), 1);
+
+        let _ = cache.load(source_b).unwrap();
+        assert_eq!(cache.len(), 1, "the byte budget must evict the least-recently-used image");
+        let reloaded = cache.load(source_a).unwrap();
+        assert!(!std::sync::Arc::ptr_eq(&first, &reloaded));
+    }
+
+    #[test]
     fn rasterizes_base64_svg_data_uri() {
         let cache = ImageCache::default();
         let source = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyIiBoZWlnaHQ9IjEiPjxyZWN0IHdpZHRoPSIyIiBoZWlnaHQ9IjEiIGZpbGw9InJlZCIvPjwvc3ZnPg==";

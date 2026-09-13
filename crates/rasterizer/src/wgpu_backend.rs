@@ -48,6 +48,7 @@
 
 use crate::backend::{BackendCapabilities, FrameConfig, RasterError, RasterizerBackend};
 use crate::scene::{Color, GradientStop, Scene, SceneNode};
+use crate::scene::ImageFit;
 use crate::tiny_skia_backend::{svgpath_to_tiny_skia, TinySkiaBackend};
 use crate::image_cache::ImageCache;
 use image::RgbaImage;
@@ -66,6 +67,74 @@ const SAMPLE_COUNT: u32 = 4;
 /// Internal linear-light render format. **Not** sRGB to avoid double-gamma.
 const RENDER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const MESH_ATTRIBUTES: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![0 => Float32x2];
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ImagePlacement {
+    /// Destination rectangle in canvas pixels: x, y, width, height.
+    destination: [f32; 4],
+    /// Normalized source rectangle: left, top, right, bottom.
+    source_uv: [f32; 4],
+}
+
+/// Resolve CSS/Remotion-style image fitting into a destination rectangle and
+/// normalized source crop. Keeping this independent of wgpu lets the CPU and
+/// GPU image paths use exactly the same geometry.
+fn image_placement(
+    fit: ImageFit,
+    image_width: f32,
+    image_height: f32,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+) -> Option<ImagePlacement> {
+    if ![image_width, image_height, x, y, width, height]
+        .iter()
+        .all(|value| value.is_finite())
+        || image_width <= 0.0
+        || image_height <= 0.0
+        || width <= 0.0
+        || height <= 0.0
+    {
+        return None;
+    }
+    let (draw_width, draw_height, source_uv) = match fit {
+        ImageFit::Fill => (width, height, [0.0, 0.0, 1.0, 1.0]),
+        ImageFit::None => {
+            let draw_width = image_width.min(width);
+            let draw_height = image_height.min(height);
+            let source_uv = [0.0, 0.0, draw_width / image_width, draw_height / image_height];
+            (draw_width, draw_height, source_uv)
+        }
+        ImageFit::Contain | ImageFit::ScaleDown => {
+            let scale = if matches!(fit, ImageFit::ScaleDown) {
+                (1.0_f32).min((width / image_width).min(height / image_height))
+            } else {
+                (width / image_width).min(height / image_height)
+            };
+            let draw_width = image_width * scale;
+            let draw_height = image_height * scale;
+            (draw_width, draw_height, [0.0, 0.0, 1.0, 1.0])
+        }
+        ImageFit::Cover => {
+            let scale = (width / image_width).max(height / image_height);
+            let visible_width = width / scale / image_width;
+            let visible_height = height / scale / image_height;
+            let left = (1.0 - visible_width) * 0.5;
+            let top = (1.0 - visible_height) * 0.5;
+            (width, height, [left, top, left + visible_width, top + visible_height])
+        }
+    };
+    Some(ImagePlacement {
+        destination: [
+            x + (width - draw_width) * 0.5,
+            y + (height - draw_height) * 0.5,
+            draw_width,
+            draw_height,
+        ],
+        source_uv,
+    })
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // WGSL Shader Source
@@ -1383,6 +1452,31 @@ fn bytemuck_cast<T: Copy>(data: &[T]) -> &[u8] {
 #[cfg(test)]
 mod support_tests {
     use super::*;
+
+    #[test]
+    fn image_fit_geometry_matches_expected_crop_and_letterbox() {
+        let contain = image_placement(ImageFit::Contain, 200.0, 100.0, 10.0, 20.0, 100.0, 100.0).unwrap();
+        assert_eq!(contain.destination, [10.0, 45.0, 100.0, 50.0]);
+        assert_eq!(contain.source_uv, [0.0, 0.0, 1.0, 1.0]);
+
+        let cover = image_placement(ImageFit::Cover, 200.0, 100.0, 0.0, 0.0, 100.0, 100.0).unwrap();
+        assert_eq!(cover.destination, [0.0, 0.0, 100.0, 100.0]);
+        assert_eq!(cover.source_uv, [0.25, 0.0, 0.75, 1.0]);
+
+        let fill = image_placement(ImageFit::Fill, 200.0, 100.0, 1.0, 2.0, 30.0, 40.0).unwrap();
+        assert_eq!(fill.destination, [1.0, 2.0, 30.0, 40.0]);
+        assert_eq!(fill.source_uv, [0.0, 0.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn image_fit_none_and_scale_down_never_upscale() {
+        let none = image_placement(ImageFit::None, 200.0, 100.0, 0.0, 0.0, 80.0, 80.0).unwrap();
+        assert_eq!(none.destination, [0.0, 0.0, 80.0, 80.0]);
+        assert_eq!(none.source_uv, [0.0, 0.0, 0.4, 0.8]);
+
+        let scale_down = image_placement(ImageFit::ScaleDown, 20.0, 10.0, 0.0, 0.0, 100.0, 100.0).unwrap();
+        assert_eq!(scale_down.destination, [40.0, 45.0, 20.0, 10.0]);
+    }
 
     #[test]
     fn unsupported_nodes_trigger_cpu_fallback() {
