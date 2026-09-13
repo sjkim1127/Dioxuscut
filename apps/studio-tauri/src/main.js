@@ -536,6 +536,37 @@ function findCodecConfig(bytes, root) {
   return null;
 }
 
+function parseAacAudioSpecificConfig(config) {
+  if (!config || config.length < 2) return null;
+  let asc = config;
+  for (let index = 0; index + 2 < config.length; index += 1) {
+    if (config[index] !== 0x05) continue;
+    let cursor = index + 1;
+    let length = 0;
+    let lengthByte;
+    do {
+      if (cursor >= config.length) break;
+      lengthByte = config[cursor++];
+      length = (length << 7) | (lengthByte & 0x7f);
+    } while (lengthByte & 0x80);
+    if (length >= 2 && cursor + length <= config.length) {
+      asc = config.slice(cursor, cursor + length);
+      break;
+    }
+  }
+  config = asc;
+  const audioObjectType = (config[0] >> 3) & 0x1f;
+  const frequencyIndex = ((config[0] & 0x07) << 1) | (config[1] >> 7);
+  const frequencies = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050,
+    16000, 12000, 11025, 8000, 7350];
+  const sampleRate = frequencyIndex === 15 && config.length >= 5
+    ? ((config[1] & 0x7f) << 17) | (config[2] << 9) | (config[3] << 1) | (config[4] >> 7)
+    : frequencies[frequencyIndex];
+  const channelConfiguration = (config[1] >> 3) & 0x0f;
+  const channels = [0, 1, 2, 3, 4, 5, 6, 8][channelConfiguration] ?? null;
+  return audioObjectType && sampleRate && channels ? { sampleRate, channels } : null;
+}
+
 // Read and decode only the movie header from an ISO-BMFF moov box. The box is
 // bounded by the same 16 MiB cap as all other media range reads.
 export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 16 * 1024 * 1024 } = {}) {
@@ -621,6 +652,9 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
       const keyframes = readEntries(stss, 4, 4);
       const keyframeSet = new Set(keyframes);
       const codecConfig = findCodecConfig(bytes, trak);
+      const audioConfig = codecConfig?.type === 'esds'
+        ? parseAacAudioSpecificConfig(codecConfig.data)
+        : null;
       const sampleRanges = [];
       let sampleIndex = 0;
       for (let chunkIndex = 0; chunkIndex < chunkOffsets.length && sampleIndex < Math.min(sampleCount, 1_000_000); chunkIndex += 1) {
@@ -712,6 +746,8 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
         timescale: trackTimescale,
         durationInSeconds: trackTimescale ? Number(trackDuration) / trackTimescale : null,
         fps: firstDelta > 0 ? 1 / firstDelta : null,
+        sampleRate: audioConfig?.sampleRate ?? null,
+        numberOfChannels: audioConfig?.channels ?? null,
         sampleTables: {
           timeToSample,
           compositionOffsets,

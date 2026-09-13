@@ -91,6 +91,16 @@ try {
       onFrame: (frame) => { streamedVideo.push(frame.timestamp); frame.close(); },
     });
     const audioParsed = await window.dioxuscut.parseIsoBmffMovieHeader('/assets/audio-fixture.m4a');
+    const audioMetadataEvents = [];
+    await window.dioxuscut.parseMedia({
+      src: '/assets/audio-fixture.m4a',
+      onSampleRate: (value) => audioMetadataEvents.push(['rate', value]),
+      onNumberOfAudioChannels: (value) => audioMetadataEvents.push(['channels', value]),
+    });
+    if (!audioMetadataEvents.some(([name, value]) => name === 'rate' && value === 48000)
+      || !audioMetadataEvents.some(([name, value]) => name === 'channels' && value === 1)) {
+      throw new Error(`AAC metadata callbacks failed: ${JSON.stringify(audioParsed.tracks?.[0]?.codecConfig)}`);
+    }
     const audioConfig = window.dioxuscut.makeIsoBmffWebCodecsConfig(audioParsed.tracks[0]);
     const audioDecodeStarted = performance.now();
     const audioData = await window.dioxuscut.decodeIsoBmffAudio('/assets/audio-fixture.m4a', {
