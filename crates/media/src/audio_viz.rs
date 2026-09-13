@@ -312,6 +312,39 @@ pub fn get_waveform_bars(
         .collect()
 }
 
+/// Frame-based native counterpart of Remotion's `visualizeAudioWaveform`.
+pub fn visualize_audio_waveform(
+    data: &AudioData,
+    frame: u32,
+    fps: f32,
+    window_sec: f32,
+    number_of_samples: usize,
+    channel: usize,
+    data_offset_sec: f32,
+    normalize: bool,
+) -> Vec<f32> {
+    if !fps.is_finite() || fps <= 0.0 || !window_sec.is_finite() || window_sec <= 0.0 {
+        return Vec::new();
+    }
+    if window_sec * (data.sample_rate as f32) < number_of_samples as f32 {
+        return Vec::new();
+    }
+    let start = frame as f32 / fps - window_sec / 2.0;
+    get_waveform_bars(
+        data,
+        start,
+        window_sec,
+        number_of_samples,
+        channel,
+        "minus-one-to-one",
+        normalize,
+        data_offset_sec,
+    )
+    .into_iter()
+    .map(|(_, amplitude)| amplitude)
+    .collect()
+}
+
 /// Generates a smoothed SVG path (`d` attribute string) from a slice of amplitude values.
 pub fn create_smooth_svg_path(points: &[f32], width: f32, height: f32) -> String {
     if points.is_empty() {
@@ -441,5 +474,18 @@ mod tests {
         assert_eq!(bars[0].0, 0);
         assert!((bars[0].1 + (0.25 / 3.0)).abs() < 1.0e-6);
         assert!((bars[1].1 - ((0.5 + 0.75 + 1.0) / 3.0)).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn test_visualize_audio_waveform_is_frame_centered() {
+        let data = AudioData {
+            channel_waveforms: vec![vec![0.0, 0.0, 1.0, 1.0, 0.0, 0.0]],
+            sample_rate: 6,
+            duration_secs: 1.0,
+        };
+        let bars = visualize_audio_waveform(&data, 1, 6.0, 1.0, 2, 0, 0.0, false);
+        assert_eq!(bars.len(), 2);
+        assert!(bars[0] <= 0.0);
+        assert!(bars[1] >= 0.0);
     }
 }
