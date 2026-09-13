@@ -240,7 +240,7 @@ impl WgpuShaderRunner {
             .lock()
             .map_err(|_| RasterError::Init("Pipeline cache mutex poisoned".into()))?;
 
-        let pipeline = if let Some(p) = cache.get(&wgsl) {
+        let _pipeline = if let Some(p) = cache.get(&wgsl) {
             p.clone()
         } else {
             let shader_module = self
@@ -322,7 +322,7 @@ impl WgpuShaderRunner {
                 usage: wgpu::BufferUsages::UNIFORM,
             });
 
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let _bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("shader_uniforms_bg"),
             layout: &self.uniform_layout,
             entries: &[wgpu::BindGroupEntry {
@@ -354,25 +354,16 @@ impl WgpuShaderRunner {
                 label: Some("shader_encoder"),
             });
 
-        {
-            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("shader_render_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-            rpass.set_pipeline(&pipeline);
-            rpass.set_bind_group(0, &bind_group, &[]);
-            rpass.draw(0..6, 0..1);
-        }
+        self.render_into(
+            &mut encoder,
+            &view,
+            width,
+            height,
+            time,
+            params,
+            source,
+            wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+        )?;
 
         // Staging buffer readback
         let bytes_per_row = (width * 4 + 255) & !255;
@@ -447,12 +438,47 @@ impl WgpuShaderRunner {
         source: &str,
         load: wgpu::LoadOp<wgpu::Color>,
     ) -> Result<(), RasterError> {
+        self.render_into_region(
+            encoder,
+            target,
+            width,
+            height,
+            0.0,
+            0.0,
+            width as f32,
+            height as f32,
+            time,
+            params,
+            source,
+            load,
+        )
+    }
+
+    /// Record a shader into a rectangular viewport of an existing target.
+    /// The shader receives the region dimensions and its interpolated UV stays
+    /// local to the region, matching the standalone shader render semantics.
+    pub fn render_into_region(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        target_width: u32,
+        target_height: u32,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        time: f32,
+        params: [f32; 4],
+        source: &str,
+        load: wgpu::LoadOp<wgpu::Color>,
+    ) -> Result<(), RasterError> {
         let wgsl = wrap_wgsl_shader(source);
+        let cache_key = format!("target:{wgsl}");
         let mut cache = self
             .pipeline_cache
             .lock()
             .map_err(|_| RasterError::Init("Pipeline cache mutex poisoned".into()))?;
-        let pipeline = if let Some(pipeline) = cache.get(&wgsl) {
+        let pipeline = if let Some(pipeline) = cache.get(&cache_key) {
             pipeline.clone()
         } else {
             let module = self
@@ -495,13 +521,13 @@ impl WgpuShaderRunner {
                     cache: None,
                 },
             ));
-            cache.insert(wgsl, pipeline.clone());
+            cache.insert(cache_key, pipeline.clone());
             pipeline
         };
         drop(cache);
 
         let uniforms = ShaderUniforms {
-            resolution: [width as f32, height as f32],
+            resolution: [width, height],
             time,
             _pad: 0.0,
             params,
@@ -543,6 +569,14 @@ impl WgpuShaderRunner {
         });
         pass.set_pipeline(&pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
+        pass.set_viewport(
+            x.clamp(0.0, target_width as f32),
+            y.clamp(0.0, target_height as f32),
+            width.max(1.0).min(target_width as f32),
+            height.max(1.0).min(target_height as f32),
+            0.0,
+            1.0,
+        );
         pass.draw(0..6, 0..1);
         Ok(())
     }
