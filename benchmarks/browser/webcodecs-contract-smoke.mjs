@@ -11,6 +11,7 @@ const executablePath = process.env.CHROME_PATH ?? '/Applications/Google Chrome.a
 const run = promisify(execFile);
 const audioFixturePath = `/tmp/dioxuscut-webcodecs-audio-${process.pid}.m4a`;
 const webmFixturePath = `/tmp/dioxuscut-webcodecs-video-${process.pid}.webm`;
+const webmAudioFixturePath = `/tmp/dioxuscut-webcodecs-audio-${process.pid}.webm`;
 await run(process.env.FFMPEG_PATH ?? 'ffmpeg', [
   '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1',
   '-c:a', 'aac', '-b:a', '96k', '-ar', '48000', '-ac', '1', '-f', 'ipod', '-y', audioFixturePath,
@@ -19,12 +20,17 @@ await run(process.env.FFMPEG_PATH ?? 'ffmpeg', [
   '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=160x90:rate=24:duration=1',
   '-c:v', 'libvpx-vp9', '-crf', '35', '-b:v', '0', '-an', '-y', webmFixturePath,
 ]);
+await run(process.env.FFMPEG_PATH ?? 'ffmpeg', [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1',
+  '-c:a', 'libopus', '-b:a', '64k', '-ar', '48000', '-ac', '1', '-vn', '-y', webmAudioFixturePath,
+]);
 const browser = await chromium.launch({ executablePath, headless: true });
 try {
   const page = await browser.newPage();
   const fixture = await readFile(new URL('../../assets/showcase.mp4', import.meta.url));
   const audioFixture = await readFile(audioFixturePath);
   const webmFixture = await readFile(webmFixturePath);
+  const webmAudioFixture = await readFile(webmAudioFixturePath);
   const rangeFixture = Buffer.from([0, 1, 2, 3, 4, 5, 6, 7]);
   await page.route('**/range.bin', (route) => {
     const range = /^bytes=(\d+)-(\d+)$/.exec(route.request().headers().range ?? '');
@@ -44,6 +50,9 @@ try {
   }));
   await page.route('**/assets/webm-fixture.webm', (route) => route.fulfill({
     status: 200, contentType: 'video/webm', body: webmFixture,
+  }));
+  await page.route('**/assets/webm-audio-fixture.webm', (route) => route.fulfill({
+    status: 200, contentType: 'audio/webm', body: webmAudioFixture,
   }));
   await page.addInitScript(() => { window.__DIOXUSCUT_HEADLESS_RENDER__ = true; });
   await page.goto(url, { waitUntil: 'domcontentloaded' });
@@ -75,6 +84,12 @@ try {
     });
     const webmDecodedDimensions = webmFrames.map(({ displayWidth, displayHeight }) => [displayWidth, displayHeight]);
     for (const frame of webmFrames) frame.close();
+    const webmAudioSamples = await window.dioxuscut.readWebmSamples('/assets/webm-audio-fixture.webm', 1);
+    const webmAudioData = await window.dioxuscut.decodeWebmAudio('/assets/webm-audio-fixture.webm', {
+      trackNumber: 1, maxSamples: 3, codec: 'opus', numberOfChannels: 1, sampleRate: 48000,
+    });
+    const webmAudioFrames = webmAudioData.map(({ numberOfFrames }) => numberOfFrames);
+    for (const audio of webmAudioData) audio.close();
     let streamedWebmFrames = 0;
     const streamedWebmResult = await window.dioxuscut.decodeWebmVideo('/assets/webm-fixture.webm', {
       trackNumber: 1, maxSamples: 3, codec: 'vp09.00.10.08',
@@ -179,6 +194,8 @@ try {
         samples: webmSamples.length,
         decoded: webmFrames.length,
         streamed: { count: streamedWebmFrames, returnValue: streamedWebmResult },
+        audioSamples: webmAudioSamples.length,
+        decodedAudio: webmAudioFrames,
         decodedDimensions: webmDecodedDimensions,
         firstSample: webmSamples[0] ? {
           keyframe: webmSamples[0].keyframe,
@@ -228,6 +245,9 @@ try {
   assert.equal(result.webm.decoded, 3);
   assert.equal(result.webm.streamed.count, 3);
   assert.equal(result.webm.streamed.returnValue, null);
+  assert.ok(result.webm.audioSamples > 0);
+  assert.ok(result.webm.decodedAudio.length > 0);
+  assert.ok(result.webm.decodedAudio.every((frames) => frames > 0));
   assert.deepEqual(result.webm.decodedDimensions[0], [160, 90]);
   assert.ok(result.webm.firstSample.size > 0);
   assert.ok(result.videoDecodeMs >= 0 && result.audioDecodeMs >= 0);
@@ -236,4 +256,5 @@ try {
   await browser.close();
   await rm(audioFixturePath, { force: true });
   await rm(webmFixturePath, { force: true });
+  await rm(webmAudioFixturePath, { force: true });
 }

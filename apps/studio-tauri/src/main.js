@@ -712,6 +712,16 @@ export function createWebmEncodedVideoChunk(sample, duration = 0) {
   });
 }
 
+export function createWebmEncodedAudioChunk(sample, duration = 0) {
+  if (typeof EncodedAudioChunk === 'undefined') throw new Error('EncodedAudioChunk is not available in this runtime');
+  return new EncodedAudioChunk({
+    type: 'key',
+    timestamp: Math.round(sample.timestamp * 1_000_000),
+    duration: duration > 0 ? Math.round(duration * 1_000_000) : undefined,
+    data: sample.data,
+  });
+}
+
 // Decode VP8/VP9/AV1 SimpleBlock samples through the same bounded lifecycle
 // used by the ISO-BMFF backend. The codec string is supplied by the caller
 // because Matroska CodecID does not contain the WebCodecs profile fields.
@@ -753,6 +763,46 @@ export async function decodeWebmVideo(source, {
     return onFrame ? null : frames;
   } catch (error) {
     for (const frame of frames ?? []) frame.close();
+    throw error;
+  } finally {
+    if (decoder.state !== 'closed') decoder.close();
+  }
+}
+
+export async function decodeWebmAudio(source, {
+  trackNumber = 1, cueIndex = 0, maxSamples = 256, codec = 'opus', numberOfChannels = 2,
+  sampleRate = 48_000, options = {}, onAudioData,
+} = {}) {
+  if (typeof AudioDecoder === 'undefined') throw new Error('AudioDecoder is not available in this runtime');
+  if (!Number.isInteger(maxSamples) || maxSamples <= 0) throw new RangeError('maxSamples must be a positive integer');
+  if (onAudioData !== undefined && typeof onAudioData !== 'function') throw new TypeError('onAudioData must be a function');
+  const metadata = options.metadata ?? await parseWebmHeader(source);
+  const samples = (await readWebmSamples(source, trackNumber, { ...options, metadata, cueIndex }))
+    .slice(0, maxSamples);
+  if (!samples.length) throw new RangeError('decodeWebmAudio found no samples in the requested cue');
+  const chunks = onAudioData ? null : [];
+  let failure;
+  const decoder = new AudioDecoder({
+    output: (audio) => { if (onAudioData) onAudioData(audio); else chunks.push(audio); },
+    error: (error) => { failure = error; },
+  });
+  const config = { codec, sampleRate, numberOfChannels };
+  if (typeof AudioDecoder.isConfigSupported === 'function') {
+    const support = await AudioDecoder.isConfigSupported(config);
+    if (!support.supported) { decoder.close(); throw new Error(`WebCodecs does not support audio codec: ${codec}`); }
+  }
+  decoder.configure(config);
+  try {
+    const duration = samples[1]?.timestamp - samples[0]?.timestamp || 0.02;
+    for (const sample of samples) {
+      if (failure) throw failure;
+      decoder.decode(createWebmEncodedAudioChunk(sample, duration));
+    }
+    await decoder.flush();
+    if (failure) throw failure;
+    return onAudioData ? null : chunks;
+  } catch (error) {
+    for (const chunk of chunks ?? []) chunk.close();
     throw error;
   } finally {
     if (decoder.state !== 'closed') decoder.close();
@@ -2188,7 +2238,9 @@ window.dioxuscut = {
   parseMedia,
   readWebmSamples,
   createWebmEncodedVideoChunk,
+  createWebmEncodedAudioChunk,
   decodeWebmVideo,
+  decodeWebmAudio,
   parseWavMetadata,
   probeIsoBmff,
   parseIsoBmffMovieHeader,
