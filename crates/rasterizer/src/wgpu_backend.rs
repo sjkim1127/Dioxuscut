@@ -4215,7 +4215,7 @@ mod tests {
     }
 
     #[test]
-    fn gpu_three_stop_linear_alpha_mask_matches_cpu() {
+    fn gpu_four_stop_linear_alpha_mask_matches_cpu() {
         let Ok(gpu) = WgpuBackend::new() else {
             println!("GPU backend unavailable; skipping gradient mask GPU test");
             return;
@@ -4239,6 +4239,10 @@ mod tests {
                         crate::scene::GradientStop {
                             position: 0.5,
                             color: Color::WHITE,
+                        },
+                        crate::scene::GradientStop {
+                            position: 0.75,
+                            color: Color::rgba(255, 255, 255, 128),
                         },
                         crate::scene::GradientStop {
                             position: 1.0,
