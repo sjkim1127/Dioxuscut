@@ -293,7 +293,7 @@ export async function parseMedia({
   const selectFields = (result) => !Array.isArray(fields) || fields.length === 0
     ? result
     : Object.fromEntries(fields.filter((field) => field in result).map((field) => [field, result[field]]));
-  const container = await probeIsoBmff(src).catch(() => null);
+  const container = await parseIsoBmffMovieHeader(src).catch(() => null);
   const wav = await parseWavMetadata(src).catch(() => null);
   if (wav) {
     await onDimensions?.(null);
@@ -306,11 +306,11 @@ export async function parseMedia({
     getImageDimensions(src).catch(() => null),
     getAudioDurationInSeconds(src).catch(() => null),
   ]);
-  if (!video && !image && audioDuration === null) {
+  if (!video && !image && audioDuration === null && container?.durationInSeconds == null) {
     throw new Error(`unable to parse media metadata: ${src}`);
   }
   const dimensions = video ? { width: video.width, height: video.height } : image;
-  const durationInSeconds = video?.durationInSeconds ?? audioDuration ?? 0;
+  const durationInSeconds = video?.durationInSeconds ?? audioDuration ?? container?.durationInSeconds ?? 0;
   await onDimensions?.(dimensions);
   await onDurationInSeconds?.(durationInSeconds);
   await onParseProgress?.({ bytes: 0, percentage: 1, totalBytes: null });
@@ -433,6 +433,50 @@ export async function probeIsoBmff(source, { requestInit, maxBytes = 16 * 1024 *
     hasMovieHeader: boxes.some(({ type }) => type === 'moov'),
     isRemote: /^https?:\/\//i.test(source),
   };
+}
+
+function findIsoBox(bytes, wanted, start = 0, end = bytes.length) {
+  let offset = start;
+  while (offset + 8 <= end) {
+    const size32 = uint32be(bytes, offset);
+    const type = ascii(bytes, offset + 4, 4);
+    const headerSize = size32 === 1 ? 16 : 8;
+    const size = size32 === 1 && offset + 16 <= end
+      ? Number((BigInt(uint32be(bytes, offset + 8)) << 32n) | BigInt(uint32be(bytes, offset + 12)))
+      : size32;
+    if (!Number.isSafeInteger(size) || size < headerSize || offset + size > end) break;
+    if (type === wanted) return { offset, size, headerSize };
+    offset += size;
+  }
+  return null;
+}
+
+// Read and decode only the movie header from an ISO-BMFF moov box. The box is
+// bounded by the same 16 MiB cap as all other media range reads.
+export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 16 * 1024 * 1024 } = {}) {
+  const structure = await probeIsoBmff(source, { requestInit, maxBytes });
+  const moov = structure?.boxes.find(({ type }) => type === 'moov');
+  if (!moov || moov.size > maxBytes) return structure ? { ...structure, durationInSeconds: null } : null;
+  const bytes = await readMediaRange(source, moov.offset, moov.offset + moov.size, { requestInit });
+  const mvhd = findIsoBox(bytes, 'mvhd', moov.headerSize, bytes.length);
+  if (!mvhd || mvhd.offset + mvhd.headerSize + 20 > bytes.length) {
+    return { ...structure, durationInSeconds: null };
+  }
+  const payload = mvhd.offset + mvhd.headerSize;
+  const version = bytes[payload];
+  let timescale;
+  let duration;
+  if (version === 1 && payload + 32 <= bytes.length) {
+    timescale = uint32be(bytes, payload + 20);
+    duration = (BigInt(uint32be(bytes, payload + 24)) << 32n) | BigInt(uint32be(bytes, payload + 28));
+  } else if (payload + 20 <= bytes.length) {
+    timescale = uint32be(bytes, payload + 12);
+    duration = BigInt(uint32be(bytes, payload + 16));
+  }
+  const durationInSeconds = timescale > 0 && duration !== undefined
+    ? Number(duration) / timescale
+    : null;
+  return { ...structure, durationInSeconds: Number.isFinite(durationInSeconds) ? durationInSeconds : null };
 }
 
 function uint32be(bytes, offset) {
@@ -1213,6 +1257,7 @@ window.dioxuscut = {
   parseMedia,
   parseWavMetadata,
   probeIsoBmff,
+  parseIsoBmffMovieHeader,
   readMediaRange,
   getAudioDurationInSeconds,
   getAudioDuration,
