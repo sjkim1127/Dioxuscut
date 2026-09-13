@@ -1538,6 +1538,24 @@ impl RasterizerBackend for WgpuBackend {
             self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
             return Ok(image);
         }
+        if scene
+            .nodes
+            .iter()
+            .any(|node| matches!(node, SceneNode::Shader { .. }))
+        {
+            let first_shader = scene
+                .nodes
+                .iter()
+                .position(|node| matches!(node, SceneNode::Shader { .. }))
+                .unwrap();
+            let trailing_shader_only = scene.nodes[first_shader..]
+                .iter()
+                .all(|node| matches!(node, SceneNode::Shader { .. }));
+            if !trailing_shader_only {
+                let image = self.render_interleaved_shader_scene(scene, config)?;
+                return Ok(image);
+            }
+        }
         let mut gpu_base_scene = None;
         let shader_suffix = scene
             .nodes
@@ -1754,6 +1772,43 @@ impl RasterizerBackend for WgpuBackend {
 }
 
 impl WgpuBackend {
+    fn render_interleaved_shader_scene(
+        &self,
+        scene: &Scene,
+        config: &FrameConfig,
+    ) -> Result<RgbaImage, RasterError> {
+        let mut output = RgbaImage::new(config.width, config.height);
+        let mut regular_nodes = Vec::new();
+        for node in &scene.nodes {
+            if matches!(node, SceneNode::Shader { .. }) {
+                if !regular_nodes.is_empty() {
+                    let segment = Scene {
+                        nodes: std::mem::take(&mut regular_nodes),
+                    };
+                    let rendered = self.render_frame(&segment, config)?;
+                    image::imageops::overlay(&mut output, &rendered, 0, 0);
+                }
+                let shader_scene = Scene {
+                    nodes: vec![node.clone()],
+                };
+                let rendered = self.render_shader_layers(&shader_scene, config)?;
+                image::imageops::overlay(&mut output, &rendered, 0, 0);
+            } else {
+                regular_nodes.push(node.clone());
+            }
+        }
+        if !regular_nodes.is_empty() {
+            let rendered = self.render_frame(
+                &Scene {
+                    nodes: regular_nodes,
+                },
+                config,
+            )?;
+            image::imageops::overlay(&mut output, &rendered, 0, 0);
+        }
+        Ok(output)
+    }
+
     /// Render opaque shader layers directly into one GPU target and read it
     /// back once. Opacity layers retain the compatibility path until opacity
     /// is carried as a target-pass uniform.
@@ -3202,6 +3257,46 @@ mod tests {
             overlap[0] > 80 && overlap[2] > 80,
             "overlap was {overlap:?}"
         );
+    }
+
+    #[test]
+    fn gpu_interleaved_shader_preserves_top_level_draw_order() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping interleaved shader test");
+            return;
+        };
+        let rect = |color| SceneNode::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 16.0,
+            h: 10.0,
+            fill: color,
+            stroke: None,
+            stroke_width: 0.0,
+            corner_radius: 0.0,
+        };
+        let scene = Scene {
+            nodes: vec![
+                rect(Color::rgb(255, 0, 0)),
+                SceneNode::Shader {
+                    x: 4.0,
+                    y: 2.0,
+                    w: 6.0,
+                    h: 4.0,
+                    source: "return vec4<f32>(0.0, 0.0, 1.0, 1.0);".into(),
+                    time: 0.0,
+                    params: [0.0; 4],
+                    opacity: 1.0,
+                },
+                rect(Color::rgb(0, 255, 0)),
+            ],
+        };
+        let image = gpu
+            .render_frame(&scene, &FrameConfig::new(16, 10, 0, 30.0))
+            .unwrap();
+        assert_eq!(image.get_pixel(1, 1)[1], 255);
+        assert_eq!(image.get_pixel(6, 4)[1], 255);
+        assert_eq!(image.get_pixel(6, 4)[2], 0);
     }
 
     #[test]
