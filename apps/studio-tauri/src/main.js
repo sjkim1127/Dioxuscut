@@ -426,7 +426,10 @@ async function parseWebmHeader(source) {
   const signature = await readMediaRange(source, 0, 4);
   if (signature.length !== 4 || signature[0] !== 0x1a || signature[1] !== 0x45
     || signature[2] !== 0xdf || signature[3] !== 0xa3) return null;
-  const bytes = await readMediaRange(source, 0, 16 * 1024 * 1024);
+  const response = await fetch(source);
+  if (!response.ok) throw new Error(`failed to read WebM header: ${response.status}`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.length > 16 * 1024 * 1024) throw new Error('WebM header exceeds 16MiB safety limit');
   const elements = [];
   const readVint = (offset, forSize = false) => {
     if (offset >= bytes.length) return null;
@@ -460,6 +463,7 @@ async function parseWebmHeader(source) {
       if (!sizeInfo || sizeInfo.value === null) break;
       const start = offset + idInfo.width + sizeInfo.width;
       const end = Math.min(rangeEnd, start + sizeInfo.value);
+      if (end <= offset) break;
       elements.push({ id: idInfo.value, start, end });
       if (masters.has(idInfo.value)) parseRange(start, end);
       offset = end;
@@ -509,6 +513,7 @@ async function parseWebmHeader(source) {
   return {
     container: 'webm',
     durationInSeconds: duration && scale ? float(duration) * integer(scale) / 1e9 : null,
+    timecodeScale: scale ? integer(scale) : 1_000_000,
     videoCodec: codecId,
     videoTrackNumber: trackNumber ? integer(trackNumber) : null,
     videoWidth: width ? integer(width) : null,
@@ -516,6 +521,85 @@ async function parseWebmHeader(source) {
     videoType: trackType ? integer(trackType) : null,
     cues,
   };
+}
+
+// Read VP8/VP9/AV1 SimpleBlock payloads from a WebM cluster. Laced blocks are
+// deliberately rejected until their per-codec frame duration semantics are
+// implemented; ordinary browser-recorded WebM uses one frame per block.
+export async function readWebmSamples(source, trackNumber = 1, options = {}) {
+  const metadata = options.metadata ?? await parseWebmHeader(source);
+  if (!metadata?.cues?.length) return [];
+  const cues = metadata.cues.filter((cue) => cue.trackNumber === trackNumber || cue.trackNumber == null);
+  const cueIndex = Math.max(0, Number(options.cueIndex ?? 0));
+  const start = cues[cueIndex]?.clusterPosition;
+  if (!Number.isSafeInteger(start)) return [];
+  const next = cues.slice(cueIndex + 1).find((cue) => cue.clusterPosition > start)?.clusterPosition;
+  const requestedEnd = (next ?? start + 16 * 1024 * 1024);
+  const response = await fetch(source, { headers: { Range: `bytes=${start}-${requestedEnd - 1}` } });
+  if (!response.ok) throw new Error(`failed to read WebM cluster: ${response.status}`);
+  const responseBytes = new Uint8Array(await response.arrayBuffer());
+  const bytes = response.status === 200
+    ? responseBytes.slice(start, Math.min(requestedEnd, responseBytes.length))
+    : responseBytes;
+  const samples = [];
+  const readVint = (offset) => {
+    const first = bytes[offset];
+    if (first === undefined) return null;
+    let mask = 0x80; let width = 1;
+    while (width <= 8 && !(first & mask)) { mask >>= 1; width += 1; }
+    if (width > 8 || offset + width > bytes.length) return null;
+    let value = first & (mask - 1);
+    for (let index = 1; index < width; index += 1) value = value * 256 + bytes[offset + index];
+    return { width, value };
+  };
+  const readId = (offset) => {
+    const first = bytes[offset];
+    if (first === undefined) return null;
+    let mask = 0x80; let width = 1;
+    while (width <= 4 && !(first & mask)) { mask >>= 1; width += 1; }
+    if (width > 4 || offset + width > bytes.length) return null;
+    let value = 0;
+    for (let index = 0; index < width; index += 1) value = value * 256 + bytes[offset + index];
+    return { width, value };
+  };
+  let offset = 0;
+  while (offset + 2 <= bytes.length) {
+    const id = readId(offset); if (!id) break;
+    const size = readVint(offset + id.width); if (!size) break;
+    const payload = offset + id.width + size.width;
+    const end = Math.min(bytes.length, payload + size.value);
+    if (end <= offset) break;
+    if (id.value === 0xa3 && end > payload + 4) {
+      const track = readVint(payload);
+      if (track && track.value === trackNumber) {
+        const timecode = (bytes[payload + track.width] << 8) | bytes[payload + track.width + 1];
+        const signedTimecode = timecode & 0x8000 ? timecode - 0x10000 : timecode;
+        const flags = bytes[payload + track.width + 2];
+        if ((flags & 0x06) === 0) {
+          const dataStart = payload + track.width + 3;
+          samples.push({
+            timestamp: (cues[cueIndex].timeInSeconds ?? 0) + signedTimecode * metadata.timecodeScale / 1e9,
+            keyframe: Boolean(flags & 0x80),
+            offset: start + dataStart,
+            size: end - dataStart,
+            data: bytes.slice(dataStart, end),
+          });
+        }
+      }
+    }
+    offset = end;
+  }
+  return samples;
+}
+
+export function createWebmEncodedVideoChunk(sample, duration = 0) {
+  if (typeof EncodedVideoChunk === 'undefined') throw new Error('EncodedVideoChunk is not available in this runtime');
+  return new EncodedVideoChunk({
+    type: sample.keyframe ? 'key' : 'delta',
+    timestamp: Math.round(sample.timestamp * 1_000_000),
+    duration: duration > 0 ? Math.round(duration * 1_000_000) : undefined,
+    data: sample.data,
+  });
 }
 
 // Browser counterpart of the native bounded range reader used by the
