@@ -539,6 +539,7 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
       const stsz = table('stsz');
       const stco = table('stco') ?? table('co64');
       const stss = table('stss');
+      const ctts = table('ctts');
       const readEntries = (box, width, valueOffset) => {
         if (!box) return [];
         const payload = box.offset + box.headerSize;
@@ -595,6 +596,20 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
         }
         return entries;
       })() : [];
+      const compositionOffsets = ctts ? (() => {
+        const payload = ctts.offset + ctts.headerSize;
+        const version = bytes[payload];
+        const count = uint32be(bytes, payload + 4);
+        const entries = [];
+        for (let index = 0; index < count && index < 1_000_000; index += 1) {
+          const cursor = payload + 8 + index * 8;
+          if (cursor + 8 > ctts.offset + ctts.size) break;
+          let offset = uint32be(bytes, cursor + 4);
+          if (version === 1 && offset & 0x80000000) offset -= 0x100000000;
+          entries.push({ count: uint32be(bytes, cursor), offset });
+        }
+        return entries;
+      })() : [];
       const sampleTimestamps = [];
       let decodeTime = 0;
       let timedSamples = 0;
@@ -610,11 +625,25 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
         }
         if (timedSamples >= sampleRanges.length) break;
       }
+      const compositionTimestamps = [];
+      let compositionSample = 0;
+      for (const entry of compositionOffsets) {
+        for (let index = 0; index < entry.count && compositionSample < sampleRanges.length; index += 1) {
+          compositionTimestamps.push({ sampleIndex: compositionSample, offset: entry.offset });
+          compositionSample += 1;
+        }
+        if (compositionSample >= sampleRanges.length) break;
+      }
+      const compositionMap = new Map(compositionTimestamps.map((sample) => [sample.sampleIndex, sample.offset]));
       const timedSampleMap = new Map(sampleTimestamps.map((sample) => [sample.sampleIndex, sample]));
       const timedRanges = sampleRanges.map((sample) => ({
         ...sample,
         timestamp: timedSampleMap.get(sample.sampleIndex)?.timestamp ?? null,
         duration: timedSampleMap.get(sample.sampleIndex)?.duration ?? null,
+        compositionOffset: compositionMap.get(sample.sampleIndex) ?? 0,
+        presentationTimestamp: timedSampleMap.has(sample.sampleIndex)
+          ? timedSampleMap.get(sample.sampleIndex).timestamp + (trackTimescale ? (compositionMap.get(sample.sampleIndex) ?? 0) / trackTimescale : 0)
+          : null,
       }));
       return {
         type: handler === 'vide' ? 'video' : handler === 'soun' ? 'audio' : 'unknown',
@@ -623,6 +652,7 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
         durationInSeconds: trackTimescale ? Number(trackDuration) / trackTimescale : null,
         sampleTables: {
           timeToSample,
+          compositionOffsets,
           sampleCount: Number.isSafeInteger(sampleCount) ? sampleCount : 0,
           uniformSampleSize: uniformSampleSize || null,
           sampleSizes,
@@ -630,6 +660,7 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
           keyframes,
           sampleRanges: timedRanges,
           sampleTimestamps,
+          compositionTimestamps,
         },
         codecConfig,
       };
