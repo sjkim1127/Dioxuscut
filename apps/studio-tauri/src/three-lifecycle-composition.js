@@ -50,6 +50,14 @@ export function register(api) {
     numberOfChannels: 1,
     resultId: 'three-audio-reactive-fixture',
   };
+  const audioUrl = api.audioBufferToDataUrl?.({
+    numberOfChannels: 1,
+    sampleRate,
+    getChannelData: () => audioWaveform,
+  });
+  if (!audioUrl?.startsWith('data:audio/wav;base64,')) {
+    throw new Error('audioBufferToDataUrl did not return a WAV data URL');
+  }
   api.registerThreeComposition('three_audio_reactive_preview', {
     setup({ THREE }) {
       const scene = new THREE.Scene();
