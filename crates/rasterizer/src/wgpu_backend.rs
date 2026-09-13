@@ -184,6 +184,10 @@ struct InstanceData {
     // rgb = duotone endpoints in sRGB, w = enabled on primary
     duotone_primary: vec4<f32>,
     duotone_secondary: vec4<f32>,
+    // x = contrast, y = saturation, z = inverse gamma, w = enabled
+    grading: vec4<f32>,
+    // rgb = tint color in sRGB, w = amount
+    grading_tint: vec4<f32>,
     clip_rects: array<vec4<f32>, 4>,
     mask_opacity: vec4<f32>,
     mask_kinds: vec4<u32>,
@@ -315,6 +319,7 @@ fn apply_color_filters(color: vec4<f32>, instance: InstanceData) -> vec4<f32> {
         && instance.hue.x == 0.0
         && instance.tint.w == 0.0
         && instance.duotone_primary.w == 0.0
+        && instance.grading.w == 0.0
     {
         return color;
     }
@@ -377,6 +382,13 @@ fn apply_color_filters(color: vec4<f32>, instance: InstanceData) -> vec4<f32> {
     if instance.duotone_primary.w > 0.0 {
         let duo_luma = clamp(dot(srgb, vec3<f32>(0.299, 0.587, 0.114)), 0.0, 1.0);
         srgb = mix(instance.duotone_primary.rgb, instance.duotone_secondary.rgb, duo_luma);
+    }
+    if instance.grading.w > 0.0 {
+        srgb = pow(clamp(srgb, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(instance.grading.z));
+        srgb = (srgb - vec3<f32>(0.5)) * instance.grading.x + vec3<f32>(0.5);
+        let grading_luma = dot(srgb, vec3<f32>(0.299, 0.587, 0.114));
+        srgb = grading_luma + (srgb - vec3<f32>(grading_luma)) * instance.grading.y;
+        srgb = mix(srgb, instance.grading_tint.rgb, clamp(instance.grading_tint.w, 0.0, 1.0));
     }
     return vec4<f32>(clamp(srgb, vec3<f32>(0.0), vec3<f32>(1.0)), color.a);
 }
@@ -3049,6 +3061,8 @@ struct GpuInstance {
     tint: [f32; 4],
     duotone_primary: [f32; 4],
     duotone_secondary: [f32; 4],
+    grading: [f32; 4],
+    grading_tint: [f32; 4],
     clip_rects: [[f32; 4]; 4],
     mask_opacity: [f32; 4],
     mask_kinds: [u32; 4],
@@ -3085,6 +3099,8 @@ impl GpuInstance {
             tint: [0.0, 0.0, 0.0, 0.0],
             duotone_primary: [0.0, 0.0, 0.0, 0.0],
             duotone_secondary: [0.0, 0.0, 0.0, 0.0],
+            grading: [1.0, 1.0, 1.0, 0.0],
+            grading_tint: [0.0, 0.0, 0.0, 0.0],
             clip_rects: [[-1.0; 4]; 4],
             mask_opacity: [-1.0; 4],
             mask_kinds: [0; 4],
@@ -3548,6 +3564,10 @@ fn compile_nodes(
                         instance.duotone_primary = primary;
                         instance.duotone_secondary = secondary;
                     }
+                    if let Some((grading, grading_tint)) = gpu_color_grading(filters) {
+                        instance.grading = grading;
+                        instance.grading_tint = grading_tint;
+                    }
                     if let Some(vignette) = gpu_vignette(filters) {
                         instance.vignette = vignette;
                     }
@@ -3601,6 +3621,10 @@ fn compile_nodes(
                     if let Some((primary, secondary)) = gpu_duotone(filters) {
                         instance.duotone_primary = primary;
                         instance.duotone_secondary = secondary;
+                    }
+                    if let Some((grading, grading_tint)) = gpu_color_grading(filters) {
+                        instance.grading = grading;
+                        instance.grading_tint = grading_tint;
                     }
                     if let Some(vignette) = gpu_vignette(filters) {
                         instance.vignette = vignette;
@@ -3687,6 +3711,10 @@ fn compile_nodes(
                         instance.duotone_primary = primary;
                         instance.duotone_secondary = secondary;
                     }
+                    if let Some((grading, grading_tint)) = gpu_color_grading(filters) {
+                        instance.grading = grading;
+                        instance.grading_tint = grading_tint;
+                    }
                     if let Some(vignette) = gpu_vignette(filters) {
                         instance.vignette = vignette;
                     }
@@ -3735,6 +3763,10 @@ fn compile_nodes(
                     if let Some((primary, secondary)) = gpu_duotone(filters) {
                         instance.duotone_primary = primary;
                         instance.duotone_secondary = secondary;
+                    }
+                    if let Some((grading, grading_tint)) = gpu_color_grading(filters) {
+                        instance.grading = grading;
+                        instance.grading_tint = grading_tint;
                     }
                     if let Some(vignette) = gpu_vignette(filters) {
                         instance.vignette = vignette;
@@ -3882,6 +3914,22 @@ fn gpu_layer_effects(
             crate::scene::SceneFilter::Duotone { .. } => Some((
                 opacity, brightness, grayscale, contrast, saturation, invert, hue,
             )),
+            crate::scene::SceneFilter::ColorGrading {
+                contrast: grading_contrast,
+                saturation: grading_saturation,
+                gamma,
+                tint,
+            } if grading_contrast.is_finite()
+                && *grading_contrast >= 0.0
+                && grading_saturation.is_finite()
+                && *grading_saturation >= 0.0
+                && gamma.is_finite()
+                && *gamma > 0.0 =>
+            {
+                Some((
+                    opacity, brightness, grayscale, contrast, saturation, invert, hue,
+                ))
+            }
             _ => None,
         },
     )
@@ -3922,6 +3970,39 @@ fn gpu_duotone(filters: &[crate::scene::SceneFilter]) -> Option<([f32; 4], [f32;
                     0.0,
                 ],
             ))
+        } else {
+            None
+        }
+    })
+}
+
+fn gpu_color_grading(filters: &[crate::scene::SceneFilter]) -> Option<([f32; 4], [f32; 4])> {
+    filters.iter().find_map(|filter| {
+        if let crate::scene::SceneFilter::ColorGrading {
+            contrast,
+            saturation,
+            gamma,
+            tint,
+        } = filter
+        {
+            if !contrast.is_finite()
+                || *contrast < 0.0
+                || !saturation.is_finite()
+                || *saturation < 0.0
+                || !gamma.is_finite()
+                || *gamma <= 0.0
+            {
+                return None;
+            }
+            let tint = tint.map_or([0.0; 4], |color| {
+                [
+                    f32::from(color[0]) / 255.0,
+                    f32::from(color[1]) / 255.0,
+                    f32::from(color[2]) / 255.0,
+                    f32::from(color[3]) / 255.0,
+                ]
+            });
+            Some(([*contrast, *saturation, 1.0 / *gamma, 1.0], tint))
         } else {
             None
         }
@@ -5509,6 +5590,57 @@ mod tests {
                     w: 16.0,
                     h: 16.0,
                     fill: Color::rgb(255, 0, 0),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                }],
+            }],
+        };
+        assert!(gpu_supports_scene(&scene));
+        let config = FrameConfig::new(16, 16, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        let gpu_pixel = gpu_image.get_pixel(8, 8);
+        let cpu_pixel = cpu_image.get_pixel(8, 8);
+        for channel in 0..4 {
+            assert!(
+                (i32::from(gpu_pixel[channel]) - i32::from(cpu_pixel[channel])).abs() <= 2,
+                "channel {channel}: GPU {:?}, CPU {:?}",
+                gpu_pixel,
+                cpu_pixel
+            );
+        }
+        assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
+    }
+
+    #[test]
+    fn gpu_color_grading_filter_matches_cpu_for_opaque_rect() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping color grading GPU test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Layer {
+                opacity: 1.0,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: None,
+                mask: None,
+                mask_mode: crate::scene::MaskMode::Alpha,
+                filters: vec![crate::scene::SceneFilter::ColorGrading {
+                    contrast: 1.2,
+                    saturation: 0.7,
+                    gamma: 1.3,
+                    tint: Some([20, 40, 80, 64]),
+                }],
+                shadow: None,
+                children: vec![SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 16.0,
+                    h: 16.0,
+                    fill: Color::rgb(200, 80, 30),
                     stroke: None,
                     stroke_width: 0.0,
                     corner_radius: 0.0,
