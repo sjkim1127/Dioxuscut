@@ -1389,10 +1389,10 @@ impl WgpuBackend {
                         "GPU shader suffix contains a non-shader node".into(),
                     ));
                 };
-                if *opacity != 1.0
-                    || ![*x, *y, *w, *h, *time]
-                        .iter()
-                        .all(|value| value.is_finite())
+                if ![*x, *y, *w, *h, *time, *opacity]
+                    .iter()
+                    .all(|value| value.is_finite())
+                    || !(*opacity >= 0.0 && *opacity <= 1.0)
                     || *x < 0.0
                     || *y < 0.0
                     || *w <= 0.0
@@ -1404,6 +1404,7 @@ impl WgpuBackend {
                         "invalid GPU shader suffix region".into(),
                     ));
                 }
+                let shader_source = shader_source_with_opacity(source, *opacity);
                 self.shader_runner.render_into_region(
                     &mut encoder,
                     &slot.texture_view,
@@ -1415,7 +1416,7 @@ impl WgpuBackend {
                     *h,
                     *time,
                     *params,
-                    source,
+                    &shader_source,
                     wgpu::LoadOp::Load,
                 )?;
             }
@@ -1519,8 +1520,10 @@ impl RasterizerBackend for WgpuBackend {
                 .all(|node| matches!(node, SceneNode::Shader { .. }))
         {
             let image = if scene.nodes.iter().all(|node| {
-                matches!(node, SceneNode::Shader { x, y, w, h, opacity, .. }
-                        if *opacity == 1.0
+                matches!(node, SceneNode::Shader { x, y, w, h, source, opacity, .. }
+                        if *opacity >= 0.0
+                            && *opacity <= 1.0
+                            && shader_opacity_supported(source)
                             && *x >= 0.0
                             && *y >= 0.0
                             && *w > 0.0
@@ -1544,8 +1547,10 @@ impl RasterizerBackend for WgpuBackend {
             .and_then(|start| {
                 let suffix = &scene.nodes[start..];
                 let valid = suffix.iter().all(|node| {
-                    matches!(node, SceneNode::Shader { x, y, w, h, opacity, .. }
-                        if *opacity == 1.0
+                    matches!(node, SceneNode::Shader { x, y, w, h, source, opacity, .. }
+                        if *opacity >= 0.0
+                            && *opacity <= 1.0
+                            && shader_opacity_supported(source)
                             && *x >= 0.0
                             && *y >= 0.0
                             && *w > 0.0
@@ -1794,17 +1799,18 @@ impl WgpuBackend {
             else {
                 unreachable!("direct shader path was checked before rendering");
             };
-            if ![*x, *y, *w, *h, *time]
+            if ![*x, *y, *w, *h, *time, *opacity]
                 .iter()
                 .all(|value| value.is_finite())
+                || !(*opacity >= 0.0 && *opacity <= 1.0)
                 || *w <= 0.0
                 || *h <= 0.0
                 || *x < 0.0
                 || *y < 0.0
-                || *opacity != 1.0
             {
                 return Err(RasterError::Scene("invalid direct shader region".into()));
             }
+            let shader_source = shader_source_with_opacity(source, *opacity);
             self.shader_runner.render_into_region(
                 &mut encoder,
                 &view,
@@ -1816,7 +1822,7 @@ impl WgpuBackend {
                 *h,
                 *time,
                 *params,
-                source,
+                &shader_source,
                 if index == 0 {
                     wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
                 } else {
@@ -1931,6 +1937,32 @@ impl WgpuBackend {
         }
         Ok(())
     }
+}
+
+fn shader_opacity_supported(source: &str) -> bool {
+    !source.contains("@fragment") && source.contains("return ")
+}
+
+fn shader_source_with_opacity(source: &str, opacity: f32) -> String {
+    if opacity >= 1.0 || !shader_opacity_supported(source) {
+        return source.to_owned();
+    }
+    let Some(return_start) = source.rfind("return ") else {
+        return source.to_owned();
+    };
+    let expression_start = return_start + "return ".len();
+    let Some(semicolon_offset) = source[expression_start..].find(';') else {
+        return source.to_owned();
+    };
+    let semicolon = expression_start + semicolon_offset;
+    let expression = &source[expression_start..semicolon];
+    format!(
+        "{}let dioxuscut_color = {}; return vec4<f32>(dioxuscut_color.rgb, dioxuscut_color.a * {:.9});{}",
+        &source[..return_start],
+        expression,
+        opacity,
+        &source[semicolon + 1..]
+    )
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -3156,7 +3188,7 @@ mod tests {
                     source: "return vec4<f32>(0.0, 0.0, 1.0, 1.0);".into(),
                     time: 0.0,
                     params: [0.0; 4],
-                    opacity: 1.0,
+                    opacity: 0.5,
                 },
             ],
         };
@@ -3166,8 +3198,10 @@ mod tests {
         assert_eq!(gpu.render_stats().gpu_frames, 1);
         assert_eq!(image.get_pixel(1, 1)[0], 255);
         let overlap = image.get_pixel(6, 4);
-        assert_eq!(overlap[0], 0);
-        assert_eq!(overlap[2], 255);
+        assert!(
+            overlap[0] > 80 && overlap[2] > 80,
+            "overlap was {overlap:?}"
+        );
     }
 
     #[test]
