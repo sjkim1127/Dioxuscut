@@ -449,6 +449,7 @@ impl Mesh3D {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn render_to_scene(
         &self,
         scene: &mut Scene,
