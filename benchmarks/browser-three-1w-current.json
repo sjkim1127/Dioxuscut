@@ -10,12 +10,12 @@
   "jpeg_quality": null,
   "transparent": false,
   "samples_ms": [
-    6017.298167,
-    6015.460541999999,
-    6082.9805000000015
+    6383.586084,
+    6082.245250000002,
+    6153.232166999998
   ],
-  "median_ms": 6017.298167,
-  "fps_equivalent": 29.91375780365248,
+  "median_ms": 6153.232166999998,
+  "fps_equivalent": 29.252918647429944,
   "node": "v24.11.1",
   "platform": "darwin",
   "arch": "arm64"
