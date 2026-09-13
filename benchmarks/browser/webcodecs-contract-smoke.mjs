@@ -68,6 +68,13 @@ try {
     const parsed = await window.dioxuscut.parseIsoBmffMovieHeader('/assets/showcase.mp4');
     const webmMetadata = await window.dioxuscut.parseMedia({ src: '/assets/webm-fixture.webm' });
     const webmSamples = await window.dioxuscut.readWebmSamples('/assets/webm-fixture.webm', 1);
+    const webmChunks = webmSamples.slice(0, 2).map((sample) =>
+      window.dioxuscut.createWebmEncodedVideoChunk(sample, 1 / 24));
+    const webmFrames = await window.dioxuscut.decodeWebmVideo('/assets/webm-fixture.webm', {
+      trackNumber: 1, maxSamples: 3, codec: 'vp09.00.10.08',
+    });
+    const webmDecodedDimensions = webmFrames.map(({ displayWidth, displayHeight }) => [displayWidth, displayHeight]);
+    for (const frame of webmFrames) frame.close();
     const parseEvents = [];
     const partialMetadata = await window.dioxuscut.parseMedia({
       src: '/assets/showcase.mp4',
@@ -164,6 +171,8 @@ try {
         track: webmMetadata.tracks?.[0]?.codec,
         cues: webmMetadata.keyframes?.length ?? 0,
         samples: webmSamples.length,
+        decoded: webmFrames.length,
+        decodedDimensions: webmDecodedDimensions,
         firstSample: webmSamples[0] ? {
           keyframe: webmSamples[0].keyframe,
           size: webmSamples[0].size,
@@ -208,6 +217,8 @@ try {
   assert.equal(result.webm.track, 'V_VP9');
   assert.ok(result.webm.cues > 0);
   assert.ok(result.webm.samples > 0);
+  assert.equal(result.webm.decoded, 3);
+  assert.deepEqual(result.webm.decodedDimensions[0], [160, 90]);
   assert.ok(result.webm.firstSample.size > 0);
   assert.ok(result.videoDecodeMs >= 0 && result.audioDecodeMs >= 0);
   console.log(JSON.stringify({ status: 'ok', ...result }));
