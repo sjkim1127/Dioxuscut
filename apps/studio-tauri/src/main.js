@@ -81,6 +81,18 @@ function cancelRender(handle, reason = 'render cancelled') {
   renderGateError = new Error(String(reason));
 }
 
+// Hook-shaped aliases for compositions ported from Remotion. The worker is
+// not React-driven, so these return the stable render-gate protocol helpers.
+export function useDelayRender() {
+  return { delayRender, continueRender, cancelRender };
+}
+
+// Browser pixel density for canvas/WebGL adapters. Headless workers use their
+// configured device scale factor, keeping captures deterministic.
+export function usePixelDensity() {
+  return window.devicePixelRatio || 1;
+}
+
 async function waitForRenderGates() {
   if (renderGateError) throw renderGateError;
   while (renderGates.size > 0) {
@@ -595,6 +607,8 @@ window.dioxuscut = {
   delayRender,
   continueRender,
   cancelRender,
+  useDelayRender,
+  usePixelDensity,
   registerLottieAdapter,
   getVideoTexture,
   useVideoTexture,
