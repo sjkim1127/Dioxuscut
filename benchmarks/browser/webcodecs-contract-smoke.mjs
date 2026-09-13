@@ -11,6 +11,7 @@ const executablePath = process.env.CHROME_PATH ?? '/Applications/Google Chrome.a
 const run = promisify(execFile);
 const audioFixturePath = `/tmp/dioxuscut-webcodecs-audio-${process.pid}.m4a`;
 const webmFixturePath = `/tmp/dioxuscut-webcodecs-video-${process.pid}.webm`;
+const webmVp8FixturePath = `/tmp/dioxuscut-webcodecs-vp8-${process.pid}.webm`;
 const webmAudioFixturePath = `/tmp/dioxuscut-webcodecs-audio-${process.pid}.webm`;
 await run(process.env.FFMPEG_PATH ?? 'ffmpeg', [
   '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1',
@@ -19,6 +20,10 @@ await run(process.env.FFMPEG_PATH ?? 'ffmpeg', [
 await run(process.env.FFMPEG_PATH ?? 'ffmpeg', [
   '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=160x90:rate=24:duration=1',
   '-c:v', 'libvpx-vp9', '-crf', '35', '-b:v', '0', '-an', '-y', webmFixturePath,
+]);
+await run(process.env.FFMPEG_PATH ?? 'ffmpeg', [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=160x90:rate=24:duration=1',
+  '-c:v', 'libvpx', '-crf', '35', '-b:v', '0', '-an', '-y', webmVp8FixturePath,
 ]);
 await run(process.env.FFMPEG_PATH ?? 'ffmpeg', [
   '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1',
@@ -30,6 +35,7 @@ try {
   const fixture = await readFile(new URL('../../assets/showcase.mp4', import.meta.url));
   const audioFixture = await readFile(audioFixturePath);
   const webmFixture = await readFile(webmFixturePath);
+  const webmVp8Fixture = await readFile(webmVp8FixturePath);
   const webmAudioFixture = await readFile(webmAudioFixturePath);
   const rangeFixture = Buffer.from([0, 1, 2, 3, 4, 5, 6, 7]);
   await page.route('**/range.bin', (route) => {
@@ -50,6 +56,9 @@ try {
   }));
   await page.route('**/assets/webm-fixture.webm', (route) => route.fulfill({
     status: 200, contentType: 'video/webm', body: webmFixture,
+  }));
+  await page.route('**/assets/webm-vp8-fixture.webm', (route) => route.fulfill({
+    status: 200, contentType: 'video/webm', body: webmVp8Fixture,
   }));
   await page.route('**/assets/webm-audio-fixture.webm', (route) => route.fulfill({
     status: 200, contentType: 'audio/webm', body: webmAudioFixture,
@@ -90,6 +99,10 @@ try {
     const webmDecodedDimensions = webmFrames.map(({ displayWidth, displayHeight }) => [displayWidth, displayHeight]);
     for (const frame of webmFrames) frame.close();
     const webmAudioSamples = await window.dioxuscut.readWebmSamples('/assets/webm-audio-fixture.webm', 1);
+    const webmVp8Metadata = await window.dioxuscut.parseMedia({ src: '/assets/webm-vp8-fixture.webm' });
+    const webmVp8Frames = await window.dioxuscut.decodeWebmVideo('/assets/webm-vp8-fixture.webm', { maxSamples: 1 });
+    const webmVp8Dimensions = webmVp8Frames.map(({ displayWidth, displayHeight }) => [displayWidth, displayHeight]);
+    for (const frame of webmVp8Frames) frame.close();
     const webmAudioMetadata = await window.dioxuscut.parseMedia({ src: '/assets/webm-audio-fixture.webm' });
     const webmAudioData = await window.dioxuscut.decodeWebmAudio('/assets/webm-audio-fixture.webm', {
       trackNumber: 1, maxSamples: 3,
@@ -202,6 +215,7 @@ try {
         decoded: webmFrames.length,
         streamed: { count: streamedWebmFrames, returnValue: streamedWebmResult },
         audioSamples: webmAudioSamples.length,
+        vp8: { codec: webmVp8Metadata.videoCodec, decoded: webmVp8Dimensions },
         audioCodec: webmAudioMetadata.audioCodec,
         audioRate: webmAudioMetadata.tracks?.[0]?.sampleRate,
         audioChannels: webmAudioMetadata.tracks?.[0]?.numberOfChannels,
@@ -257,6 +271,8 @@ try {
   assert.equal(result.webm.streamed.count, 3);
   assert.equal(result.webm.streamed.returnValue, null);
   assert.ok(result.webm.audioSamples > 0);
+  assert.equal(result.webm.vp8.codec, 'vp8');
+  assert.deepEqual(result.webm.vp8.decoded[0], [160, 90]);
   assert.equal(result.webm.audioCodec, 'opus');
   assert.equal(result.webm.audioRate, 48000);
   assert.equal(result.webm.audioChannels, 1);
@@ -270,5 +286,6 @@ try {
   await browser.close();
   await rm(audioFixturePath, { force: true });
   await rm(webmFixturePath, { force: true });
+  await rm(webmVp8FixturePath, { force: true });
   await rm(webmAudioFixturePath, { force: true });
 }
