@@ -1499,6 +1499,103 @@ impl WgpuBackend {
         Ok(())
     }
 
+    /// Stream GPU-compatible frames directly to texture-view consumers.
+    ///
+    /// Frames are delivered in order and never copied to the CPU. The view is
+    /// valid only for the duration of `consume`; a consumer that needs to
+    /// retain GPU work must enqueue it before returning from the callback.
+    pub fn render_stream_gpu<S, C, F>(
+        &self,
+        total: u32,
+        scene_fn: &S,
+        config_fn: &C,
+        mut consume: F,
+    ) -> Result<(), RasterError>
+    where
+        S: Fn(u32) -> Result<Scene, RasterError> + Sync,
+        C: Fn(u32) -> FrameConfig + Sync,
+        F: FnMut(u32, &wgpu::TextureView, u32, u32),
+    {
+        if total == 0 {
+            return Ok(());
+        }
+        let first = config_fn(0);
+        if first.width > self.ctx.max_texture_dimension_2d
+            || first.height > self.ctx.max_texture_dimension_2d
+        {
+            return Err(RasterError::Scene(
+                "GPU-native stream dimensions exceed the device limit".into(),
+            ));
+        }
+        let resource = {
+            let mut pool = self
+                .frame_resources
+                .lock()
+                .map_err(|_| RasterError::Init("GPU resource pool mutex poisoned".into()))?;
+            pool.entry((first.width, first.height))
+                .or_insert_with(|| {
+                    Arc::new(Mutex::new(GpuFrameResources::new(
+                        &self.ctx.device,
+                        first.width,
+                        first.height,
+                    )))
+                })
+                .clone()
+        };
+        let mut resources = resource
+            .lock()
+            .map_err(|_| RasterError::Init("GPU frame resource mutex poisoned".into()))?;
+
+        for frame in 0..total {
+            let scene = scene_fn(frame)?;
+            let config = config_fn(frame);
+            if (config.width, config.height) != (first.width, first.height) {
+                return Err(RasterError::Scene(
+                    "GPU-native stream cannot change dimensions mid-stream".into(),
+                ));
+            }
+            let Some((commands, path_mask)) = compile_scene_with_path_mask(&scene, &self.fallback)
+            else {
+                return Err(RasterError::Scene(format!(
+                    "frame {frame} requires the CPU fallback"
+                )));
+            };
+            if scene
+                .nodes
+                .iter()
+                .any(|node| matches!(node, SceneNode::Shader { .. }))
+            {
+                return Err(RasterError::Scene(format!(
+                    "frame {frame} contains unsupported shader nodes"
+                )));
+            }
+            let slot_idx = resources.active_index % RING_BUFFER_SIZE;
+            resources.active_index = resources.active_index.wrapping_add(1);
+            let (submission_index, rx) = self.submit_frame_to_slot(
+                &commands,
+                path_mask.as_ref(),
+                first.width,
+                first.height,
+                config.fps,
+                &resources.slots[slot_idx],
+                None,
+                false,
+            )?;
+            debug_assert!(rx.is_none());
+            self.ctx
+                .device
+                .poll(wgpu::Maintain::wait_for(submission_index));
+            consume(
+                frame,
+                &resources.slots[slot_idx].texture_view,
+                first.width,
+                first.height,
+            );
+            self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
+        }
+        Ok(())
+    }
+
     fn submit_frame_to_slot(
         &self,
         commands: &[DrawCommand],
@@ -5841,6 +5938,37 @@ mod tests {
         )
         .unwrap();
         assert_eq!(callback_dimensions, Some((16, 16)));
+        assert_eq!(gpu.video_timing_stats().gpu_submit_readback_ns, 0);
+    }
+
+    #[test]
+    fn gpu_native_stream_delivers_ordered_frames_without_readback() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping GPU-native stream test");
+            return;
+        };
+        let mut delivered = Vec::new();
+        gpu.render_stream_gpu(
+            3,
+            &|frame| {
+                Ok(Scene {
+                    nodes: vec![SceneNode::Rect {
+                        x: frame as f32,
+                        y: 0.0,
+                        w: 8.0,
+                        h: 8.0,
+                        fill: Color::WHITE,
+                        stroke: None,
+                        stroke_width: 0.0,
+                        corner_radius: 0.0,
+                    }],
+                })
+            },
+            &|frame| FrameConfig::new(16, 16, frame, 30.0),
+            |frame, _view, width, height| delivered.push((frame, width, height)),
+        )
+        .unwrap();
+        assert_eq!(delivered, vec![(0, 16, 16), (1, 16, 16), (2, 16, 16)]);
         assert_eq!(gpu.video_timing_stats().gpu_submit_readback_ns, 0);
     }
 }
