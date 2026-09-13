@@ -198,3 +198,38 @@ jobs:
           deb=$(find target/debug/bundle/deb -name '*.deb' -type f -print -quit)
           test -n "$deb"
           dpkg-deb -c "$deb" | grep -q 'three-render-worker.mjs'
+
+  browser_three_smoke:
+    name: Chromium Three.js worker smoke
+    runs-on: ubuntu-latest
+    needs: [fmt_clippy]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Chromium
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium
+
+      - name: Install JavaScript dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: apps/studio-tauri
+
+      - name: Start Vite preview server
+        run: |
+          npm run dev -- --port 1421 > /tmp/dioxuscut-vite.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            curl --fail --silent http://127.0.0.1:1421/ > /dev/null && exit 0
+            sleep 1
+          done
+          cat /tmp/dioxuscut-vite.log
+          exit 1
+        working-directory: apps/studio-tauri
+
+      - name: Exercise Three.js lifecycle through worker
+        env:
+          DIOXUSCUT_BROWSER_URL: http://127.0.0.1:1421
+          CHROME_PATH: /usr/bin/chromium
+        run: node benchmarks/browser/three-lifecycle-smoke.mjs
