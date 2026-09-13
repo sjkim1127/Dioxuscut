@@ -397,6 +397,14 @@ export async function parseMedia({
         trackId: (container?.tracks?.indexOf(videoTrack) ?? 0) + 1,
       }));
     await onKeyframes?.(keyframes);
+  } else if (webmMetadata?.cues?.length) {
+    await onKeyframes?.(webmMetadata.cues.map((cue) => ({
+      positionInBytes: cue.clusterPosition,
+      sizeInBytes: 0,
+      presentationTimeInSeconds: cue.timeInSeconds ?? 0,
+      decodingTimeInSeconds: cue.timeInSeconds ?? 0,
+      trackId: cue.trackNumber ?? 1,
+    })));
   }
   const tracks = container?.tracks ?? (webmTrack ? [webmTrack] : []);
   await onTracks?.(tracks);
@@ -408,6 +416,7 @@ export async function parseMedia({
     audioTracks: audioDuration !== null ? [{ durationInSeconds: audioDuration }] : [],
     container: container?.container ?? (webm ? 'webm' : null),
     tracks,
+    keyframes: webmMetadata?.cues ?? undefined,
     isRemote: /^https?:\/\//i.test(src),
   };
   return selectFields(result);
@@ -468,6 +477,8 @@ async function parseWebmHeader(source) {
   };
   const find = (id, start = 0, end = bytes.length) => elements.find((element) =>
     element.id === id && element.start >= start && element.end <= end);
+  const findAll = (id, start = 0, end = bytes.length) => elements.filter((element) =>
+    element.id === id && element.start >= start && element.end <= end);
   const segment = find(0x18538067);
   if (!segment) return null;
   const info = find(0x1549a966, segment.start, segment.end);
@@ -479,6 +490,19 @@ async function parseWebmHeader(source) {
   const trackNumber = entry ? find(0xd7, entry.start, entry.end) : null;
   const codec = entry ? find(0x86, entry.start, entry.end) : null;
   const video = entry ? find(0xe0, entry.start, entry.end) : null;
+  const cues = findAll(0xbb, segment.start, segment.end).map((cuePoint) => {
+    const cueTime = find(0xb3, cuePoint.start, cuePoint.end);
+    const positions = findAll(0xb7, cuePoint.start, cuePoint.end);
+    return positions.map((position) => {
+      const track = find(0xf7, position.start, position.end);
+      const cluster = find(0xf1, position.start, position.end);
+      return {
+        timeInSeconds: cueTime && scale ? integer(cueTime) * integer(scale) / 1e9 : null,
+        trackNumber: track ? integer(track) : null,
+        clusterPosition: cluster ? segment.start + integer(cluster) : null,
+      };
+    });
+  }).flat().filter((cue) => cue.clusterPosition !== null);
   const width = video ? find(0xb0, video.start, video.end) : null;
   const height = video ? find(0xba, video.start, video.end) : null;
   const codecId = codec ? new TextDecoder().decode(bytes.subarray(codec.start, codec.end)) : null;
@@ -490,6 +514,7 @@ async function parseWebmHeader(source) {
     videoWidth: width ? integer(width) : null,
     videoHeight: height ? integer(height) : null,
     videoType: trackType ? integer(trackType) : null,
+    cues,
   };
 }
 
