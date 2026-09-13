@@ -68,6 +68,12 @@ try {
     });
     const decoded = frames.map((frame) => ({ width: frame.displayWidth, height: frame.displayHeight, timestamp: frame.timestamp }));
     for (const frame of frames) frame.close();
+    const streamedVideo = [];
+    const streamedVideoResult = await window.dioxuscut.decodeIsoBmffVideo('/assets/showcase.mp4', {
+      trackIndex: 0, startSample: 0, endSample: 3, maxSamples: 3,
+      codec: codecConfig.codec, description: codecConfig.description, options: { parsed },
+      onFrame: (frame) => { streamedVideo.push(frame.timestamp); frame.close(); },
+    });
     const audioParsed = await window.dioxuscut.parseIsoBmffMovieHeader('/assets/audio-fixture.m4a');
     const audioConfig = window.dioxuscut.makeIsoBmffWebCodecsConfig(audioParsed.tracks[0]);
     const audioData = await window.dioxuscut.decodeIsoBmffAudio('/assets/audio-fixture.m4a', {
@@ -77,6 +83,13 @@ try {
     });
     const decodedAudio = audioData.map((audio) => ({ frames: audio.numberOfFrames, timestamp: audio.timestamp }));
     for (const audio of audioData) audio.close();
+    const streamedAudio = [];
+    const streamedAudioResult = await window.dioxuscut.decodeIsoBmffAudio('/assets/audio-fixture.m4a', {
+      trackIndex: 0, startSample: 0, endSample: 3, maxSamples: 3,
+      codec: audioConfig.codec, description: audioConfig.description,
+      numberOfChannels: 1, sampleRate: 48000, options: { parsed: audioParsed },
+      onAudioData: (audio) => { streamedAudio.push(audio.timestamp); audio.close(); },
+    });
     return {
       type: chunk.type, timestamp: chunk.timestamp, duration: chunk.duration, supported: support.supported,
       annexB: [...annexB],
@@ -96,6 +109,8 @@ try {
       ranged: [...ranged],
       decoded,
       decodedAudio,
+      streamedVideo: { count: streamedVideo.length, returnValue: streamedVideoResult },
+      streamedAudio: { count: streamedAudio.length, returnValue: streamedAudioResult },
     };
   });
   assert.equal(result.type, 'key');
@@ -126,6 +141,10 @@ try {
   assert.ok(result.decoded.every(({ timestamp }, index, frames) => index === 0 || timestamp > frames[index - 1].timestamp));
   assert.ok(result.decodedAudio.length > 0);
   assert.ok(result.decodedAudio.every(({ frames }) => frames > 0));
+  assert.equal(result.streamedVideo.count, 3);
+  assert.equal(result.streamedVideo.returnValue, null);
+  assert.ok(result.streamedAudio.count > 0);
+  assert.equal(result.streamedAudio.returnValue, null);
   console.log(JSON.stringify({ status: 'ok', ...result }));
 } finally {
   await browser.close();
