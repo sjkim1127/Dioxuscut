@@ -1669,6 +1669,9 @@ impl WgpuBackend {
                     fit,
                     ..
                 } => (self.gpu_video(src, *time, sampling_fps, *looped)?, *fit),
+                DrawCommand::Lottie { key, image, .. } => {
+                    (self.gpu_pixels(key, image)?, ImageFit::Contain)
+                }
                 DrawCommand::Text { entry, .. } => {
                     all_instances[index].params[0] = entry.x as f32 / atlas_snapshot.width as f32;
                     all_instances[index].params[1] = entry.y as f32 / atlas_snapshot.height as f32;
@@ -1906,6 +1909,7 @@ impl WgpuBackend {
                     DrawCommand::Analytic { .. }
                     | DrawCommand::Image { .. }
                     | DrawCommand::Video { .. }
+                    | DrawCommand::Lottie { .. }
                     | DrawCommand::Text { .. } => None,
                 })
                 .collect();
@@ -1994,6 +1998,7 @@ impl WgpuBackend {
                     }
                     DrawCommand::Image { .. }
                     | DrawCommand::Video { .. }
+                    | DrawCommand::Lottie { .. }
                     | DrawCommand::Text { .. } => {
                         if matches!(commands[i], DrawCommand::Text { .. }) {
                             pass.set_pipeline(&self.ctx.text_pipeline);
@@ -2822,6 +2827,11 @@ enum DrawCommand {
         looped: bool,
         fit: ImageFit,
     },
+    Lottie {
+        instance: GpuInstance,
+        key: String,
+        image: Arc<image::RgbaImage>,
+    },
     Text {
         instance: GpuInstance,
         entry: crate::text_atlas::AtlasEntry,
@@ -2841,6 +2851,7 @@ impl DrawCommand {
             | Self::Mesh { instance, .. }
             | Self::Image { instance, .. }
             | Self::Video { instance, .. }
+            | Self::Lottie { instance, .. }
             | Self::Text { instance, .. } => instance,
         }
     }
@@ -2851,6 +2862,7 @@ impl DrawCommand {
             | Self::Mesh { instance, .. }
             | Self::Image { instance, .. }
             | Self::Video { instance, .. }
+            | Self::Lottie { instance, .. }
             | Self::Text { instance, .. } => instance,
         }
     }
@@ -3066,6 +3078,55 @@ fn compile_nodes(
                     time: *time,
                     looped: *looped,
                     fit: *fit,
+                });
+            }
+
+            SceneNode::Lottie {
+                src,
+                time,
+                x,
+                y,
+                w,
+                h,
+                playback_rate,
+                loop_behavior,
+                opacity: node_opacity,
+            } => {
+                if ![*x, *y, *w, *h, *playback_rate, *node_opacity]
+                    .iter()
+                    .all(|value| value.is_finite())
+                    || !time.is_finite()
+                    || *w <= 0.0
+                    || *h <= 0.0
+                    || *playback_rate <= 0.0
+                    || *node_opacity < 0.0
+                    || *node_opacity > 1.0
+                {
+                    return None;
+                }
+                let target_w = w.round().max(1.0) as u32;
+                let target_h = h.round().max(1.0) as u32;
+                let image = font
+                    .lottie_frame(
+                        src,
+                        *time * f64::from(*playback_rate),
+                        target_w,
+                        target_h,
+                        *loop_behavior,
+                    )
+                    .ok()?;
+                let mut instance =
+                    GpuInstance::solid(Color::WHITE, opacity * *node_opacity, transform);
+                instance.kind_data[0] = 5;
+                instance.bounds = [*x, *y, *w, *h];
+                instance.shape_bounds = instance.bounds;
+                instance.params = [0.0, 0.0, 1.0, 1.0];
+                let key =
+                    format!("lottie:{src}:{time:.9}:{playback_rate:.6}:{target_w}x{target_h}");
+                output.push(DrawCommand::Lottie {
+                    instance,
+                    key,
+                    image,
                 });
             }
 
@@ -3293,7 +3354,6 @@ fn compile_nodes(
             SceneNode::Gif { .. }
             | SceneNode::Layer { .. }
             | SceneNode::Emoji { .. }
-            | SceneNode::Lottie { .. }
             | SceneNode::AudioVisualizer { .. }
             | SceneNode::Shader { .. } => return None,
         }
@@ -4660,6 +4720,43 @@ mod tests {
         )
         .unwrap();
         assert_eq!(gpu.text_atlas_upload_bytes(), upload_bytes);
+    }
+
+    #[test]
+    fn gpu_lottie_frame_is_uploaded_and_composited_as_a_texture() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping Lottie GPU test");
+            return;
+        };
+        let dir =
+            std::env::temp_dir().join(format!("dioxuscut-wgpu-lottie-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let source = dir.join("pulse.json");
+        std::fs::write(
+            &source,
+            r#"{"v":"5.5.7","fr":30,"ip":0,"op":30,"w":32,"h":32,"ddd":0,"assets":[],"layers":[{"ddd":0,"ind":1,"ty":4,"nm":"shape","sr":1,"ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":{"a":0,"k":[16,16,0]},"a":{"a":0,"k":[0,0,0]},"s":{"a":0,"k":[100,100,100]}},"ao":0,"shapes":[{"ty":"el","p":{"a":0,"k":[0,0]},"s":{"a":0,"k":[20,20]}},{"ty":"fl","c":{"a":0,"k":[1,0,0,1]},"o":{"a":0,"k":100},"r":1}],"ip":0,"op":30,"st":0,"bm":0}]}"#,
+        )
+        .unwrap();
+        let scene = Scene {
+            nodes: vec![SceneNode::Lottie {
+                src: source.display().to_string(),
+                time: 0.0,
+                x: 0.0,
+                y: 0.0,
+                w: 32.0,
+                h: 32.0,
+                playback_rate: 1.0,
+                loop_behavior: crate::gif_cache::LoopBehavior::Loop,
+                opacity: 1.0,
+            }],
+        };
+        assert!(gpu_supports_scene(&scene));
+        let image = gpu
+            .render_frame(&scene, &FrameConfig::new(32, 32, 0, 30.0))
+            .unwrap();
+        assert!(image.pixels().any(|pixel| pixel[3] > 0));
+        assert_eq!(gpu.gpu_texture_uploads(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -13,6 +13,7 @@ use crate::scene::{
 use crate::video_cache::VideoFrameCache;
 use image::{imageops, RgbaImage};
 use rayon::prelude::*;
+use std::sync::Arc;
 use tiny_skia::{
     BlendMode as SkBlendMode, FillRule, IntSize, Mask, MaskType, Paint, Path, PathBuilder, Pixmap,
     PixmapPaint, Rect, Stroke, Transform,
@@ -116,6 +117,25 @@ impl TinySkiaBackend {
     #[cfg(feature = "gpu")]
     pub(crate) fn text_atlas_snapshot(&self) -> crate::text_atlas::TextAtlasSnapshot {
         self.font.text_atlas_snapshot()
+    }
+
+    #[cfg(feature = "gpu")]
+    pub(crate) fn lottie_frame(
+        &self,
+        src: &str,
+        time_secs: f64,
+        target_w: u32,
+        target_h: u32,
+        loop_behavior: crate::gif_cache::LoopBehavior,
+    ) -> Result<Arc<image::RgbaImage>, RasterError> {
+        self.lotties.render_with_policy(
+            src,
+            time_secs,
+            target_w,
+            target_h,
+            loop_behavior,
+            &crate::security::MediaSecurityPolicy::default(),
+        )
     }
 }
 
