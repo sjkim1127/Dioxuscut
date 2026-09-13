@@ -2594,14 +2594,14 @@ fn compile_nodes(
                 && (*mask_mode == crate::scene::MaskMode::Alpha
                     || *mask_mode == crate::scene::MaskMode::Luminance)
                 && (mask.is_none()
-                    || gpu_rect_masks(mask.as_deref().unwrap_or(&[]), transform, *mask_mode)
+                    || gpu_mask_shapes(mask.as_deref().unwrap_or(&[]), transform, *mask_mode)
                         .is_some()) =>
             {
                 let (layer_opacity, brightness, grayscale, contrast, saturation) =
                     gpu_layer_effects(filters, *layer_opacity).unwrap();
                 let mask_info = mask
                     .as_deref()
-                    .and_then(|nodes| gpu_rect_masks(nodes, transform, *mask_mode));
+                    .and_then(|nodes| gpu_mask_shapes(nodes, transform, *mask_mode));
                 let start = output.len();
                 compile_nodes(children, transform, opacity * layer_opacity, output, font)?;
                 for command in &mut output[start..] {
@@ -2701,7 +2701,7 @@ fn gpu_layer_effects(
     )
 }
 
-fn gpu_rect_masks(
+fn gpu_mask_shapes(
     mask: &[SceneNode],
     transform: Transform,
     mask_mode: crate::scene::MaskMode,
