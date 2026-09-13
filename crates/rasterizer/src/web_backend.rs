@@ -784,4 +784,47 @@ mod tests {
         drop(backend);
         let _ = fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn webcodecs_worker_serves_sequential_frames_on_one_worker() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("dioxuscut-browser-video-sequence-{nonce}"));
+        fs::create_dir_all(&root).unwrap();
+        let script = root.join("worker.sh");
+        fs::write(
+            &script,
+            "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"ready\",\"protocol\":1}'\ncount=0\nwhile read request; do\n  if [ \"$count\" -eq 0 ]; then\n    printf '%s\\n' '{\"type\":\"frame\",\"frame\":3,\"width\":1,\"height\":1,\"video_frame\":{\"width\":1,\"height\":1,\"timestamp_us\":1000,\"rgba_base64\":\"AQIDBA==\"}}'\n  else\n    printf '%s\\n' '{\"type\":\"frame\",\"frame\":4,\"width\":1,\"height\":1,\"video_frame\":{\"width\":1,\"height\":1,\"timestamp_us\":2000,\"rgba_base64\":\"BQYHCA==\"}}'\n  fi\n  count=$((count + 1))\ndone\n",
+        )
+        .unwrap();
+        let backend = BrowserFrameBackend::new("/bin/sh", &script, "http://unused")
+            .unwrap()
+            .with_frame_timeout(Duration::from_millis(500));
+        let request = |frame| WebFrameRequest {
+            composition: None,
+            frame,
+            fps: 30.0,
+            width: 1,
+            height: 1,
+            props: serde_json::json!({}),
+            assets: vec![],
+            timeline: vec![],
+            image_format: None,
+            jpeg_quality: None,
+            transparent: false,
+            transport: None,
+        };
+        assert_eq!(
+            backend.render_web_frame(&request(3)).unwrap().as_raw(),
+            &[1, 2, 3, 4]
+        );
+        assert_eq!(
+            backend.render_web_frame(&request(4)).unwrap().as_raw(),
+            &[5, 6, 7, 8]
+        );
+        drop(backend);
+        let _ = fs::remove_dir_all(root);
+    }
 }
