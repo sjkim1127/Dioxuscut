@@ -429,8 +429,7 @@ async function parseWebmHeader(source) {
     || signature[2] !== 0xdf || signature[3] !== 0xa3) return null;
   const response = await fetch(source);
   if (!response.ok) throw new Error(`failed to read WebM header: ${response.status}`);
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.length > 16 * 1024 * 1024) throw new Error('WebM header exceeds 16MiB safety limit');
+  const bytes = await readBoundedResponse(response, 16 * 1024 * 1024);
   const elements = [];
   const readVint = (offset, forSize = false) => {
     if (offset >= bytes.length) return null;
@@ -534,6 +533,35 @@ function webmCodec(codecId) {
   return null;
 }
 
+async function readBoundedResponse(response, maxBytes) {
+  const declaredLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw new RangeError(`media response exceeds ${maxBytes} byte safety limit`);
+  }
+  if (!response.body) {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.length > maxBytes) throw new RangeError(`media response exceeds ${maxBytes} byte safety limit`);
+    return bytes;
+  }
+  const reader = response.body.getReader();
+  const chunks = []; let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) throw new RangeError(`media response exceeds ${maxBytes} byte safety limit`);
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return bytes;
+}
+
 // Read VP8/VP9/AV1 SimpleBlock payloads from a WebM cluster. Ordinary blocks
 // and fixed/Xiph/EBML-laced blocks are supported. Laced frames share the
 // block timestamp because Matroska does not store per-frame timestamps there.
@@ -548,7 +576,7 @@ async function readWebmSamplesFromCue(source, trackNumber = 1, options = {}) {
   const requestedEnd = (next ?? start + 16 * 1024 * 1024);
   const response = await fetch(source, { headers: { Range: `bytes=${start}-${requestedEnd - 1}` } });
   if (!response.ok) throw new Error(`failed to read WebM cluster: ${response.status}`);
-  const responseBytes = new Uint8Array(await response.arrayBuffer());
+  const responseBytes = await readBoundedResponse(response, 16 * 1024 * 1024);
   const bytes = response.status === 200
     ? responseBytes.slice(start, Math.min(requestedEnd, responseBytes.length))
     : responseBytes;
