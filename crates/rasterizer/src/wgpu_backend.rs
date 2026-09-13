@@ -3610,32 +3610,66 @@ fn gpu_path_mask_from_node(
 ) -> Option<GpuPathMask> {
     let SceneNode::Path {
         d,
-        fill: Some(fill),
-        stroke: None,
+        fill,
+        stroke,
         stroke_width,
         opacity,
     } = node
     else {
         return None;
     };
-    if !stroke_width.is_finite() || *stroke_width != 0.0 || !opacity.is_finite() {
+    if !stroke_width.is_finite() || !opacity.is_finite() || *opacity < 0.0 {
         return None;
     }
-    let color = match mask_mode {
-        crate::scene::MaskMode::Alpha => Color::rgba(255, 255, 255, fill.a),
+    let path = svgpath_to_tiny_skia(d)?;
+    let (mask_path, color_source) = match (fill, stroke) {
+        (Some(_), Some(_)) => return None,
+        (Some(fill), None) if *stroke_width == 0.0 => (&path, fill),
+        (None, Some(stroke)) if *stroke_width > 0.0 => {
+            let scale = transform
+                .get_scale()
+                .0
+                .max(transform.get_scale().1)
+                .max(1.0);
+            let stroked = path.stroke(
+                &Stroke {
+                    width: *stroke_width,
+                    ..Default::default()
+                },
+                scale,
+            )?;
+            return gpu_path_mask_from_tiny_path(
+                &stroked,
+                transform,
+                mask_color(*stroke, mask_mode),
+            )
+            .map(|mut mask| {
+                mask.instance.params[3] = *opacity;
+                mask
+            });
+        }
+        _ => return None,
+    };
+    gpu_path_mask_from_tiny_path(mask_path, transform, mask_color(*color_source, mask_mode)).map(
+        |mut mask| {
+            mask.instance.params[3] = *opacity;
+            mask
+        },
+    )
+}
+
+fn mask_color(color: Color, mask_mode: crate::scene::MaskMode) -> Color {
+    match mask_mode {
+        crate::scene::MaskMode::Alpha => Color::rgba(255, 255, 255, color.a),
         crate::scene::MaskMode::Luminance => {
-            let luminance = (0.2126 * f32::from(fill.r)
-                + 0.7152 * f32::from(fill.g)
-                + 0.0722 * f32::from(fill.b))
+            let luminance = (0.2126 * f32::from(color.r)
+                + 0.7152 * f32::from(color.g)
+                + 0.0722 * f32::from(color.b))
             .round()
             .clamp(0.0, 255.0) as u8;
-            Color::rgba(luminance, luminance, luminance, fill.a)
+            Color::rgba(luminance, luminance, luminance, color.a)
         }
-    };
-    gpu_path_mask_from_svg(d, transform, color).map(|mut mask| {
-        mask.instance.params[3] = *opacity;
-        mask
-    })
+    }
 }
 
 fn gpu_path_mask_from_tiny_path(
@@ -4950,6 +4984,50 @@ mod tests {
             .render_frame(&scene, &config)
             .unwrap();
         for (x, y) in [(16, 10), (16, 20), (2, 2)] {
+            assert_eq!(gpu_image.get_pixel(x, y), cpu_image.get_pixel(x, y));
+        }
+    }
+
+    #[test]
+    fn gpu_path_stroke_mask_uses_intermediate_mask_texture() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping path stroke mask GPU test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Layer {
+                opacity: 1.0,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: None,
+                mask: Some(vec![SceneNode::Path {
+                    d: "M 4 16 L 28 16".into(),
+                    fill: None,
+                    stroke: Some(Color::WHITE),
+                    stroke_width: 4.0,
+                    opacity: 1.0,
+                }]),
+                mask_mode: crate::scene::MaskMode::Alpha,
+                filters: Vec::new(),
+                shadow: None,
+                children: vec![SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 32.0,
+                    h: 32.0,
+                    fill: Color::rgb(255, 0, 0),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                }],
+            }],
+        };
+        assert!(gpu_supports_scene(&scene));
+        let config = FrameConfig::new(32, 32, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        for (x, y) in [(16, 16), (16, 10), (2, 2)] {
             assert_eq!(gpu_image.get_pixel(x, y), cpu_image.get_pixel(x, y));
         }
     }
