@@ -2769,6 +2769,20 @@ fn gpu_layer_effects(
     )
 }
 
+fn valid_gpu_gradient_stops(stops: &[crate::scene::GradientStop]) -> bool {
+    if !(2..=4).contains(&stops.len())
+        || (stops.first().map(|stop| stop.position) != Some(0.0))
+        || (stops.last().map(|stop| stop.position) != Some(1.0))
+    {
+        return false;
+    }
+    stops.windows(2).all(|pair| {
+        pair[0].position.is_finite()
+            && pair[1].position.is_finite()
+            && pair[0].position <= pair[1].position
+    })
+}
+
 fn gpu_mask_shapes(
     mask: &[SceneNode],
     transform: Transform,
@@ -2860,10 +2874,17 @@ fn gpu_mask_shapes(
                 } if [*x, *y, *w, *h, *angle_deg].iter().all(|v| v.is_finite())
                     && *w > 0.0
                     && *h > 0.0
-                    && stops.len() == 2
-                    && (stops[0].position - 0.0).abs() <= f32::EPSILON
-                    && (stops[1].position - 1.0).abs() <= f32::EPSILON =>
+                    && (2..=4).contains(&stops.len()) =>
                 {
+                    if !valid_gpu_gradient_stops(stops) {
+                        return None;
+                    }
+                    let mut colors = [[0.0; 4]; 4];
+                    let mut positions = [0.0; 4];
+                    for (index, stop) in stops.iter().enumerate() {
+                        colors[index] = color_to_f32(stop.color);
+                        positions[index] = stop.position;
+                    }
                     let half_diag = (*w * *w + *h * *h).sqrt() / 2.0;
                     let cx = *x + *w / 2.0;
                     let cy = *y + *h / 2.0;
@@ -2878,21 +2899,28 @@ fn gpu_mask_shapes(
                         Color::WHITE,
                         2,
                         [cx - dx, cy - dy, cx + dx, cy + dy],
-                        color_to_f32(stops[0].color),
-                        color_to_f32(stops[1].color),
-                        [0.0; 4],
-                        [0.0; 4],
-                        [0.0, 1.0, 0.0, 0.0],
-                        2,
+                        colors[0],
+                        colors[1],
+                        colors[2],
+                        colors[3],
+                        positions,
+                        stops.len() as u32,
                     )
                 }
                 SceneNode::RadialGradient { cx, cy, r, stops }
                     if [*cx, *cy, *r].iter().all(|v| v.is_finite())
                         && *r > 0.0
-                        && stops.len() == 2
-                        && (stops[0].position - 0.0).abs() <= f32::EPSILON
-                        && (stops[1].position - 1.0).abs() <= f32::EPSILON =>
+                        && (2..=4).contains(&stops.len()) =>
                 {
+                    if !valid_gpu_gradient_stops(stops) {
+                        return None;
+                    }
+                    let mut colors = [[0.0; 4]; 4];
+                    let mut positions = [0.0; 4];
+                    for (index, stop) in stops.iter().enumerate() {
+                        colors[index] = color_to_f32(stop.color);
+                        positions[index] = stop.position;
+                    }
                     (
                         *cx - *r,
                         *cy - *r,
@@ -2901,12 +2929,12 @@ fn gpu_mask_shapes(
                         Color::WHITE,
                         4,
                         [*cx, *cy, *r, 0.0],
-                        color_to_f32(stops[0].color),
-                        color_to_f32(stops[1].color),
-                        [0.0; 4],
-                        [0.0; 4],
-                        [0.0, 1.0, 0.0, 0.0],
-                        2,
+                        colors[0],
+                        colors[1],
+                        colors[2],
+                        colors[3],
+                        positions,
+                        stops.len() as u32,
                     )
                 }
                 _ => return None,
@@ -4187,7 +4215,7 @@ mod tests {
     }
 
     #[test]
-    fn gpu_two_stop_linear_alpha_mask_matches_cpu() {
+    fn gpu_three_stop_linear_alpha_mask_matches_cpu() {
         let Ok(gpu) = WgpuBackend::new() else {
             println!("GPU backend unavailable; skipping gradient mask GPU test");
             return;
@@ -4209,8 +4237,12 @@ mod tests {
                             color: Color::rgba(255, 255, 255, 0),
                         },
                         crate::scene::GradientStop {
-                            position: 1.0,
+                            position: 0.5,
                             color: Color::WHITE,
+                        },
+                        crate::scene::GradientStop {
+                            position: 1.0,
+                            color: Color::rgba(255, 255, 255, 0),
                         },
                     ],
                 }]),
