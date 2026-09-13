@@ -756,7 +756,10 @@ mod tests {
 
     #[test]
     fn webcodecs_video_frame_transport_decodes_tightly_packed_rgba() {
-        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let root = std::env::temp_dir().join(format!("dioxuscut-browser-video-frame-{nonce}"));
         fs::create_dir_all(&root).unwrap();
         let script = root.join("worker.sh");

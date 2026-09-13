@@ -355,14 +355,23 @@ fn bench_gpu_video_frames(c: &mut Criterion) {
         eprintln!("GPU backend unavailable, skipping GPU video benchmark");
         return;
     };
-    let dir = std::env::temp_dir().join(format!("dioxuscut-gpu-video-bench-{}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("dioxuscut-gpu-video-bench-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let source = dir.join("gradient.mkv");
     let generated = std::process::Command::new("ffmpeg")
         .args([
-            "-y", "-loglevel", "error", "-f", "lavfi", "-i",
-            "testsrc2=size=64x64:rate=30:duration=2", "-an", "-c:v", "ffv1",
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=64x64:rate=30:duration=2",
+            "-an",
+            "-c:v",
+            "ffv1",
         ])
         .arg(&source)
         .status()
@@ -533,7 +542,10 @@ fn bench_gpu_text_atlas(c: &mut Criterion) {
     group.bench_function("80_text_nodes_atlas_reuse", |b| {
         b.iter(|| backend.render_frame(&scene, &config).unwrap())
     });
-    eprintln!("text atlas upload bytes after bench: {}", backend.text_atlas_upload_bytes());
+    eprintln!(
+        "text atlas upload bytes after bench: {}",
+        backend.text_atlas_upload_bytes()
+    );
     group.finish();
 }
 
@@ -542,7 +554,12 @@ fn bench_gpu_text_atlas(c: &mut Criterion) {
 // ─────────────────────────────────────────────────────────────────
 
 #[cfg(not(feature = "gpu"))]
-criterion_group!(benches, bench_cpu_scenes, bench_cpu_resolutions, bench_cpu_text_atlas);
+criterion_group!(
+    benches,
+    bench_cpu_scenes,
+    bench_cpu_resolutions,
+    bench_cpu_text_atlas
+);
 
 #[cfg(feature = "gpu")]
 criterion_group!(
@@ -555,8 +572,8 @@ criterion_group!(
     bench_gpu_video_frames,
     bench_gpu_resolutions,
     bench_gpu_streaming,
-    bench_gpu_concurrent_resolutions
-    , bench_gpu_text_atlas
+    bench_gpu_concurrent_resolutions,
+    bench_gpu_text_atlas
 );
 
 criterion_main!(benches);

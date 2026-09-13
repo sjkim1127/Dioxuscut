@@ -407,10 +407,7 @@ impl FontCache {
             .lock()
             .expect("font raster cache lock poisoned")
             .clear();
-        self.atlas
-            .lock()
-            .expect("text atlas lock poisoned")
-            .clear();
+        self.atlas.lock().expect("text atlas lock poisoned").clear();
         Ok(())
     }
 
@@ -481,17 +478,13 @@ impl FontCache {
         let rendered = self.rasterize_uncached(text, font_size, sources)?;
         if let Some(rendered) = rendered.as_ref() {
             let atlas_key = format!("{}:{}:{:?}", key.text, key.font_size_bits, key.sources);
-            let _ = self
-                .atlas
-                .lock()
-                .expect("text atlas lock poisoned")
-                .insert(
-                    atlas_key,
-                    &rendered.pixels,
-                    rendered.width,
-                    rendered.height,
-                    rendered.baseline,
-                );
+            let _ = self.atlas.lock().expect("text atlas lock poisoned").insert(
+                atlas_key,
+                &rendered.pixels,
+                rendered.width,
+                rendered.height,
+                rendered.baseline,
+            );
             self.rasterized
                 .lock()
                 .expect("font raster cache lock poisoned")

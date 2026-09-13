@@ -102,7 +102,10 @@ impl TinySkiaBackend {
         font_size: f32,
         font_sources: &[String],
     ) -> Option<crate::font::RenderedText> {
-        self.font.rasterize(content, font_size, font_sources).ok().flatten()
+        self.font
+            .rasterize(content, font_size, font_sources)
+            .ok()
+            .flatten()
     }
 
     #[cfg(feature = "gpu")]
@@ -776,10 +779,18 @@ fn render_node(
                         let src_a = 255.0 * src_alpha;
 
                         let dst = pixels_rgba[idx];
-                        let out_r = (src_r + dst.red() as f32 * inv_src_alpha).round().min(255.0) as u8;
-                        let out_g = (src_g + dst.green() as f32 * inv_src_alpha).round().min(255.0) as u8;
-                        let out_b = (src_b + dst.blue() as f32 * inv_src_alpha).round().min(255.0) as u8;
-                        let out_a = (src_a + dst.alpha() as f32 * inv_src_alpha).round().min(255.0) as u8;
+                        let out_r = (src_r + dst.red() as f32 * inv_src_alpha)
+                            .round()
+                            .min(255.0) as u8;
+                        let out_g = (src_g + dst.green() as f32 * inv_src_alpha)
+                            .round()
+                            .min(255.0) as u8;
+                        let out_b = (src_b + dst.blue() as f32 * inv_src_alpha)
+                            .round()
+                            .min(255.0) as u8;
+                        let out_a = (src_a + dst.alpha() as f32 * inv_src_alpha)
+                            .round()
+                            .min(255.0) as u8;
 
                         pixels_rgba[idx] =
                             tiny_skia::PremultipliedColorU8::from_rgba(out_r, out_g, out_b, out_a)

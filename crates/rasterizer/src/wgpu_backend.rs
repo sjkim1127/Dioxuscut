@@ -47,18 +47,18 @@
 #![cfg(feature = "gpu")]
 
 use crate::backend::{BackendCapabilities, FrameConfig, RasterError, RasterizerBackend};
-use crate::scene::{Color, GradientStop, Scene, SceneNode};
-use crate::scene::ImageFit;
-use crate::tiny_skia_backend::{svgpath_to_tiny_skia, TinySkiaBackend};
 use crate::image_cache::ImageCache;
+use crate::scene::ImageFit;
+use crate::scene::{Color, GradientStop, Scene, SceneNode};
+use crate::tiny_skia_backend::{svgpath_to_tiny_skia, TinySkiaBackend};
 use crate::video_cache::VideoFrameCache;
 use image::RgbaImage;
-use std::sync::atomic::{AtomicU64, Ordering};
 use lyon_tessellation::geometry_builder::{BuffersBuilder, FillVertexConstructor, VertexBuffers};
 use lyon_tessellation::math::point;
 use lyon_tessellation::path::Path as LyonPath;
 use lyon_tessellation::{FillOptions, FillTessellator, FillVertex};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tiny_skia::{Path as TinyPath, PathSegment, Stroke, Transform};
 use wgpu::util::DeviceExt;
@@ -104,7 +104,12 @@ fn image_placement(
         ImageFit::None => {
             let draw_width = image_width.min(width);
             let draw_height = image_height.min(height);
-            let source_uv = [0.0, 0.0, draw_width / image_width, draw_height / image_height];
+            let source_uv = [
+                0.0,
+                0.0,
+                draw_width / image_width,
+                draw_height / image_height,
+            ];
             (draw_width, draw_height, source_uv)
         }
         ImageFit::Contain | ImageFit::ScaleDown => {
@@ -123,7 +128,11 @@ fn image_placement(
             let visible_height = height / scale / image_height;
             let left = (1.0 - visible_width) * 0.5;
             let top = (1.0 - visible_height) * 0.5;
-            (width, height, [left, top, left + visible_width, top + visible_height])
+            (
+                width,
+                height,
+                [left, top, left + visible_width, top + visible_height],
+            )
         }
     };
     Some(ImagePlacement {
@@ -582,7 +591,10 @@ impl GpuContext {
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
-            multisample: wgpu::MultisampleState { count: SAMPLE_COUNT, ..Default::default() },
+            multisample: wgpu::MultisampleState {
+                count: SAMPLE_COUNT,
+                ..Default::default()
+            },
             multiview: None,
             cache: None,
         });
@@ -836,7 +848,10 @@ impl WgpuBackend {
         key: &str,
         decoded: &image::RgbaImage,
     ) -> Result<Arc<GpuImageResource>, RasterError> {
-        let mut cache = self.gpu_images.lock().expect("GPU image cache lock poisoned");
+        let mut cache = self
+            .gpu_images
+            .lock()
+            .expect("GPU image cache lock poisoned");
         if let Some(image) = cache.images.get(key).cloned() {
             cache.lru.retain(|entry| entry != key);
             cache.lru.push_back(key.to_string());
@@ -898,7 +913,10 @@ impl WgpuBackend {
             width: decoded.width(),
             height: decoded.height(),
         });
-        let mut cache = self.gpu_images.lock().expect("GPU image cache lock poisoned");
+        let mut cache = self
+            .gpu_images
+            .lock()
+            .expect("GPU image cache lock poisoned");
         if let Some(existing) = cache.images.get(key).cloned() {
             cache.lru.retain(|entry| entry != key);
             cache.lru.push_back(key.to_string());
@@ -909,7 +927,9 @@ impl WgpuBackend {
         cache.lru.push_back(key.to_string());
         cache.bytes = cache.bytes.saturating_add(bytes);
         while cache.bytes > cache.max_bytes {
-            let Some(oldest) = cache.lru.pop_front() else { break };
+            let Some(oldest) = cache.lru.pop_front() else {
+                break;
+            };
             if let Some(evicted) = cache.images.remove(&oldest) {
                 cache.bytes = cache
                     .bytes
@@ -929,7 +949,10 @@ impl WgpuBackend {
         snapshot: &crate::text_atlas::TextAtlasSnapshot,
     ) -> Arc<GpuTextAtlasResource> {
         let queue = &self.ctx.queue;
-        let mut cache = self.text_atlas.lock().expect("text atlas GPU lock poisoned");
+        let mut cache = self
+            .text_atlas
+            .lock()
+            .expect("text atlas GPU lock poisoned");
         if let Some(resource) = cache.as_ref() {
             if resource.width == snapshot.width && resource.height == snapshot.height {
                 let generation = resource.generation.load(Ordering::Acquire);
@@ -940,13 +963,19 @@ impl WgpuBackend {
                     let mut upload = Vec::with_capacity((rect.width * rect.height) as usize);
                     for row in 0..rect.height {
                         let start = ((rect.y + row) * snapshot.width + rect.x) as usize;
-                        upload.extend_from_slice(&snapshot.pixels[start..start + rect.width as usize]);
+                        upload.extend_from_slice(
+                            &snapshot.pixels[start..start + rect.width as usize],
+                        );
                     }
                     queue.write_texture(
                         wgpu::ImageCopyTexture {
                             texture: &resource._texture,
                             mip_level: 0,
-                            origin: wgpu::Origin3d { x: rect.x, y: rect.y, z: 0 },
+                            origin: wgpu::Origin3d {
+                                x: rect.x,
+                                y: rect.y,
+                                z: 0,
+                            },
                             aspect: wgpu::TextureAspect::All,
                         },
                         &upload,
@@ -955,13 +984,19 @@ impl WgpuBackend {
                             bytes_per_row: Some(rect.width),
                             rows_per_image: Some(rect.height),
                         },
-                        wgpu::Extent3d { width: rect.width, height: rect.height, depth_or_array_layers: 1 },
+                        wgpu::Extent3d {
+                            width: rect.width,
+                            height: rect.height,
+                            depth_or_array_layers: 1,
+                        },
                     );
                     self.text_atlas_upload_bytes.fetch_add(
                         u64::from(rect.width) * u64::from(rect.height),
                         Ordering::Relaxed,
                     );
-                    resource.generation.store(snapshot.generation, Ordering::Release);
+                    resource
+                        .generation
+                        .store(snapshot.generation, Ordering::Release);
                     return resource.clone();
                 }
             }
@@ -970,7 +1005,11 @@ impl WgpuBackend {
         let queue = &self.ctx.queue;
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("text_atlas_texture"),
-            size: wgpu::Extent3d { width: snapshot.width, height: snapshot.height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: snapshot.width,
+                height: snapshot.height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -981,8 +1020,16 @@ impl WgpuBackend {
         queue.write_texture(
             texture.as_image_copy(),
             &snapshot.pixels,
-            wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(snapshot.width), rows_per_image: Some(snapshot.height) },
-            wgpu::Extent3d { width: snapshot.width, height: snapshot.height, depth_or_array_layers: 1 },
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(snapshot.width),
+                rows_per_image: Some(snapshot.height),
+            },
+            wgpu::Extent3d {
+                width: snapshot.width,
+                height: snapshot.height,
+                depth_or_array_layers: 1,
+            },
         );
         self.text_atlas_upload_bytes.fetch_add(
             u64::from(snapshot.width) * u64::from(snapshot.height),
@@ -994,8 +1041,14 @@ impl WgpuBackend {
             label: Some("text_atlas_bg"),
             layout: &self.ctx.image_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&sampler) },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
             ],
         });
         let resource = Arc::new(GpuTextAtlasResource {
@@ -1103,8 +1156,10 @@ impl WgpuBackend {
                 DrawCommand::Text { entry, .. } => {
                     all_instances[index].params[0] = entry.x as f32 / atlas_snapshot.width as f32;
                     all_instances[index].params[1] = entry.y as f32 / atlas_snapshot.height as f32;
-                    all_instances[index].params[2] = (entry.x + entry.width) as f32 / atlas_snapshot.width as f32;
-                    all_instances[index].params[3] = (entry.y + entry.height) as f32 / atlas_snapshot.height as f32;
+                    all_instances[index].params[2] =
+                        (entry.x + entry.width) as f32 / atlas_snapshot.width as f32;
+                    all_instances[index].params[3] =
+                        (entry.y + entry.height) as f32 / atlas_snapshot.height as f32;
                     image_resources.push(None);
                     continue;
                 }
@@ -1196,7 +1251,6 @@ impl WgpuBackend {
                 ],
             });
 
-
             let mesh_buffers: Vec<Option<(wgpu::Buffer, wgpu::Buffer)>> = commands
                 .iter()
                 .map(|cmd| match cmd {
@@ -1268,7 +1322,14 @@ impl WgpuBackend {
                             pass.set_bind_group(2, &atlas_resource.bind_group, &[]);
                         } else {
                             pass.set_pipeline(&self.ctx.image_pipeline);
-                            pass.set_bind_group(2, &image_resources[i].as_ref().expect("image resource").bind_group, &[]);
+                            pass.set_bind_group(
+                                2,
+                                &image_resources[i]
+                                    .as_ref()
+                                    .expect("image resource")
+                                    .bind_group,
+                                &[],
+                            );
                         }
                         pass.draw(0..6, i as u32..i as u32 + 1);
                         i += 1;
@@ -1381,33 +1442,27 @@ impl RasterizerBackend for WgpuBackend {
     }
 
     fn render_frame(&self, scene: &Scene, config: &FrameConfig) -> Result<RgbaImage, RasterError> {
-        if let [SceneNode::Shader { x, y, w, h, source, time, params, opacity }] = scene.nodes.as_slice() {
-            if *x == 0.0
-                && *y == 0.0
-                && *w == config.width as f32
-                && *h == config.height as f32
-                && opacity.is_finite()
-                && (0.0..=1.0).contains(opacity)
-            {
-                let mut image = self.shader_runner.render(config.width, config.height, *time, *params, source)?;
-                if *opacity < 1.0 {
-                    for pixel in image.pixels_mut() {
-                        pixel[3] = (f32::from(pixel[3]) * *opacity).round() as u8;
-                    }
-                }
-                self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
-                return Ok(image);
-            }
+        if scene
+            .nodes
+            .iter()
+            .all(|node| matches!(node, SceneNode::Shader { .. }))
+            && !scene.nodes.is_empty()
+        {
+            let image = self.render_shader_layers(scene, config)?;
+            self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
+            return Ok(image);
         }
         let Some(commands) = compile_scene(scene, &self.fallback) else {
-            self.cpu_fallback_frame_count.fetch_add(1, Ordering::Relaxed);
+            self.cpu_fallback_frame_count
+                .fetch_add(1, Ordering::Relaxed);
             return self.fallback.render_frame(scene, config);
         };
 
         if config.width > self.ctx.max_texture_dimension_2d
             || config.height > self.ctx.max_texture_dimension_2d
         {
-            self.cpu_fallback_frame_count.fetch_add(1, Ordering::Relaxed);
+            self.cpu_fallback_frame_count
+                .fetch_add(1, Ordering::Relaxed);
             return self.fallback.render_frame(scene, config);
         }
 
@@ -1437,13 +1492,7 @@ impl RasterizerBackend for WgpuBackend {
         res.active_index = res.active_index.wrapping_add(1);
 
         let (submission_index, rx) =
-            self.submit_frame_to_slot(
-                &commands,
-                width,
-                height,
-                config.fps,
-                &res.slots[slot_idx],
-            )?;
+            self.submit_frame_to_slot(&commands, width, height, config.fps, &res.slots[slot_idx])?;
 
         let mut out_pixels = None;
         let mut scratch = Vec::new();
@@ -1531,7 +1580,8 @@ impl RasterizerBackend for WgpuBackend {
                 if let Some(prev) = in_flight.take() {
                     self.drain_slot(prev, &res, width, height, &mut scratch, consume_fn)?;
                 }
-                self.cpu_fallback_frame_count.fetch_add(1, Ordering::Relaxed);
+                self.cpu_fallback_frame_count
+                    .fetch_add(1, Ordering::Relaxed);
                 let img = self.fallback.render_frame(&scene, &cfg)?;
                 consume_fn(frame, img.as_raw())?;
                 continue;
@@ -1550,13 +1600,7 @@ impl RasterizerBackend for WgpuBackend {
 
             // Submit this frame to GPU
             let (submission_index, rx) =
-                self.submit_frame_to_slot(
-                    &commands,
-                    width,
-                    height,
-                    cfg.fps,
-                    &res.slots[slot_idx],
-                )?;
+                self.submit_frame_to_slot(&commands, width, height, cfg.fps, &res.slots[slot_idx])?;
             self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
 
             // Overlap: drain the previous frame while the newly submitted frame is being rendered on GPU
@@ -1578,6 +1622,62 @@ impl RasterizerBackend for WgpuBackend {
         }
 
         Ok(())
+    }
+}
+
+impl WgpuBackend {
+    /// Render shader nodes on the GPU and composite their rectangular outputs
+    /// in scene order. Non-shader nodes deliberately remain outside this path
+    /// until an offscreen GPU texture is available for general scene blending.
+    fn render_shader_layers(
+        &self,
+        scene: &Scene,
+        config: &FrameConfig,
+    ) -> Result<RgbaImage, RasterError> {
+        let mut output = RgbaImage::new(config.width, config.height);
+        for node in &scene.nodes {
+            let SceneNode::Shader {
+                x,
+                y,
+                w,
+                h,
+                source,
+                time,
+                params,
+                opacity,
+            } = node
+            else {
+                unreachable!("shader layer path was checked before rendering");
+            };
+            if ![*x, *y, *w, *h, *opacity]
+                .iter()
+                .all(|value| value.is_finite())
+                || *w <= 0.0
+                || *h <= 0.0
+                || !(0.0..=1.0).contains(opacity)
+            {
+                return Err(RasterError::Scene(
+                    "invalid shader layer bounds or opacity".into(),
+                ));
+            }
+            let width = (*w).round().max(1.0) as u32;
+            let height = (*h).round().max(1.0) as u32;
+            let mut layer = self
+                .shader_runner
+                .render(width, height, *time, *params, source)?;
+            if *opacity < 1.0 {
+                for pixel in layer.pixels_mut() {
+                    pixel[3] = (f32::from(pixel[3]) * *opacity).round() as u8;
+                }
+            }
+            image::imageops::overlay(
+                &mut output,
+                &layer,
+                (*x).round() as i64,
+                (*y).round() as i64,
+            );
+        }
+        Ok(output)
     }
 }
 
@@ -1676,7 +1776,13 @@ impl DrawCommand {
 
 fn compile_scene(scene: &Scene, font: &TinySkiaBackend) -> Option<Vec<DrawCommand>> {
     let mut commands = Vec::new();
-    compile_nodes(&scene.nodes, Transform::identity(), 1.0, &mut commands, font)?;
+    compile_nodes(
+        &scene.nodes,
+        Transform::identity(),
+        1.0,
+        &mut commands,
+        font,
+    )?;
     Some(commands)
 }
 
@@ -1820,7 +1926,8 @@ fn compile_nodes(
                 {
                     return None;
                 }
-                let mut instance = GpuInstance::solid(Color::WHITE, opacity * *node_opacity, transform);
+                let mut instance =
+                    GpuInstance::solid(Color::WHITE, opacity * *node_opacity, transform);
                 instance.kind_data[0] = 5;
                 instance.bounds = [*x, *y, *w, *h];
                 instance.shape_bounds = instance.bounds;
@@ -1854,7 +1961,8 @@ fn compile_nodes(
                 {
                     return None;
                 }
-                let mut instance = GpuInstance::solid(Color::WHITE, opacity * *node_opacity, transform);
+                let mut instance =
+                    GpuInstance::solid(Color::WHITE, opacity * *node_opacity, transform);
                 instance.kind_data[0] = 5;
                 instance.bounds = [*x, *y, *w, *h];
                 instance.shape_bounds = instance.bounds;
@@ -1868,14 +1976,27 @@ fn compile_nodes(
                 });
             }
 
-            SceneNode::Text { x, y, content, font_size, color, font_sources, .. } => {
+            SceneNode::Text {
+                x,
+                y,
+                content,
+                font_size,
+                color,
+                font_sources,
+                ..
+            } => {
                 if ![*x, *y, *font_size].iter().all(|v| v.is_finite()) || *font_size <= 0.0 {
                     return None;
                 }
                 let rendered = font.rasterize_text(content, *font_size, font_sources)?;
                 let mut instance = GpuInstance::solid(*color, opacity, transform);
                 instance.kind_data[0] = 5;
-                instance.bounds = [*x, *y - rendered.baseline as f32, rendered.width as f32, rendered.height as f32];
+                instance.bounds = [
+                    *x,
+                    *y - rendered.baseline as f32,
+                    rendered.width as f32,
+                    rendered.height as f32,
+                ];
                 instance.shape_bounds = instance.bounds;
                 let key = format!("{}:{}:{:?}", content, font_size.to_bits(), font_sources);
                 let entry = font.text_atlas_entry(&key)?;
@@ -1891,7 +2012,13 @@ fn compile_nodes(
                 if !next_transform.is_finite() || !group_opacity.is_finite() {
                     return None;
                 }
-                compile_nodes(children, next_transform, opacity * group_opacity, output, font)?;
+                compile_nodes(
+                    children,
+                    next_transform,
+                    opacity * group_opacity,
+                    output,
+                    font,
+                )?;
             }
 
             // A layer with no offscreen-only effect is semantically just an
@@ -1943,6 +2070,28 @@ fn gpu_layer_opacity(filters: &[crate::scene::SceneFilter], layer_opacity: f32) 
 
 #[cfg(test)]
 fn gpu_supports_scene(scene: &Scene) -> bool {
+    if !scene.nodes.is_empty()
+        && scene.nodes.iter().all(|node| {
+            matches!(
+                node,
+                SceneNode::Shader {
+                    x,
+                    y,
+                    w,
+                    h,
+                    opacity,
+                    ..
+                } if [*x, *y, *w, *h, *opacity]
+                    .iter()
+                    .all(|value| value.is_finite())
+                    && *w > 0.0
+                    && *h > 0.0
+                    && (0.0..=1.0).contains(opacity)
+            )
+        })
+    {
+        return true;
+    }
     compile_scene(scene, &TinySkiaBackend::new()).is_some()
 }
 
@@ -2077,7 +2226,8 @@ mod support_tests {
 
     #[test]
     fn image_fit_geometry_matches_expected_crop_and_letterbox() {
-        let contain = image_placement(ImageFit::Contain, 200.0, 100.0, 10.0, 20.0, 100.0, 100.0).unwrap();
+        let contain =
+            image_placement(ImageFit::Contain, 200.0, 100.0, 10.0, 20.0, 100.0, 100.0).unwrap();
         assert_eq!(contain.destination, [10.0, 45.0, 100.0, 50.0]);
         assert_eq!(contain.source_uv, [0.0, 0.0, 1.0, 1.0]);
 
@@ -2096,13 +2246,24 @@ mod support_tests {
         assert_eq!(none.destination, [0.0, 0.0, 80.0, 80.0]);
         assert_eq!(none.source_uv, [0.0, 0.0, 0.4, 0.8]);
 
-        let scale_down = image_placement(ImageFit::ScaleDown, 20.0, 10.0, 0.0, 0.0, 100.0, 100.0).unwrap();
+        let scale_down =
+            image_placement(ImageFit::ScaleDown, 20.0, 10.0, 0.0, 0.0, 100.0, 100.0).unwrap();
         assert_eq!(scale_down.destination, [40.0, 45.0, 20.0, 10.0]);
     }
 
     #[test]
     fn unsupported_nodes_trigger_cpu_fallback() {
         let mut scene = Scene::new();
+        scene.push(SceneNode::Shader {
+            x: 0.0,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+            source: "return vec4<f32>(1.0);".into(),
+            time: 0.0,
+            params: [0.0; 4],
+            opacity: 1.0,
+        });
         scene.push(SceneNode::Text {
             x: 0.0,
             y: 20.0,
@@ -2277,7 +2438,12 @@ mod support_tests {
         };
         assert!(gpu_supports_scene(&scene));
         assert!(
-            (compile_scene(&scene, &TinySkiaBackend::headless()).unwrap()[0].instance().params[3] - 0.25).abs() < f32::EPSILON
+            (compile_scene(&scene, &TinySkiaBackend::headless()).unwrap()[0]
+                .instance()
+                .params[3]
+                - 0.25)
+                .abs()
+                < f32::EPSILON
         );
     }
 
@@ -2366,10 +2532,13 @@ mod tests {
         };
         backend.render_frame(&gpu_scene, &config).unwrap();
         backend.render_frame(&fallback_scene, &config).unwrap();
-        assert_eq!(backend.render_stats(), WgpuRenderStats {
-            gpu_frames: 2,
-            cpu_fallback_frames: 0,
-        });
+        assert_eq!(
+            backend.render_stats(),
+            WgpuRenderStats {
+                gpu_frames: 2,
+                cpu_fallback_frames: 0,
+            }
+        );
         assert!(backend.render_stats().cpu_fallback_ratio().abs() < f64::EPSILON);
     }
 
@@ -2405,7 +2574,9 @@ mod tests {
         let config = FrameConfig::new(32, 32, 0, 30.0);
         let gpu_image = gpu.render_frame(&scene, &config).unwrap();
         let _second_gpu_image = gpu.render_frame(&scene, &config).unwrap();
-        let cpu_image = TinySkiaBackend::headless().render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::headless()
+            .render_frame(&scene, &config)
+            .unwrap();
         assert_eq!(gpu.gpu_image_cache_len(), 1);
         assert!(gpu_image.get_pixel(16, 16)[3] > 0);
         assert_eq!(gpu_image.get_pixel(2, 2), cpu_image.get_pixel(2, 2));
@@ -2414,12 +2585,17 @@ mod tests {
             .zip(cpu_image.pixels())
             .map(|(gpu, cpu)| {
                 (0..4)
-                    .map(|channel| (i16::from(gpu[channel]) - i16::from(cpu[channel])).unsigned_abs() as u64)
+                    .map(|channel| {
+                        (i16::from(gpu[channel]) - i16::from(cpu[channel])).unsigned_abs() as u64
+                    })
                     .sum::<u64>()
             })
             .sum::<u64>() as f64
             / (config.width * config.height * 4) as f64;
-        assert!(mean_error < 12.0, "GPU/CPU image mean error was {mean_error}");
+        assert!(
+            mean_error < 12.0,
+            "GPU/CPU image mean error was {mean_error}"
+        );
     }
 
     #[test]
@@ -2428,24 +2604,52 @@ mod tests {
             println!("GPU backend unavailable; skipping image fit parity test");
             return;
         };
-        let path = std::env::temp_dir().join(format!("dioxuscut-image-fit-{}.png", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("dioxuscut-image-fit-{}.png", std::process::id()));
         let mut source = image::RgbaImage::new(2, 1);
         source.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));
         source.put_pixel(1, 0, image::Rgba([0, 0, 255, 255]));
         source.save(&path).unwrap();
-        let fits = [ImageFit::Cover, ImageFit::Contain, ImageFit::Fill, ImageFit::None, ImageFit::ScaleDown];
+        let fits = [
+            ImageFit::Cover,
+            ImageFit::Contain,
+            ImageFit::Fill,
+            ImageFit::None,
+            ImageFit::ScaleDown,
+        ];
         let config = FrameConfig::new(64, 64, 0, 30.0);
         for fit in fits {
-            let scene = Scene { nodes: vec![SceneNode::Image {
-                src: path.to_string_lossy().into_owned(),
-                x: 8.0, y: 8.0, w: 48.0, h: 48.0, fit, opacity: 1.0,
-            }] };
+            let scene = Scene {
+                nodes: vec![SceneNode::Image {
+                    src: path.to_string_lossy().into_owned(),
+                    x: 8.0,
+                    y: 8.0,
+                    w: 48.0,
+                    h: 48.0,
+                    fit,
+                    opacity: 1.0,
+                }],
+            };
             let gpu_image = gpu.render_frame(&scene, &config).unwrap();
-            let cpu_image = TinySkiaBackend::new().render_frame(&scene, &config).unwrap();
-            let mean_error: f64 = gpu_image.pixels().zip(cpu_image.pixels())
-                .map(|(a, b)| (0..4).map(|channel| (i16::from(a[channel]) - i16::from(b[channel])).unsigned_abs() as u64).sum::<u64>())
-                .sum::<u64>() as f64 / (64 * 64 * 4) as f64;
-            assert!(mean_error < 18.0, "GPU/CPU {fit:?} mean error was {mean_error}");
+            let cpu_image = TinySkiaBackend::new()
+                .render_frame(&scene, &config)
+                .unwrap();
+            let mean_error: f64 = gpu_image
+                .pixels()
+                .zip(cpu_image.pixels())
+                .map(|(a, b)| {
+                    (0..4)
+                        .map(|channel| {
+                            (i16::from(a[channel]) - i16::from(b[channel])).unsigned_abs() as u64
+                        })
+                        .sum::<u64>()
+                })
+                .sum::<u64>() as f64
+                / (64 * 64 * 4) as f64;
+            assert!(
+                mean_error < 18.0,
+                "GPU/CPU {fit:?} mean error was {mean_error}"
+            );
         }
         let _ = std::fs::remove_file(path);
     }
@@ -2456,7 +2660,10 @@ mod tests {
             println!("GPU backend unavailable; skipping transformed image parity test");
             return;
         };
-        let path = std::env::temp_dir().join(format!("dioxuscut-image-transform-{}.png", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "dioxuscut-image-transform-{}.png",
+            std::process::id()
+        ));
         let mut source = image::RgbaImage::new(2, 2);
         for pixel in source.pixels_mut() {
             *pixel = image::Rgba([255, 32, 64, 255]);
@@ -2465,26 +2672,51 @@ mod tests {
         let scene = Scene {
             nodes: vec![
                 SceneNode::Rect {
-                    x: 0.0, y: 0.0, w: 64.0, h: 64.0,
-                    fill: Color::rgb(10, 20, 30), stroke: None, stroke_width: 0.0, corner_radius: 0.0,
+                    x: 0.0,
+                    y: 0.0,
+                    w: 64.0,
+                    h: 64.0,
+                    fill: Color::rgb(10, 20, 30),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
                 },
                 SceneNode::Group {
                     transform: crate::scene::Transform2D::rotate(17.0).with_translate(12.0, 8.0),
                     opacity: 0.55,
                     children: vec![SceneNode::Image {
-                        src: path.to_string_lossy().into_owned(), x: 12.0, y: 12.0, w: 32.0, h: 24.0,
-                        fit: ImageFit::Contain, opacity: 0.8,
+                        src: path.to_string_lossy().into_owned(),
+                        x: 12.0,
+                        y: 12.0,
+                        w: 32.0,
+                        h: 24.0,
+                        fit: ImageFit::Contain,
+                        opacity: 0.8,
                     }],
                 },
             ],
         };
         let config = FrameConfig::new(64, 64, 0, 30.0);
         let gpu_image = gpu.render_frame(&scene, &config).unwrap();
-        let cpu_image = TinySkiaBackend::new().render_frame(&scene, &config).unwrap();
-        let mean_error: f64 = gpu_image.pixels().zip(cpu_image.pixels())
-            .map(|(a, b)| (0..4).map(|channel| (i16::from(a[channel]) - i16::from(b[channel])).unsigned_abs() as u64).sum::<u64>())
-            .sum::<u64>() as f64 / (64 * 64 * 4) as f64;
-        assert!(mean_error < 18.0, "GPU/CPU transformed image mean error was {mean_error}");
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        let mean_error: f64 = gpu_image
+            .pixels()
+            .zip(cpu_image.pixels())
+            .map(|(a, b)| {
+                (0..4)
+                    .map(|channel| {
+                        (i16::from(a[channel]) - i16::from(b[channel])).unsigned_abs() as u64
+                    })
+                    .sum::<u64>()
+            })
+            .sum::<u64>() as f64
+            / (64 * 64 * 4) as f64;
+        assert!(
+            mean_error < 18.0,
+            "GPU/CPU transformed image mean error was {mean_error}"
+        );
         let _ = std::fs::remove_file(path);
     }
 
@@ -2506,7 +2738,9 @@ mod tests {
             }],
         };
         assert!(gpu_supports_scene(&scene));
-        let image = gpu.render_frame(&scene, &FrameConfig::new(96, 32, 0, 30.0)).unwrap();
+        let image = gpu
+            .render_frame(&scene, &FrameConfig::new(96, 32, 0, 30.0))
+            .unwrap();
         let cpu = TinySkiaBackend::new()
             .render_frame(&scene, &FrameConfig::new(96, 32, 0, 30.0))
             .unwrap();
@@ -2523,7 +2757,9 @@ mod tests {
                 font_sources: Vec::new(),
             }],
         };
-        let second = gpu.render_frame(&updated_scene, &FrameConfig::new(96, 32, 1, 30.0)).unwrap();
+        let second = gpu
+            .render_frame(&updated_scene, &FrameConfig::new(96, 32, 1, 30.0))
+            .unwrap();
         assert_eq!(gpu.render_stats().gpu_frames, 2);
         assert!(image.pixels().any(|pixel| pixel[3] > 0));
         assert!(second.pixels().any(|pixel| pixel[3] > 0));
@@ -2537,7 +2773,10 @@ mod tests {
             .map(|(gpu, cpu)| (i16::from(gpu[3]) - i16::from(cpu[3])).unsigned_abs() as u64)
             .sum();
         let mean_alpha_error = alpha_error as f64 / (96 * 32) as f64;
-        assert!(mean_alpha_error < 12.0, "GPU/CPU text alpha mean error was {mean_alpha_error}");
+        assert!(
+            mean_alpha_error < 12.0,
+            "GPU/CPU text alpha mean error was {mean_alpha_error}"
+        );
     }
 
     #[test]
@@ -2558,11 +2797,57 @@ mod tests {
                 opacity: 0.5,
             }],
         };
-        let image = gpu.render_frame(&scene, &FrameConfig::new(32, 16, 0, 30.0)).unwrap();
+        let image = gpu
+            .render_frame(&scene, &FrameConfig::new(32, 16, 0, 30.0))
+            .unwrap();
         assert_eq!(gpu.render_stats().gpu_frames, 1);
         assert!(image.get_pixel(1, 1)[2] > 0);
         assert!((120..=136).contains(&image.get_pixel(1, 1)[3]));
         assert_ne!(image.get_pixel(1, 1), image.get_pixel(30, 14));
+    }
+
+    #[test]
+    fn gpu_shader_layers_preserve_rects_opacity_and_draw_order() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping shader layer test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![
+                SceneNode::Shader {
+                    x: 2.0,
+                    y: 1.0,
+                    w: 8.0,
+                    h: 6.0,
+                    source: "return vec4<f32>(1.0, 0.0, 0.0, 1.0);".into(),
+                    time: 0.0,
+                    params: [0.0; 4],
+                    opacity: 1.0,
+                },
+                SceneNode::Shader {
+                    x: 5.0,
+                    y: 3.0,
+                    w: 4.0,
+                    h: 2.0,
+                    source: "return vec4<f32>(0.0, 0.0, 1.0, 1.0);".into(),
+                    time: 0.0,
+                    params: [0.0; 4],
+                    opacity: 0.5,
+                },
+            ],
+        };
+        let image = gpu
+            .render_frame(&scene, &FrameConfig::new(16, 10, 0, 30.0))
+            .unwrap();
+        assert_eq!(gpu.render_stats().gpu_frames, 1);
+        assert_eq!(image.get_pixel(0, 0)[3], 0);
+        assert_eq!(image.get_pixel(3, 2)[0], 255);
+        let overlap = image.get_pixel(6, 4);
+        assert!(
+            overlap[0] > 80 && overlap[2] > 80,
+            "overlap was {overlap:?}"
+        );
+        assert_eq!(image.get_pixel(10, 4)[3], 0);
     }
 
     #[test]
@@ -2576,22 +2861,37 @@ mod tests {
         let scene = Scene {
             nodes: vec![
                 SceneNode::Image {
-                    src: red.into(), x: 0.0, y: 0.0, w: 8.0, h: 8.0,
-                    fit: ImageFit::Fill, opacity: 1.0,
+                    src: red.into(),
+                    x: 0.0,
+                    y: 0.0,
+                    w: 8.0,
+                    h: 8.0,
+                    fit: ImageFit::Fill,
+                    opacity: 1.0,
                 },
                 SceneNode::Image {
-                    src: blue.into(), x: 8.0, y: 0.0, w: 8.0, h: 8.0,
-                    fit: ImageFit::Fill, opacity: 1.0,
+                    src: blue.into(),
+                    x: 8.0,
+                    y: 0.0,
+                    w: 8.0,
+                    h: 8.0,
+                    fit: ImageFit::Fill,
+                    opacity: 1.0,
                 },
             ],
         };
-        gpu.render_frame(&scene, &FrameConfig::new(16, 8, 0, 30.0)).unwrap();
+        gpu.render_frame(&scene, &FrameConfig::new(16, 8, 0, 30.0))
+            .unwrap();
         assert_eq!(gpu.gpu_image_cache_len(), 1);
     }
 
     #[test]
     fn gpu_video_frame_uses_decoded_texture_path() {
-        if std::process::Command::new("ffmpeg").arg("-version").output().is_err() {
+        if std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .is_err()
+        {
             println!("FFmpeg unavailable; skipping GPU video test");
             return;
         }
@@ -2604,18 +2904,37 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let source = dir.join("red.mkv");
         let generated = std::process::Command::new("ffmpeg")
-            .args(["-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=16x16:r=2:d=1", "-c:v", "ffv1"])
+            .args([
+                "-y",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:s=16x16:r=2:d=1",
+                "-c:v",
+                "ffv1",
+            ])
             .arg(&source)
             .status()
             .unwrap();
         assert!(generated.success());
         let scene = Scene {
             nodes: vec![SceneNode::Video {
-                src: source.display().to_string(), time: 0.0, looped: false,
-                x: 0.0, y: 0.0, w: 16.0, h: 16.0, fit: ImageFit::Fill, opacity: 1.0,
+                src: source.display().to_string(),
+                time: 0.0,
+                looped: false,
+                x: 0.0,
+                y: 0.0,
+                w: 16.0,
+                h: 16.0,
+                fit: ImageFit::Fill,
+                opacity: 1.0,
             }],
         };
-        let image = gpu.render_frame(&scene, &FrameConfig::new(16, 16, 0, 2.0)).unwrap();
+        let image = gpu
+            .render_frame(&scene, &FrameConfig::new(16, 16, 0, 2.0))
+            .unwrap();
         let pixel = image.get_pixel(8, 8);
         assert!(pixel[0] > 200 && pixel[1] < 40 && pixel[2] < 40);
         let mut same_frame = scene.clone();
@@ -2623,7 +2942,8 @@ mod tests {
             unreachable!();
         };
         *time = 0.1;
-        gpu.render_frame(&same_frame, &FrameConfig::new(16, 16, 0, 2.0)).unwrap();
+        gpu.render_frame(&same_frame, &FrameConfig::new(16, 16, 0, 2.0))
+            .unwrap();
         assert_eq!(gpu.gpu_image_cache_len(), 1);
         assert_eq!(gpu.gpu_frame_count.load(Ordering::Relaxed), 2);
         std::fs::remove_dir_all(dir).unwrap();

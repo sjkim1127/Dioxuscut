@@ -1,8 +1,8 @@
 //! "The Gauntlet" Extreme Stress Benchmark — 2x Video Decoders, 20 Images, 60 Particles, Sigma 30 Blur, Multilingual Text.
 #![allow(clippy::manual_is_multiple_of)]
 use dioxuscut_rasterizer::{
-    BlendMode, Color, FrameConfig, ImageFit, MaskMode, PipeConfig, RasterizerBackend, Scene,
-    SceneFilter, SceneNode, TinySkiaBackend, render_to_ffmpeg_pipe,
+    render_to_ffmpeg_pipe, BlendMode, Color, FrameConfig, ImageFit, MaskMode, PipeConfig,
+    RasterizerBackend, Scene, SceneFilter, SceneNode, TinySkiaBackend,
 };
 use std::time::Instant;
 
@@ -161,7 +161,9 @@ fn scene(frame: u32) -> Scene {
     root_scene.push(SceneNode::Text {
         x: 160.0,
         y: 940.0,
-        content: "900 Frames (30s) • 2x Video Decoders • 20 Images • Sigma 30.0 Blur • 60 Particles".into(),
+        content:
+            "900 Frames (30s) • 2x Video Decoders • 20 Images • Sigma 30.0 Blur • 60 Particles"
+                .into(),
         font_size: 24.0,
         color: Color::rgb(0, 240, 255),
         font_weight: 600,

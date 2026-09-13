@@ -79,8 +79,11 @@ impl TextAtlas {
         if self.entries.len() >= self.max_entries {
             self.clear();
         }
-        if glyph_width == 0 || glyph_height == 0 || coverage.len() != (glyph_width * glyph_height) as usize
-            || glyph_width > self.width || glyph_height > self.height
+        if glyph_width == 0
+            || glyph_height == 0
+            || coverage.len() != (glyph_width * glyph_height) as usize
+            || glyph_width > self.width
+            || glyph_height > self.height
         {
             return None;
         }
@@ -100,20 +103,28 @@ impl TextAtlas {
             baseline,
         };
         for row in 0..glyph_height {
-            let source = &coverage[(row * glyph_width) as usize..((row + 1) * glyph_width) as usize];
+            let source =
+                &coverage[(row * glyph_width) as usize..((row + 1) * glyph_width) as usize];
             let target_start = ((entry.y + row) * self.width + entry.x) as usize;
             self.pixels[target_start..target_start + glyph_width as usize].copy_from_slice(source);
         }
         self.cursor_x = self.cursor_x.saturating_add(glyph_width);
         self.row_height = self.row_height.max(glyph_height);
         self.entries.insert(key, entry);
-        let rect = AtlasRect { x: entry.x, y: entry.y, width: entry.width, height: entry.height };
+        let rect = AtlasRect {
+            x: entry.x,
+            y: entry.y,
+            width: entry.width,
+            height: entry.height,
+        };
         self.dirty = Some(match self.dirty {
             Some(previous) => AtlasRect {
                 x: previous.x.min(rect.x),
                 y: previous.y.min(rect.y),
-                width: (previous.x + previous.width).max(rect.x + rect.width) - previous.x.min(rect.x),
-                height: (previous.y + previous.height).max(rect.y + rect.height) - previous.y.min(rect.y),
+                width: (previous.x + previous.width).max(rect.x + rect.width)
+                    - previous.x.min(rect.x),
+                height: (previous.y + previous.height).max(rect.y + rect.height)
+                    - previous.y.min(rect.y),
             },
             None => rect,
         });
@@ -132,7 +143,12 @@ impl TextAtlas {
         self.cursor_y = 0;
         self.row_height = 0;
         self.entries.clear();
-        self.dirty = Some(AtlasRect { x: 0, y: 0, width: self.width, height: self.height });
+        self.dirty = Some(AtlasRect {
+            x: 0,
+            y: 0,
+            width: self.width,
+            height: self.height,
+        });
         self.generation = self.generation.wrapping_add(1);
     }
 
@@ -169,7 +185,16 @@ mod tests {
         let mut atlas = TextAtlas::new(4, 4);
         let first = atlas.insert("a".into(), &[1, 2, 3, 4], 2, 2, 1).unwrap();
         let second = atlas.insert("b".into(), &[5, 6], 2, 1, 0).unwrap();
-        assert_eq!(first, AtlasEntry { x: 0, y: 0, width: 2, height: 2, baseline: 1 });
+        assert_eq!(
+            first,
+            AtlasEntry {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 2,
+                baseline: 1
+            }
+        );
         assert_eq!(second.x, 2);
         assert_eq!(atlas.sample(first), vec![1, 2, 3, 4]);
         assert_eq!(atlas.sample(second), vec![5, 6]);
@@ -208,6 +233,14 @@ mod tests {
         assert!(snapshot.generation > before);
         assert!(atlas.entry("old").is_none());
         assert!(atlas.entry("new").is_some());
-        assert_eq!(snapshot.dirty, Some(AtlasRect { x: 0, y: 0, width: 4, height: 2 }));
+        assert_eq!(
+            snapshot.dirty,
+            Some(AtlasRect {
+                x: 0,
+                y: 0,
+                width: 4,
+                height: 2
+            })
+        );
     }
 }

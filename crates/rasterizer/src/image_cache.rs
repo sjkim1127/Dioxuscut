@@ -277,7 +277,11 @@ mod tests {
         assert_eq!(cache.len(), 1);
 
         let _ = cache.load(source_b).unwrap();
-        assert_eq!(cache.len(), 1, "the byte budget must evict the least-recently-used image");
+        assert_eq!(
+            cache.len(),
+            1,
+            "the byte budget must evict the least-recently-used image"
+        );
         let reloaded = cache.load(source_a).unwrap();
         assert!(!std::sync::Arc::ptr_eq(&first, &reloaded));
     }
