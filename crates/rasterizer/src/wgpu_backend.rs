@@ -447,7 +447,8 @@ fn mask_shape_coverage(position: vec2<f32>, rect: vec4<f32>, shape: vec4<f32>, k
     }
     var shape_opacity = opacity;
     if kind == 2u || kind == 3u {
-        let t = clamp((position.x - shape.x) / max(shape.z - shape.x, 0.000001), 0.0, 1.0);
+        let direction = shape.zw - shape.xy;
+        let t = clamp(dot(position - shape.xy, direction) / max(dot(direction, direction), 0.000001), 0.0, 1.0);
         let color = mix(color0, color1, t);
         shape_opacity = color.a;
         if kind == 3u {
@@ -2801,7 +2802,6 @@ fn gpu_mask_shapes(
             } if [*x, *y, *w, *h, *angle_deg].iter().all(|v| v.is_finite())
                 && *w > 0.0
                 && *h > 0.0
-                && (*angle_deg - 90.0).abs() <= f32::EPSILON
                 && stops.len() == 2
                 && (stops[0].position - 0.0).abs() <= f32::EPSILON
                 && (stops[1].position - 1.0).abs() <= f32::EPSILON =>
@@ -2809,6 +2809,9 @@ fn gpu_mask_shapes(
                 let half_diag = (*w * *w + *h * *h).sqrt() / 2.0;
                 let cx = *x + *w / 2.0;
                 let cy = *y + *h / 2.0;
+                let angle_rad = angle_deg.to_radians();
+                let dx = angle_rad.sin() * half_diag;
+                let dy = angle_rad.cos() * half_diag;
                 (
                     *x,
                     *y,
@@ -2816,7 +2819,7 @@ fn gpu_mask_shapes(
                     *h,
                     Color::WHITE,
                     2,
-                    [cx - half_diag, cy, cx + half_diag, cy],
+                    [cx - dx, cy - dy, cx + dx, cy + dy],
                     color_to_f32(stops[0].color),
                     color_to_f32(stops[1].color),
                 )
@@ -2864,12 +2867,23 @@ fn gpu_mask_shapes(
         rects[index] = [x0.min(x1), y0.min(y1), width, height];
         opacities[index] = mask_opacity;
         kinds[index] = kind;
-        shapes[index] = [
-            shape[0] * transform.sx + transform.tx,
-            shape[1] * transform.sy + transform.ty,
-            shape[2] * transform.sx.abs(),
-            0.0,
-        ];
+        shapes[index] = if kind == 1 {
+            [
+                shape[0] * transform.sx + transform.tx,
+                shape[1] * transform.sy + transform.ty,
+                shape[2] * transform.sx.abs(),
+                0.0,
+            ]
+        } else if kind == 2 || kind == 3 {
+            [
+                shape[0] * transform.sx + transform.tx,
+                shape[1] * transform.sy + transform.ty,
+                shape[2] * transform.sx + transform.tx,
+                shape[3] * transform.sy + transform.ty,
+            ]
+        } else {
+            [0.0; 4]
+        };
         colors0[index] = color0;
         colors1[index] = color1;
     }
@@ -4081,7 +4095,7 @@ mod tests {
                     y: 0.0,
                     w: 32.0,
                     h: 32.0,
-                    angle_deg: 90.0,
+                    angle_deg: 45.0,
                     stops: vec![
                         crate::scene::GradientStop {
                             position: 0.0,
