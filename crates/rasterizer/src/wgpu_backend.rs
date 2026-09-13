@@ -668,7 +668,25 @@ struct GpuImageResource {
     height: u32,
 }
 
-type GpuImageCache = Mutex<HashMap<String, Arc<GpuImageResource>>>;
+struct GpuImageCacheState {
+    images: HashMap<String, Arc<GpuImageResource>>,
+    lru: std::collections::VecDeque<String>,
+    bytes: usize,
+    max_bytes: usize,
+}
+
+impl GpuImageCacheState {
+    fn new(max_bytes: usize) -> Self {
+        Self {
+            images: HashMap::new(),
+            lru: std::collections::VecDeque::new(),
+            bytes: 0,
+            max_bytes: max_bytes.max(1),
+        }
+    }
+}
+
+type GpuImageCache = Mutex<GpuImageCacheState>;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Backend
@@ -730,7 +748,7 @@ impl WgpuBackend {
             frame_resources: Mutex::new(HashMap::new()),
             fallback: TinySkiaBackend::new(),
             image_cache: ImageCache::default(),
-            gpu_images: Mutex::new(HashMap::new()),
+            gpu_images: Mutex::new(GpuImageCacheState::new(256 * 1024 * 1024)),
             gpu_frame_count: AtomicU64::new(0),
             cpu_fallback_frame_count: AtomicU64::new(0),
         })
@@ -748,19 +766,21 @@ impl WgpuBackend {
     pub fn with_image_cache_bytes(mut self, max_bytes: usize) -> Self {
         self.fallback = self.fallback.with_image_cache_bytes(max_bytes);
         self.image_cache = ImageCache::with_max_bytes(max_bytes);
+        self.gpu_images
+            .lock()
+            .expect("GPU image cache lock poisoned")
+            .max_bytes = max_bytes.max(1);
         self
     }
 
     fn gpu_image(&self, src: &str) -> Result<Arc<GpuImageResource>, RasterError> {
-        if let Some(image) = self
-            .gpu_images
-            .lock()
-            .expect("GPU image cache lock poisoned")
-            .get(src)
-            .cloned()
-        {
+        let mut cache = self.gpu_images.lock().expect("GPU image cache lock poisoned");
+        if let Some(image) = cache.images.get(src).cloned() {
+            cache.lru.retain(|entry| entry != src);
+            cache.lru.push_back(src.to_string());
             return Ok(image);
         }
+        drop(cache);
 
         let decoded = self.image_cache.load(src)?;
         let device = &self.ctx.device;
@@ -818,10 +838,24 @@ impl WgpuBackend {
             height: decoded.height(),
         });
         let mut cache = self.gpu_images.lock().expect("GPU image cache lock poisoned");
-        Ok(cache
-            .entry(src.to_string())
-            .or_insert_with(|| Arc::clone(&resource))
-            .clone())
+        if let Some(existing) = cache.images.get(src).cloned() {
+            cache.lru.retain(|entry| entry != src);
+            cache.lru.push_back(src.to_string());
+            return Ok(existing);
+        }
+        let bytes = resource.width as usize * resource.height as usize * 4;
+        cache.images.insert(src.to_string(), Arc::clone(&resource));
+        cache.lru.push_back(src.to_string());
+        cache.bytes = cache.bytes.saturating_add(bytes);
+        while cache.bytes > cache.max_bytes {
+            let Some(oldest) = cache.lru.pop_front() else { break };
+            if let Some(evicted) = cache.images.remove(&oldest) {
+                cache.bytes = cache
+                    .bytes
+                    .saturating_sub(evicted.width as usize * evicted.height as usize * 4);
+            }
+        }
+        Ok(resource)
     }
 
     #[cfg(test)]
@@ -829,6 +863,7 @@ impl WgpuBackend {
         self.gpu_images
             .lock()
             .expect("GPU image cache lock poisoned")
+            .images
             .len()
     }
 
@@ -2087,6 +2122,30 @@ mod tests {
             .sum::<u64>() as f64
             / (config.width * config.height * 4) as f64;
         assert!(mean_error < 12.0, "GPU/CPU image mean error was {mean_error}");
+    }
+
+    #[test]
+    fn gpu_image_cache_obeys_byte_budget_and_lru_eviction() {
+        let Ok(gpu) = WgpuBackend::new().map(|backend| backend.with_image_cache_bytes(4)) else {
+            println!("GPU backend unavailable; skipping image cache eviction test");
+            return;
+        };
+        let red = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221%22%20height%3D%221%22%3E%3Crect%20width%3D%221%22%20height%3D%221%22%20fill%3D%22%23f00%22%2F%3E%3C%2Fsvg%3E";
+        let blue = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221%22%20height%3D%221%22%3E%3Crect%20width%3D%221%22%20height%3D%221%22%20fill%3D%22%2300f%22%2F%3E%3C%2Fsvg%3E";
+        let scene = Scene {
+            nodes: vec![
+                SceneNode::Image {
+                    src: red.into(), x: 0.0, y: 0.0, w: 8.0, h: 8.0,
+                    fit: ImageFit::Fill, opacity: 1.0,
+                },
+                SceneNode::Image {
+                    src: blue.into(), x: 8.0, y: 0.0, w: 8.0, h: 8.0,
+                    fit: ImageFit::Fill, opacity: 1.0,
+                },
+            ],
+        };
+        gpu.render_frame(&scene, &FrameConfig::new(16, 8, 0, 30.0)).unwrap();
+        assert_eq!(gpu.gpu_image_cache_len(), 1);
     }
 
     #[test]
