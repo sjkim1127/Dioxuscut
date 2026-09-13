@@ -300,9 +300,16 @@ export async function parseMedia({
   // This metadata facade does not yet expose container byte counts. Report the
   // same progress shape as @remotion/media-parser with an unknown total.
   await onParseProgress?.({ bytes: 0, percentage: 0, totalBytes: null });
-  const selectFields = (result) => !Array.isArray(fields) || fields.length === 0
-    ? result
-    : Object.fromEntries(fields.filter((field) => field in result).map((field) => [field, result[field]]));
+  const selectFields = (result) => {
+    if (fields === undefined || fields === null) return result;
+    const requested = Array.isArray(fields)
+      ? fields
+      : typeof fields === 'object'
+        ? Object.entries(fields).filter(([, enabled]) => enabled).map(([field]) => field)
+        : null;
+    if (!requested || requested.length === 0) return result;
+    return Object.fromEntries(requested.filter((field) => field in result).map((field) => [field, result[field]]));
+  };
   const container = await parseIsoBmffMovieHeader(src).catch(() => null);
   const wav = await parseWavMetadata(src).catch(() => null);
   if (wav) {
