@@ -253,6 +253,65 @@ pub fn get_waveform_portion_channel(
     waveform[start_idx..end_idx].to_vec()
 }
 
+/// Returns Remotion-compatible averaged waveform bars for a time window.
+/// Samples outside the decoded source are zero-padded, which keeps frame
+/// centered visualizers stable at the beginning and end of a composition.
+pub fn get_waveform_bars(
+    data: &AudioData,
+    start_sec: f32,
+    duration_sec: f32,
+    number_of_samples: usize,
+    channel: usize,
+    output_range: &str,
+    normalize: bool,
+    data_offset_sec: f32,
+) -> Vec<(usize, f32)> {
+    if data.channel_waveforms.is_empty()
+        || data.sample_rate == 0
+        || duration_sec <= 0.0
+        || number_of_samples == 0
+    {
+        return Vec::new();
+    }
+    let waveform = &data.channel_waveforms[channel.min(data.channel_waveforms.len() - 1)];
+    let start = ((start_sec - data_offset_sec) * data.sample_rate as f32).floor() as isize;
+    let end = ((start_sec - data_offset_sec + duration_sec) * data.sample_rate as f32).floor() as isize;
+    let length = (end - start).max(0) as usize;
+    let block_size = length / number_of_samples;
+    if block_size == 0 {
+        return Vec::new();
+    }
+    let mut values = Vec::with_capacity(number_of_samples);
+    for bar in 0..number_of_samples {
+        let mut sum = 0.0f32;
+        for offset in 0..block_size {
+            let sample = start + (bar * block_size + offset) as isize;
+            if sample >= 0 {
+                sum += waveform.get(sample as usize).copied().unwrap_or(0.0).abs();
+            }
+        }
+        values.push(sum / block_size as f32);
+    }
+    let scale = if normalize {
+        values.iter().copied().fold(1.0e-9f32, f32::max)
+    } else {
+        1.0
+    };
+    values
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let amplitude = value / scale;
+            let amplitude = if output_range == "minus-one-to-one" && index % 2 == 0 {
+                -amplitude
+            } else {
+                amplitude
+            };
+            (index, amplitude)
+        })
+        .collect()
+}
+
 /// Generates a smoothed SVG path (`d` attribute string) from a slice of amplitude values.
 pub fn create_smooth_svg_path(points: &[f32], width: f32, height: f32) -> String {
     if points.is_empty() {
@@ -368,5 +427,19 @@ mod tests {
             get_waveform_portion(&data, 0.0, 1.0),
             vec![-0.15, -0.15, -0.15]
         );
+    }
+
+    #[test]
+    fn test_waveform_bars_match_remotion_range_and_padding_contract() {
+        let data = AudioData {
+            channel_waveforms: vec![vec![0.25, -0.5, 0.75, -1.0]],
+            sample_rate: 4,
+            duration_secs: 1.0,
+        };
+        let bars = get_waveform_bars(&data, -0.5, 1.5, 2, 0, "minus-one-to-one", false, 0.0);
+        assert_eq!(bars.len(), 2);
+        assert_eq!(bars[0].0, 0);
+        assert!((bars[0].1 + (0.25 / 3.0)).abs() < 1.0e-6);
+        assert!((bars[1].1 - ((0.5 + 0.75 + 1.0) / 3.0)).abs() < 1.0e-6);
     }
 }
