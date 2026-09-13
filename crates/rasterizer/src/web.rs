@@ -55,6 +55,25 @@ pub struct WebVideoFrame {
     pub rgba_base64: String,
 }
 
+/// Timing metadata attached to a browser-produced WebCodecs frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WebFrameTiming {
+    pub timestamp_us: i64,
+    pub timeline_frame: f64,
+}
+
+impl WebFrameTiming {
+    pub fn from_timestamp(timestamp_us: i64, fps: f64) -> Option<Self> {
+        if !fps.is_finite() || fps <= 0.0 {
+            return None;
+        }
+        Some(Self {
+            timestamp_us,
+            timeline_frame: timestamp_us as f64 / 1_000_000.0 * fps,
+        })
+    }
+}
+
 impl WebVideoFrame {
     /// Return the WebCodecs presentation timestamp in seconds.
     pub fn timestamp_seconds(&self) -> f64 {

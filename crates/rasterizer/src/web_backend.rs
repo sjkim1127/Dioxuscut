@@ -4,7 +4,7 @@ use crate::backend::{BackendCapabilities, FrameConfig, RasterError, RasterizerBa
 use crate::frame_cache::{CacheMetrics, FrameCacheConfig, FrameCacheKey, FrameCacheManager};
 use crate::scene::Scene;
 use crate::web::{
-    WebFrameRequest, WebFrameResponse, WebTimelineClip, WebWorkerMessage,
+    WebFrameRequest, WebFrameResponse, WebFrameTiming, WebTimelineClip, WebWorkerMessage,
     WEB_WORKER_PROTOCOL_VERSION,
 };
 use base64::Engine;
@@ -389,6 +389,17 @@ impl BrowserFrameBackend {
         self.cache.metrics()
     }
     pub fn render_web_frame(&self, request: &WebFrameRequest) -> Result<RgbaImage, RasterError> {
+        Ok(self.render_web_frame_with_timing(request)?.0)
+    }
+
+    /// Render a browser frame while retaining WebCodecs presentation timing.
+    ///
+    /// A cache hit returns `None` metadata because no new browser frame was
+    /// produced. The image remains fully usable through the legacy API.
+    pub fn render_web_frame_with_timing(
+        &self,
+        request: &WebFrameRequest,
+    ) -> Result<(RgbaImage, Option<WebFrameTiming>), RasterError> {
         let composition = request.composition.clone().or_else(|| {
             self.composition
                 .lock()
@@ -411,7 +422,7 @@ impl BrowserFrameBackend {
             &cache_inputs,
         );
         if let Some(image) = self.cache.get(&cache_key) {
-            return Ok((*image).clone());
+            return Ok(((*image).clone(), None));
         }
         let encoded =
             serde_json::to_string(&WebWorkerMessage::Render(request.clone())).map_err(|e| {
@@ -465,6 +476,14 @@ impl BrowserFrameBackend {
             bytes = line.len(),
             "browser frame response received"
         );
+        let video_timestamp_us = serde_json::from_str::<WebWorkerMessage>(&line)
+            .ok()
+            .and_then(|message| match message {
+                WebWorkerMessage::Frame(response) if response.frame == request.frame => {
+                    response.video_frame.map(|frame| frame.timestamp_us)
+                }
+                _ => None,
+            });
         let result = match serde_json::from_str::<WebWorkerMessage>(&line) {
             Ok(WebWorkerMessage::Frame(WebFrameResponse {
                 frame,
@@ -621,7 +640,11 @@ impl BrowserFrameBackend {
         if let Ok(ref image) = result {
             self.cache.insert(cache_key, Arc::new(image.clone()));
         }
-        result
+        result.map(|image| {
+            let timing = video_timestamp_us
+                .and_then(|timestamp_us| WebFrameTiming::from_timestamp(timestamp_us, request.fps));
+            (image, timing)
+        })
     }
 }
 impl Drop for BrowserFrameBackend {
@@ -764,8 +787,8 @@ mod tests {
         )
         .unwrap();
         let backend = BrowserFrameBackend::new("/bin/sh", &script, "http://unused").unwrap();
-        let image = backend
-            .render_web_frame(&WebFrameRequest {
+        let (image, timing) = backend
+            .render_web_frame_with_timing(&WebFrameRequest {
                 composition: None,
                 frame: 3,
                 fps: 30.0,
@@ -781,6 +804,13 @@ mod tests {
             })
             .unwrap();
         assert_eq!(image.as_raw(), &[1, 2, 3, 4]);
+        assert_eq!(
+            timing,
+            Some(WebFrameTiming {
+                timestamp_us: 1_250_000,
+                timeline_frame: 37.5,
+            })
+        );
         drop(backend);
         let _ = fs::remove_dir_all(root);
     }
