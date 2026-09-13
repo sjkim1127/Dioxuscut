@@ -181,6 +181,11 @@ may return a Promise for asynchronous asset loading. `frame` is the local frame
 when the composition is used inside a timeline clip; `width`, `height`, and
 `durationInFrames` let Three.js/R3F code configure its camera and responsive
 scene deterministically for both Studio preview and headless export.
+When `DIOXUSCUT_BROWSER_COMPOSITION_MODULE` is set, the worker also discovers
+module exports automatically: an optional `register(api)` function is called,
+then functions in `compositions` (or the default export object) are registered
+under their object keys. This lets an AI-generated entrypoint expose multiple
+Three.js scenes without a separate bootstrap file.
 For adapters that expect Remotion's hook-shaped API, the same host exposes
 `window.dioxuscut.useCurrentFrame()` and
 `window.dioxuscut.useVideoConfig()`. These return the current explicit frame and

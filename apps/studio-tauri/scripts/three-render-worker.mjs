@@ -61,7 +61,15 @@ await page.addInitScript(() => { window.__DIOXUSCUT_HEADLESS_RENDER__ = true; })
 await page.goto(url, { waitUntil: 'domcontentloaded', timeout: frameTimeoutMs });
 if (compositionModule) {
   await page.evaluate(async (moduleUrl) => {
-    await import(moduleUrl);
+    const loadedModule = await eval('import(moduleUrl)');
+    const api = window.dioxuscut;
+    if (typeof loadedModule.register === 'function') await loadedModule.register(api);
+    const entries = loadedModule.compositions ?? loadedModule.default;
+    if (entries && typeof entries === 'object' && !Array.isArray(entries)) {
+      for (const [id, render] of Object.entries(entries)) {
+        if (typeof render === 'function') api.registerComposition(id, render);
+      }
+    }
   }, compositionModule);
 }
 await page.waitForFunction(() => typeof window.dioxuscut?.renderFrame === 'function', {
