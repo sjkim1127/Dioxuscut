@@ -202,7 +202,7 @@ async fn main() -> anyhow::Result<()> {
                     image_format: None,
                     jpeg_quality: None,
                     transparent: true,
-                    transport: None,
+                    transport: Some("rgba".into()),
                 };
                 let (_, timing) = backend.render_web_frame_with_timing(&request)?;
                 let timing = timing.ok_or_else(|| {
