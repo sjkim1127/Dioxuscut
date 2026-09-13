@@ -1418,6 +1418,87 @@ impl WgpuBackend {
         self.text_atlas_upload_bytes.load(Ordering::Relaxed)
     }
 
+    /// Render a GPU-compatible scene without scheduling a CPU readback.
+    ///
+    /// The callback runs after the GPU submission has completed and while the
+    /// target texture remains reserved. It is the extension point for a
+    /// backend-native compositor or encoder. The texture view is borrowed for
+    /// the callback only; callers must not retain it after returning.
+    pub fn render_frame_gpu<F>(
+        &self,
+        scene: &Scene,
+        config: &FrameConfig,
+        consume: F,
+    ) -> Result<(), RasterError>
+    where
+        F: FnOnce(&wgpu::TextureView, u32, u32),
+    {
+        if config.width > self.ctx.max_texture_dimension_2d
+            || config.height > self.ctx.max_texture_dimension_2d
+        {
+            return Err(RasterError::Scene(
+                "GPU-native frame dimensions exceed the device limit".into(),
+            ));
+        }
+        if scene
+            .nodes
+            .iter()
+            .any(|node| matches!(node, SceneNode::Shader { .. }))
+        {
+            return Err(RasterError::Scene(
+                "GPU-native frame sink does not yet support shader nodes".into(),
+            ));
+        }
+        let Some((commands, path_mask)) = compile_scene_with_path_mask(scene, &self.fallback)
+        else {
+            return Err(RasterError::Scene(
+                "scene requires the CPU fallback and has no GPU texture handle".into(),
+            ));
+        };
+
+        let resource = {
+            let mut pool = self
+                .frame_resources
+                .lock()
+                .map_err(|_| RasterError::Init("GPU resource pool mutex poisoned".into()))?;
+            pool.entry((config.width, config.height))
+                .or_insert_with(|| {
+                    Arc::new(Mutex::new(GpuFrameResources::new(
+                        &self.ctx.device,
+                        config.width,
+                        config.height,
+                    )))
+                })
+                .clone()
+        };
+        let mut resources = resource
+            .lock()
+            .map_err(|_| RasterError::Init("GPU frame resource mutex poisoned".into()))?;
+        let slot_idx = resources.active_index % RING_BUFFER_SIZE;
+        resources.active_index = resources.active_index.wrapping_add(1);
+        let (submission_index, rx) = self.submit_frame_to_slot(
+            &commands,
+            path_mask.as_ref(),
+            config.width,
+            config.height,
+            config.fps,
+            &resources.slots[slot_idx],
+            None,
+            false,
+        )?;
+        debug_assert!(rx.is_none());
+        self.ctx
+            .device
+            .poll(wgpu::Maintain::wait_for(submission_index));
+        consume(
+            &resources.slots[slot_idx].texture_view,
+            config.width,
+            config.height,
+        );
+        self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
     fn submit_frame_to_slot(
         &self,
         commands: &[DrawCommand],
@@ -1427,10 +1508,11 @@ impl WgpuBackend {
         sampling_fps: f64,
         slot: &GpuFrameSlot,
         shader_suffix: Option<&[SceneNode]>,
+        readback: bool,
     ) -> Result<
         (
             wgpu::SubmissionIndex,
-            std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
+            Option<std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>>,
         ),
         RasterError,
     > {
@@ -1881,31 +1963,38 @@ impl WgpuBackend {
             }
         }
 
-        encoder.copy_texture_to_buffer(
-            slot.texture.as_image_copy(),
-            wgpu::ImageCopyBuffer {
-                buffer: &slot.readback,
-                layout: wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(slot.bytes_per_row),
-                    rows_per_image: Some(height),
+        if readback {
+            encoder.copy_texture_to_buffer(
+                slot.texture.as_image_copy(),
+                wgpu::ImageCopyBuffer {
+                    buffer: &slot.readback,
+                    layout: wgpu::ImageDataLayout {
+                        offset: 0,
+                        bytes_per_row: Some(slot.bytes_per_row),
+                        rows_per_image: Some(height),
+                    },
                 },
-            },
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-        );
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
 
         let submission_index = queue.submit([encoder.finish()]);
 
-        let (tx, rx) = std::sync::mpsc::channel();
-        slot.readback
-            .slice(..)
-            .map_async(wgpu::MapMode::Read, move |result| {
-                let _ = tx.send(result);
-            });
+        let rx = if readback {
+            let (tx, rx) = std::sync::mpsc::channel();
+            slot.readback
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |result| {
+                    let _ = tx.send(result);
+                });
+            Some(rx)
+        } else {
+            None
+        };
 
         Ok((submission_index, rx))
     }
@@ -2093,6 +2182,7 @@ impl RasterizerBackend for WgpuBackend {
             config.fps,
             &res.slots[slot_idx],
             shader_suffix,
+            true,
         )?;
         // Texture preparation (including video decode and cache-miss upload)
         // is measured separately. This interval is GPU command submission,
@@ -2106,7 +2196,7 @@ impl RasterizerBackend for WgpuBackend {
                 frame_idx: config.frame,
                 slot_idx,
                 submission_index,
-                rx,
+                rx: rx.expect("readback was requested for render_frame"),
             },
             &res,
             width,
@@ -2221,6 +2311,7 @@ impl RasterizerBackend for WgpuBackend {
                 cfg.fps,
                 &res.slots[slot_idx],
                 None,
+                true,
             )?;
             self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
 
@@ -2228,7 +2319,7 @@ impl RasterizerBackend for WgpuBackend {
                 frame_idx: frame,
                 slot_idx,
                 submission_index,
-                rx,
+                rx: rx.expect("readback was requested for render_stream"),
             });
         }
 
@@ -5722,5 +5813,34 @@ mod tests {
                 "Frame {f} rendered via render_stream does not match render_frame"
             );
         }
+    }
+
+    #[test]
+    fn gpu_native_frame_sink_skips_cpu_readback() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping GPU-native sink test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 16.0,
+                h: 16.0,
+                fill: Color::WHITE,
+                stroke: None,
+                stroke_width: 0.0,
+                corner_radius: 0.0,
+            }],
+        };
+        let mut callback_dimensions = None;
+        gpu.render_frame_gpu(
+            &scene,
+            &FrameConfig::new(16, 16, 0, 30.0),
+            |_view, width, height| callback_dimensions = Some((width, height)),
+        )
+        .unwrap();
+        assert_eq!(callback_dimensions, Some((16, 16)));
+        assert_eq!(gpu.video_timing_stats().gpu_submit_readback_ns, 0);
     }
 }
