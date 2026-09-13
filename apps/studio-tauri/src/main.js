@@ -676,7 +676,7 @@ export async function readIsoBmffSample(source, trackIndex, sampleIndex, options
   if (!Number.isInteger(trackIndex) || trackIndex < 0 || !Number.isInteger(sampleIndex) || sampleIndex < 0) {
     throw new RangeError('readIsoBmffSample expects non-negative integer indexes');
   }
-  const parsed = await parseIsoBmffMovieHeader(source, options);
+  const parsed = options.parsed ?? await parseIsoBmffMovieHeader(source, options);
   const track = parsed?.tracks?.[trackIndex];
   const sample = track?.sampleTables?.sampleRanges?.[sampleIndex];
   if (!sample) throw new RangeError(`sample ${sampleIndex} is not available on track ${trackIndex}`);
@@ -685,6 +685,22 @@ export async function readIsoBmffSample(source, trackIndex, sampleIndex, options
   }
   const data = await readMediaRange(source, sample.offset, sample.offset + sample.size, options);
   return { ...sample, data, trackIndex };
+}
+
+export async function readIsoBmffSamples(source, trackIndex, sampleIndexes, options = {}) {
+  if (!Array.isArray(sampleIndexes)) throw new TypeError('readIsoBmffSamples expects an array of sample indexes');
+  const concurrency = Number.isInteger(options.concurrency) && options.concurrency > 0 ? options.concurrency : 4;
+  const parsed = options.parsed ?? await parseIsoBmffMovieHeader(source, options);
+  const output = new Array(sampleIndexes.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < sampleIndexes.length) {
+      const index = cursor++;
+      output[index] = await readIsoBmffSample(source, trackIndex, sampleIndexes[index], { ...options, parsed });
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, sampleIndexes.length) }, worker));
+  return output;
 }
 
 // Convert a fetched sample to the WebCodecs encoded-chunk contract. Keeping
@@ -778,11 +794,11 @@ export async function decodeIsoBmffVideo(source, {
   }
   decoder.configure(decoderConfig);
   try {
-    for (const sample of samples) {
-      decoder.decode(createIsoBmffEncodedChunk({
-        ...sample,
-        data: await readMediaRange(source, sample.offset, sample.offset + sample.size, options),
-      }));
+    const payloads = await readIsoBmffSamples(source, trackIndex, samples.map(({ sampleIndex }) => sampleIndex), {
+      ...options, parsed, concurrency: options.concurrency ?? 4,
+    });
+    for (const sample of payloads) {
+      decoder.decode(createIsoBmffEncodedChunk(sample));
     }
     await decoder.flush();
     if (failure) throw failure;
@@ -828,11 +844,11 @@ export async function decodeIsoBmffAudio(source, {
   }
   decoder.configure(decoderConfig);
   try {
-    for (const sample of samples) {
-      decoder.decode(createIsoBmffEncodedChunk({
-        ...sample,
-        data: await readMediaRange(source, sample.offset, sample.offset + sample.size, options),
-      }, 'audio'));
+    const payloads = await readIsoBmffSamples(source, trackIndex, samples.map(({ sampleIndex }) => sampleIndex), {
+      ...options, parsed, concurrency: options.concurrency ?? 4,
+    });
+    for (const sample of payloads) {
+      decoder.decode(createIsoBmffEncodedChunk(sample, 'audio'));
     }
     await decoder.flush();
     if (failure) throw failure;
@@ -1625,6 +1641,7 @@ window.dioxuscut = {
   probeIsoBmff,
   parseIsoBmffMovieHeader,
   readIsoBmffSample,
+  readIsoBmffSamples,
   createIsoBmffEncodedChunk,
   makeIsoBmffWebCodecsConfig,
   avccToAnnexB,
