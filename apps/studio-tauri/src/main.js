@@ -537,7 +537,7 @@ function webmCodec(codecId) {
 // Read VP8/VP9/AV1 SimpleBlock payloads from a WebM cluster. Ordinary blocks
 // and fixed/Xiph/EBML-laced blocks are supported. Laced frames share the
 // block timestamp because Matroska does not store per-frame timestamps there.
-export async function readWebmSamples(source, trackNumber = 1, options = {}) {
+async function readWebmSamplesFromCue(source, trackNumber = 1, options = {}) {
   const metadata = options.metadata?.cues ? options.metadata : await parseWebmHeader(source);
   if (!metadata?.cues?.length) return [];
   const cues = metadata.cues.filter((cue) => cue.trackNumber === trackNumber || cue.trackNumber == null);
@@ -645,6 +645,25 @@ export async function readWebmSamples(source, trackNumber = 1, options = {}) {
     }
   };
   parseRange(0, bytes.length);
+  return samples;
+}
+
+export async function readWebmSamples(source, trackNumber = 1, options = {}) {
+  const metadata = options.metadata?.cues ? options.metadata : await parseWebmHeader(source);
+  if (!metadata?.cues?.length) return [];
+  const maxSamples = Number.isInteger(options.maxSamples) ? options.maxSamples : Infinity;
+  if (maxSamples <= 0) return [];
+  const matchingCues = metadata.cues.filter((cue) => cue.trackNumber === trackNumber || cue.trackNumber == null);
+  const startCue = Math.max(0, Number(options.cueIndex ?? 0));
+  const samples = [];
+  for (let cueIndex = startCue; cueIndex < matchingCues.length && samples.length < maxSamples; cueIndex += 1) {
+    const clusterSamples = await readWebmSamplesFromCue(source, trackNumber, {
+      ...options,
+      metadata,
+      cueIndex,
+    });
+    samples.push(...clusterSamples.slice(0, maxSamples - samples.length));
+  }
   return samples;
 }
 
