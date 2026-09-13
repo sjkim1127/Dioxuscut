@@ -60,6 +60,7 @@ const preloadedAssets = new Map();
 const imageDimensionsCache = new Map();
 const videoMetadataCache = new Map();
 const audioDurationCache = new Map();
+const audioDataCache = new Map();
 const videoTextureCache = new Map();
 const renderGates = new Map();
 let lottieAdapter = null;
@@ -296,6 +297,43 @@ export async function getAudioDurationInSeconds(source) {
 }
 
 export const getAudioDuration = getAudioDurationInSeconds;
+
+// Browser counterpart of @remotion/media-utils/getAudioData. Decode once per
+// source and expose channel-major PCM data so audio visualizers can share the
+// same frame-driven contract as native compositions.
+export async function getAudioData(source) {
+  if (typeof source !== 'string' || !source) throw new TypeError('getAudioData expects a source URL');
+  if (audioDataCache.has(source)) return audioDataCache.get(source);
+  const task = (async () => {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) throw new Error('Web Audio API is unavailable');
+    const response = await fetch(source);
+    if (!response.ok) throw new Error(`failed to load audio data: ${source}`);
+    const context = new AudioContext();
+    try {
+      const buffer = await context.decodeAudioData(await response.arrayBuffer());
+      return {
+        channelData: Array.from({ length: buffer.numberOfChannels }, (_, channel) =>
+          buffer.getChannelData(channel)),
+        sampleRate: buffer.sampleRate,
+        durationInSeconds: buffer.duration,
+        numberOfChannels: buffer.numberOfChannels,
+        resultId: source,
+      };
+    } finally {
+      await context.close();
+    }
+  })().catch((error) => {
+    audioDataCache.delete(source);
+    throw error;
+  });
+  audioDataCache.set(source, task);
+  return task;
+}
+
+// Hook-shaped alias for browser compositions. Consumers can await the same
+// promise from a frame render and use delayRender around it when necessary.
+export const useAudioData = getAudioData;
 
 // Browser equivalent of Remotion's useVideoTexture for non-React Three.js
 // compositions. The element and texture are cached by source so a frame
@@ -659,6 +697,8 @@ window.dioxuscut = {
   getVideoMetadata,
   getAudioDurationInSeconds,
   getAudioDuration,
+  getAudioData,
+  useAudioData,
   releaseVideoTexture,
   useCurrentFrame,
   useVideoConfig,
