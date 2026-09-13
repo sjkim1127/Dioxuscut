@@ -1995,6 +1995,17 @@ export function releaseVideoTexture(source) {
   return true;
 }
 
+export function clearMediaCaches() {
+  imageDimensionsCache.clear();
+  videoMetadataCache.clear();
+  audioDurationCache.clear();
+  audioDataCache.clear();
+  webmMetadataCache.clear();
+  webmClusterCache.clear();
+  webmClusterCacheBytes = 0;
+  return true;
+}
+
 // Optional browser ecosystem adapter. The core worker stays independent from
 // lottie-web while applications can reuse any Lottie-compatible renderer.
 export function registerLottieAdapter(adapter) {
@@ -2082,8 +2093,11 @@ export function watchStaticFile(fileName, callback) {
     const files = event.detail?.files;
     if (!Array.isArray(files)) return;
     const next = files.find((file) => file?.name === normalized);
-    if (!next && previous) callback(null);
-    if (next && (!previous || next.lastModified !== previous.lastModified)) callback(next);
+    if (!next && previous) { clearMediaCaches(); callback(null); }
+    if (next && (!previous || next.lastModified !== previous.lastModified)) {
+      clearMediaCaches();
+      callback(next);
+    }
     previous = next;
   };
   window.addEventListener('remotion_staticFilesChanged', listener);
@@ -2342,6 +2356,7 @@ window.dioxuscut = {
   visualizeAudio,
   createSmoothSvgPath,
   releaseVideoTexture,
+  clearMediaCaches,
   useCurrentFrame,
   useVideoConfig,
   staticFile,
