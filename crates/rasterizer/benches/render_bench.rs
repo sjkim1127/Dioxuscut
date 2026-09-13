@@ -193,6 +193,22 @@ fn scene_image_source(src: String) -> Scene {
     scene
 }
 
+fn scene_text_heavy() -> Scene {
+    let mut nodes = Vec::with_capacity(80);
+    for index in 0..80u32 {
+        nodes.push(SceneNode::Text {
+            x: 40.0 + (index % 8) as f32 * 230.0,
+            y: 70.0 + (index / 8) as f32 * 92.0,
+            content: format!("Atlas text {:02} Remotion parity", index),
+            font_size: 28.0,
+            color: Color::rgba(230, 240, 255, 255),
+            font_weight: 400,
+            font_sources: Vec::new(),
+        });
+    }
+    Scene { nodes }
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Bench groups
 // ─────────────────────────────────────────────────────────────────
@@ -216,6 +232,18 @@ fn bench_cpu_scenes(c: &mut Criterion) {
             b.iter(|| backend.render_frame(scene, &config).unwrap())
         });
     }
+    group.finish();
+}
+
+fn bench_cpu_text_atlas(c: &mut Criterion) {
+    let backend = TinySkiaBackend::new();
+    let scene = scene_text_heavy();
+    let config = FrameConfig::new(1920, 1080, 0, 30.0);
+    let mut group = c.benchmark_group("cpu_text_atlas_1080p");
+    group.sample_size(20);
+    group.bench_function("80_text_nodes", |b| {
+        b.iter(|| backend.render_frame(&scene, &config).unwrap())
+    });
     group.finish();
 }
 
@@ -488,24 +516,47 @@ fn bench_gpu_concurrent_resolutions(c: &mut Criterion) {
     group.finish();
 }
 
+#[cfg(feature = "gpu")]
+fn bench_gpu_text_atlas(c: &mut Criterion) {
+    use dioxuscut_rasterizer::wgpu_backend::WgpuBackend;
+    let backend = match WgpuBackend::new() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("GPU backend unavailable, skipping text atlas bench: {e}");
+            return;
+        }
+    };
+    let scene = scene_text_heavy();
+    let config = FrameConfig::new(1920, 1080, 0, 30.0);
+    let mut group = c.benchmark_group("gpu_text_atlas_1080p");
+    group.sample_size(15);
+    group.bench_function("80_text_nodes_atlas_reuse", |b| {
+        b.iter(|| backend.render_frame(&scene, &config).unwrap())
+    });
+    eprintln!("text atlas upload bytes after bench: {}", backend.text_atlas_upload_bytes());
+    group.finish();
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Entry points
 // ─────────────────────────────────────────────────────────────────
 
 #[cfg(not(feature = "gpu"))]
-criterion_group!(benches, bench_cpu_scenes, bench_cpu_resolutions);
+criterion_group!(benches, bench_cpu_scenes, bench_cpu_resolutions, bench_cpu_text_atlas);
 
 #[cfg(feature = "gpu")]
 criterion_group!(
     benches,
     bench_cpu_scenes,
     bench_cpu_resolutions,
+    bench_cpu_text_atlas,
     bench_gpu_scenes,
     bench_gpu_image_cache,
     bench_gpu_video_frames,
     bench_gpu_resolutions,
     bench_gpu_streaming,
     bench_gpu_concurrent_resolutions
+    , bench_gpu_text_atlas
 );
 
 criterion_main!(benches);
