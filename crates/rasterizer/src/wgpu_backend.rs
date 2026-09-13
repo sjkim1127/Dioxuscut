@@ -2562,16 +2562,17 @@ fn compile_nodes(
                 children,
                 ..
             } if gpu_layer_effects(filters, *layer_opacity).is_some()
-                && (*mask_mode == crate::scene::MaskMode::Alpha)
+                && (*mask_mode == crate::scene::MaskMode::Alpha
+                    || *mask_mode == crate::scene::MaskMode::Luminance)
                 && (mask.is_none()
-                    || gpu_alpha_rect_mask(mask.as_deref().unwrap_or(&[]), transform)
+                    || gpu_rect_mask(mask.as_deref().unwrap_or(&[]), transform, *mask_mode)
                         .is_some()) =>
             {
                 let (layer_opacity, brightness, grayscale, contrast, saturation) =
                     gpu_layer_effects(filters, *layer_opacity).unwrap();
-                let clip_rect = mask
+                let mask_info = mask
                     .as_deref()
-                    .and_then(|nodes| gpu_alpha_rect_mask(nodes, transform));
+                    .and_then(|nodes| gpu_rect_mask(nodes, transform, *mask_mode));
                 let start = output.len();
                 compile_nodes(children, transform, opacity * layer_opacity, output, font)?;
                 for command in &mut output[start..] {
@@ -2580,8 +2581,9 @@ fn compile_nodes(
                     instance.grayscale[0] = 1.0 - (1.0 - instance.grayscale[0]) * (1.0 - grayscale);
                     instance.contrast[0] *= contrast;
                     instance.saturation[0] *= saturation;
-                    if let Some(clip_rect) = clip_rect {
+                    if let Some((clip_rect, mask_opacity)) = mask_info {
                         instance.clip_rect = clip_rect;
+                        instance.params[3] *= mask_opacity;
                     }
                 }
             }
@@ -2668,7 +2670,11 @@ fn gpu_layer_effects(
     )
 }
 
-fn gpu_alpha_rect_mask(mask: &[SceneNode], transform: Transform) -> Option<[f32; 4]> {
+fn gpu_rect_mask(
+    mask: &[SceneNode],
+    transform: Transform,
+    mask_mode: crate::scene::MaskMode,
+) -> Option<([f32; 4], f32)> {
     let [SceneNode::Rect {
         x,
         y,
@@ -2693,6 +2699,13 @@ fn gpu_alpha_rect_mask(mask: &[SceneNode], transform: Transform) -> Option<[f32;
     {
         return None;
     }
+    let mask_opacity = match mask_mode {
+        crate::scene::MaskMode::Alpha => 1.0,
+        crate::scene::MaskMode::Luminance if fill.r == fill.g && fill.g == fill.b => {
+            f32::from(fill.r) / 255.0
+        }
+        crate::scene::MaskMode::Luminance => return None,
+    };
     // Translation and axis-aligned scale remain exact rectangular clips in
     // screen space. Rotation/shear falls back: a bounding box would overdraw.
     if !transform.sx.is_finite()
@@ -2713,7 +2726,7 @@ fn gpu_alpha_rect_mask(mask: &[SceneNode], transform: Transform) -> Option<[f32;
     if width <= 0.0 || height <= 0.0 {
         return None;
     }
-    Some([x0.min(x1), y0.min(y1), width, height])
+    Some(([x0.min(x1), y0.min(y1), width, height], mask_opacity))
 }
 
 #[cfg(test)]
@@ -3723,6 +3736,62 @@ mod tests {
         );
         assert_eq!(gpu_image.get_pixel(4, 16), cpu_image.get_pixel(4, 16));
         assert_eq!(gpu_image.get_pixel(16, 16), cpu_image.get_pixel(16, 16));
+    }
+
+    #[test]
+    fn gpu_grayscale_luminance_rect_mask_matches_cpu() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping luminance mask GPU test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Layer {
+                opacity: 1.0,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: None,
+                mask: Some(vec![SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 32.0,
+                    h: 32.0,
+                    fill: Color::rgb(128, 128, 128),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                }]),
+                mask_mode: crate::scene::MaskMode::Luminance,
+                filters: Vec::new(),
+                shadow: None,
+                children: vec![SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 32.0,
+                    h: 32.0,
+                    fill: Color::rgb(255, 0, 0),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                }],
+            }],
+        };
+        assert!(gpu_supports_scene(&scene));
+        let config = FrameConfig::new(32, 32, 0, 30.0);
+        let gpu_pixel = gpu
+            .render_frame(&scene, &config)
+            .unwrap()
+            .get_pixel(16, 16)
+            .to_owned();
+        let cpu_pixel = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap()
+            .get_pixel(16, 16)
+            .to_owned();
+        for channel in 0..4 {
+            assert!(
+                (i16::from(gpu_pixel[channel]) - i16::from(cpu_pixel[channel])).abs() <= 2,
+                "GPU/CPU luminance mask mismatch: {gpu_pixel:?} vs {cpu_pixel:?}"
+            );
+        }
     }
 
     #[test]
