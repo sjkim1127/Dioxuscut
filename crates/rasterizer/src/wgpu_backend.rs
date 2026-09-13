@@ -1132,6 +1132,23 @@ fn compile_nodes(
                 compile_nodes(children, next_transform, opacity * group_opacity, output)?;
             }
 
+            // A layer with no offscreen-only effect is semantically just an
+            // opacity group. Keep it on the GPU instead of forcing the whole
+            // frame through tiny-skia; complex layers still take the fallback
+            // path below so their compositing semantics remain exact.
+            SceneNode::Layer {
+                opacity: layer_opacity,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: None,
+                mask: None,
+                filters,
+                shadow: None,
+                children,
+                ..
+            } if filters.is_empty() && layer_opacity.is_finite() => {
+                compile_nodes(children, transform, opacity * layer_opacity, output)?;
+            }
+
             SceneNode::Audio { .. } => {}
             SceneNode::Text { .. }
             | SceneNode::Image { .. }
@@ -1421,6 +1438,35 @@ mod support_tests {
         };
 
         assert!(!gpu_supports_scene(&scene));
+    }
+
+    #[test]
+    fn plain_normal_layers_compile_as_gpu_opacity_groups() {
+        let scene = Scene {
+            nodes: vec![SceneNode::Layer {
+                opacity: 0.5,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: None,
+                mask: None,
+                mask_mode: crate::scene::MaskMode::Alpha,
+                filters: vec![],
+                shadow: None,
+                children: vec![SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 10.0,
+                    h: 10.0,
+                    fill: Color::WHITE,
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                }],
+            }],
+        };
+        assert!(gpu_supports_scene(&scene));
+        assert!(
+            (compile_scene(&scene).unwrap()[0].instance().params[3] - 0.5).abs() < f32::EPSILON
+        );
     }
 }
 

@@ -436,7 +436,7 @@ written into workflow files.
   rendered scene as a legacy fallback, so audio discovered only after frame
   zero is not currently inferred automatically.
 - `SceneLayer` supports rectangular or SVG-path clips, alpha or luminance masks, twelve blend modes, ordered blur/brightness/grayscale/opacity filters, and drop shadows. These effects use CPU offscreen surfaces for export and SVG/CSS equivalents for Player preview.
-- GPU acceleration covers rectangles, circles, tessellated path fills and strokes, nested group transforms and opacity, and gradients with up to 16 stops. Text, image, video, composited layers, and gradients beyond the stop limit use whole-frame CPU fallback.
+- GPU acceleration covers rectangles, circles, tessellated path fills and strokes, nested group transforms and opacity, plain normal layers, and gradients with up to 16 stops. Text, image, video, composited layers with masks/blends/filters, and gradients beyond the stop limit use whole-frame CPU fallback.
 - Text nodes accept ordered local TTF/OTF `font_sources`; native rendering caches those files, shapes glyph runs with Rustybuzz, and falls through per grapheme. `SceneTextBlock` and Rhai `text_box` add Unicode line breaking, fitting, alignment, line limits, and ellipsis. Text without explicit sources still uses platform font discovery and is not pixel-identical across platforms; full mixed-direction paragraph layout remains incomplete.
 - Studio project loading and Tauri render-queue controls are available; timeline editing and media management are not yet a full editor.
 
