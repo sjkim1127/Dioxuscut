@@ -94,6 +94,16 @@ impl TinySkiaBackend {
     pub fn shutdown_media(&self) {
         self.videos.shutdown();
     }
+
+    #[cfg(feature = "gpu")]
+    pub(crate) fn rasterize_text(
+        &self,
+        content: &str,
+        font_size: f32,
+        font_sources: &[String],
+    ) -> Option<crate::font::RenderedText> {
+        self.font.rasterize(content, font_size, font_sources).ok().flatten()
+    }
 }
 
 impl Default for TinySkiaBackend {

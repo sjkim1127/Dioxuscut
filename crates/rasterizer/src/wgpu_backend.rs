@@ -884,6 +884,10 @@ impl WgpuBackend {
         self.gpu_pixels(&key, &frame)
     }
 
+    fn gpu_text(&self, key: &str, pixels: &image::RgbaImage) -> Result<Arc<GpuImageResource>, RasterError> {
+        self.gpu_pixels(key, pixels)
+    }
+
     #[cfg(test)]
     fn gpu_image_cache_len(&self) -> usize {
         self.gpu_images
@@ -942,6 +946,8 @@ impl WgpuBackend {
                     fit,
                     ..
                 } => (self.gpu_video(src, *time, sampling_fps, *looped)?, *fit),
+                DrawCommand::Text { key, pixels, .. } =>
+                    (self.gpu_text(key, pixels)?, ImageFit::Fill),
                 _ => {
                     image_resources.push(None);
                     continue;
@@ -1050,7 +1056,8 @@ impl WgpuBackend {
                     }
                     DrawCommand::Analytic { .. }
                     | DrawCommand::Image { .. }
-                    | DrawCommand::Video { .. } => None,
+                    | DrawCommand::Video { .. }
+                    | DrawCommand::Text { .. } => None,
                 })
                 .collect();
 
@@ -1092,7 +1099,9 @@ impl WgpuBackend {
                         pass.draw_indexed(0..indices.len() as u32, 0, i as u32..i as u32 + 1);
                         i += 1;
                     }
-                    DrawCommand::Image { .. } | DrawCommand::Video { .. } => {
+                    DrawCommand::Image { .. }
+                    | DrawCommand::Video { .. }
+                    | DrawCommand::Text { .. } => {
                         pass.set_pipeline(&self.ctx.image_pipeline);
                         pass.set_bind_group(
                             2,
@@ -1213,7 +1222,7 @@ impl RasterizerBackend for WgpuBackend {
     }
 
     fn render_frame(&self, scene: &Scene, config: &FrameConfig) -> Result<RgbaImage, RasterError> {
-        let Some(commands) = compile_scene(scene) else {
+        let Some(commands) = compile_scene(scene, &self.fallback) else {
             self.cpu_fallback_frame_count.fetch_add(1, Ordering::Relaxed);
             return self.fallback.render_frame(scene, config);
         };
@@ -1341,7 +1350,7 @@ impl RasterizerBackend for WgpuBackend {
             let scene = scene_fn(frame)?;
             let cfg = config_fn(frame);
 
-            let Some(commands) = compile_scene(&scene) else {
+            let Some(commands) = compile_scene(&scene, &self.fallback) else {
                 if let Some(prev) = in_flight.take() {
                     self.drain_slot(prev, &res, width, height, &mut scratch, consume_fn)?;
                 }
@@ -1470,6 +1479,11 @@ enum DrawCommand {
         looped: bool,
         fit: ImageFit,
     },
+    Text {
+        instance: GpuInstance,
+        key: String,
+        pixels: image::RgbaImage,
+    },
 }
 
 impl DrawCommand {
@@ -1478,14 +1492,15 @@ impl DrawCommand {
             Self::Analytic { instance }
             | Self::Mesh { instance, .. }
             | Self::Image { instance, .. }
-            | Self::Video { instance, .. } => instance,
+            | Self::Video { instance, .. }
+            | Self::Text { instance, .. } => instance,
         }
     }
 }
 
-fn compile_scene(scene: &Scene) -> Option<Vec<DrawCommand>> {
+fn compile_scene(scene: &Scene, font: &TinySkiaBackend) -> Option<Vec<DrawCommand>> {
     let mut commands = Vec::new();
-    compile_nodes(&scene.nodes, Transform::identity(), 1.0, &mut commands)?;
+    compile_nodes(&scene.nodes, Transform::identity(), 1.0, &mut commands, font)?;
     Some(commands)
 }
 
@@ -1494,6 +1509,7 @@ fn compile_nodes(
     transform: Transform,
     opacity: f32,
     output: &mut Vec<DrawCommand>,
+    font: &TinySkiaBackend,
 ) -> Option<()> {
     for node in nodes {
         match node {
@@ -1676,6 +1692,30 @@ fn compile_nodes(
                 });
             }
 
+            SceneNode::Text { x, y, content, font_size, color, font_sources, .. } => {
+                if ![*x, *y, *font_size].iter().all(|v| v.is_finite()) || *font_size <= 0.0 {
+                    return None;
+                }
+                let rendered = font.rasterize_text(content, *font_size, font_sources)?;
+                let mut pixels = Vec::with_capacity((rendered.width * rendered.height * 4) as usize);
+                for coverage in rendered.pixels {
+                    let alpha = ((coverage as f32 / 255.0) * (color.a as f32 / 255.0) * opacity * 255.0)
+                        .round().clamp(0.0, 255.0) as u8;
+                    pixels.extend_from_slice(&[
+                        color.r,
+                        color.g,
+                        color.b,
+                        alpha,
+                    ]);
+                }
+                let image = image::RgbaImage::from_raw(rendered.width, rendered.height, pixels)?;
+                let mut instance = GpuInstance::solid(Color::WHITE, 1.0, transform);
+                instance.kind_data[0] = 5;
+                instance.bounds = [*x, *y - rendered.baseline as f32, rendered.width as f32, rendered.height as f32];
+                instance.shape_bounds = instance.bounds;
+                output.push(DrawCommand::Text { instance, key: format!("text:{content}:{font_size:?}:{font_sources:?}:{color:?}"), pixels: image });
+            }
+
             SceneNode::Group {
                 transform: group_transform,
                 opacity: group_opacity,
@@ -1685,7 +1725,7 @@ fn compile_nodes(
                 if !next_transform.is_finite() || !group_opacity.is_finite() {
                     return None;
                 }
-                compile_nodes(children, next_transform, opacity * group_opacity, output)?;
+                compile_nodes(children, next_transform, opacity * group_opacity, output, font)?;
             }
 
             // A layer with no offscreen-only effect is semantically just an
@@ -1707,12 +1747,12 @@ fn compile_nodes(
                     transform,
                     opacity * gpu_layer_opacity(filters, *layer_opacity).unwrap(),
                     output,
+                    font,
                 )?;
             }
 
             SceneNode::Audio { .. } => {}
-            SceneNode::Text { .. }
-            | SceneNode::Gif { .. }
+            SceneNode::Gif { .. }
             | SceneNode::Layer { .. }
             | SceneNode::Emoji { .. }
             | SceneNode::Lottie { .. }
@@ -1737,7 +1777,7 @@ fn gpu_layer_opacity(filters: &[crate::scene::SceneFilter], layer_opacity: f32) 
 
 #[cfg(test)]
 fn gpu_supports_scene(scene: &Scene) -> bool {
-    compile_scene(scene).is_some()
+    compile_scene(scene, &TinySkiaBackend::headless()).is_some()
 }
 
 fn gradient_instance(
@@ -1997,7 +2037,7 @@ mod support_tests {
         };
 
         assert!(gpu_supports_scene(&scene));
-        let commands = compile_scene(&scene).unwrap();
+        let commands = compile_scene(&scene, &TinySkiaBackend::headless()).unwrap();
         assert_eq!(
             commands.len(),
             5,
@@ -2072,7 +2112,7 @@ mod support_tests {
         };
         assert!(gpu_supports_scene(&scene));
         assert!(
-            (compile_scene(&scene).unwrap()[0].instance().params[3] - 0.25).abs() < f32::EPSILON
+            (compile_scene(&scene, &TinySkiaBackend::headless()).unwrap()[0].instance().params[3] - 0.25).abs() < f32::EPSILON
         );
     }
 
@@ -2215,6 +2255,28 @@ mod tests {
             .sum::<u64>() as f64
             / (config.width * config.height * 4) as f64;
         assert!(mean_error < 12.0, "GPU/CPU image mean error was {mean_error}");
+    }
+
+    #[test]
+    fn gpu_text_uses_gpu_texture_path() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping text GPU test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Text {
+                x: 4.0,
+                y: 24.0,
+                content: "GPU text".into(),
+                font_size: 18.0,
+                color: Color::WHITE,
+                font_weight: 400,
+                font_sources: Vec::new(),
+            }],
+        };
+        let image = gpu.render_frame(&scene, &FrameConfig::new(96, 32, 0, 30.0)).unwrap();
+        assert_eq!(gpu.render_stats().gpu_frames, 1);
+        assert!(image.pixels().any(|pixel| pixel[3] > 0));
     }
 
     #[test]
