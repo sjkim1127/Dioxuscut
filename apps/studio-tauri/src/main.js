@@ -566,10 +566,22 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
       const sampleSizePayload = stsz && stsz.offset + stsz.headerSize;
       const uniformSampleSize = sampleSizePayload ? uint32be(bytes, sampleSizePayload + 4) : 0;
       const sampleCount = sampleSizePayload ? uint32be(bytes, sampleSizePayload + 8) : 0;
-      const stscEntries = readEntries(table('stsc'), 8, 4).map((value) => ({
-        firstChunk: Math.floor(value / 0x100000000),
-        samplesPerChunk: value >>> 0,
-      }));
+      const stscBox = table('stsc');
+      const stscEntries = stscBox ? (() => {
+        const payload = stscBox.offset + stscBox.headerSize;
+        const count = uint32be(bytes, payload + 4);
+        const entries = [];
+        for (let index = 0; index < count && index < 1_000_000; index += 1) {
+          const cursor = payload + 8 + index * 12;
+          if (cursor + 12 > stscBox.offset + stscBox.size) break;
+          entries.push({
+            firstChunk: uint32be(bytes, cursor),
+            samplesPerChunk: uint32be(bytes, cursor + 4),
+            sampleDescriptionIndex: uint32be(bytes, cursor + 8),
+          });
+        }
+        return entries;
+      })() : [];
       const chunkOffsets = readEntries(stco, stco?.type === 'co64' ? 8 : 4, 4);
       const sampleSizes = uniformSampleSize ? [] : readEntries(stsz, 4, 8);
       const keyframes = readEntries(stss, 4, 4);
@@ -588,7 +600,11 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
         let cursor = chunkOffsets[chunkIndex];
         for (let inChunk = 0; inChunk < entry.samplesPerChunk && sampleIndex < sampleCount && sampleIndex < 1_000_000; inChunk += 1) {
           const size = uniformSampleSize || sampleSizes[sampleIndex] || 0;
-          sampleRanges.push({ sampleIndex, offset: cursor, size, keyframe: !stss || keyframeSet.has(sampleIndex + 1) });
+          sampleRanges.push({
+            sampleIndex, offset: cursor, size,
+            sampleDescriptionIndex: entry.sampleDescriptionIndex,
+            keyframe: !stss || keyframeSet.has(sampleIndex + 1),
+          });
           cursor += size;
           sampleIndex += 1;
         }
@@ -661,6 +677,7 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
         sampleTables: {
           timeToSample,
           compositionOffsets,
+          sampleToChunk: stscEntries,
           sampleCount: Number.isSafeInteger(sampleCount) ? sampleCount : 0,
           uniformSampleSize: uniformSampleSize || null,
           sampleSizes,

@@ -63,6 +63,7 @@ try {
       codecConfig: parsed.tracks[0].codecConfig.type,
       batchSamples: samples.map(({ sampleIndex, offset, size, timestamp, keyframe, data }) => ({
         sampleIndex, offset, size, timestamp, keyframe, bytes: data.byteLength,
+        sampleDescriptionIndex: parsed.tracks[0].sampleTables.sampleRanges[sampleIndex].sampleDescriptionIndex,
       })),
       ranged: [...ranged],
     };
@@ -87,6 +88,7 @@ try {
   assert.deepEqual(result.batchSamples.map(({ sampleIndex }) => sampleIndex), [0, 1, 2]);
   assert.equal(result.batchSamples[0].timestamp, 0);
   assert.equal(result.batchSamples[0].keyframe, true);
+  assert.equal(result.batchSamples[0].sampleDescriptionIndex, 1);
   assert.ok(result.batchSamples.every(({ size, bytes }) => size === bytes && size > 0));
   assert.deepEqual(result.ranged, [2, 3, 4, 5]);
   console.log(JSON.stringify({ status: 'ok', ...result }));
