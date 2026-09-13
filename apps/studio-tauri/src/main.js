@@ -746,6 +746,41 @@ export async function decodeIsoBmffVideo(source, {
   }
 }
 
+export async function decodeIsoBmffAudio(source, {
+  trackIndex = 0, startSample = 0, endSample = Infinity, codec, description, options = {},
+} = {}) {
+  if (typeof AudioDecoder === 'undefined') throw new Error('AudioDecoder is not available in this runtime');
+  if (typeof codec !== 'string' || !codec) throw new TypeError('decodeIsoBmffAudio requires a codec string');
+  const parsed = await parseIsoBmffMovieHeader(source, options);
+  const track = parsed?.tracks?.[trackIndex];
+  const ranges = track?.sampleTables?.sampleRanges ?? [];
+  const samples = ranges.filter(({ sampleIndex }) => sampleIndex >= startSample && sampleIndex < endSample);
+  if (!samples.length) throw new RangeError('decodeIsoBmffAudio found no samples in the requested range');
+  const chunks = [];
+  let failure;
+  const decoder = new AudioDecoder({
+    output: (audio) => chunks.push(audio),
+    error: (error) => { failure = error; },
+  });
+  decoder.configure({ codec, ...(description ? { description } : {}) });
+  try {
+    for (const sample of samples) {
+      decoder.decode(createIsoBmffEncodedChunk({
+        ...sample,
+        data: await readMediaRange(source, sample.offset, sample.offset + sample.size, options),
+      }, 'audio'));
+    }
+    await decoder.flush();
+    if (failure) throw failure;
+    return chunks;
+  } catch (error) {
+    for (const chunk of chunks) chunk.close();
+    throw error;
+  } finally {
+    decoder.close();
+  }
+}
+
 function uint32be(bytes, offset) {
   return ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0;
 }
@@ -1528,6 +1563,7 @@ window.dioxuscut = {
   readIsoBmffSample,
   createIsoBmffEncodedChunk,
   decodeIsoBmffVideo,
+  decodeIsoBmffAudio,
   readMediaRange,
   getAudioDurationInSeconds,
   getAudioDuration,

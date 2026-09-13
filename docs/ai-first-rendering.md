@@ -308,3 +308,5 @@ available.
 `decodeIsoBmffVideo()` supplies a bounded `VideoDecoder` lifecycle over those
 samples; codec string and optional description remain explicit at the call
 site so the same parser can serve different WebCodecs implementations.
+`decodeIsoBmffAudio()` provides the corresponding `AudioDecoder` lifecycle and
+returns owned `AudioData` objects for the shared audio pipeline.
