@@ -23,6 +23,28 @@ pub enum VisualizeFor {
     Voice,
 }
 
+#[derive(Debug, Clone)]
+pub struct WaveformBarsOptions {
+    pub start_sec: f32,
+    pub duration_sec: f32,
+    pub number_of_samples: usize,
+    pub channel: usize,
+    pub output_range: String,
+    pub normalize: bool,
+    pub data_offset_sec: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct VisualizeAudioWaveformOptions {
+    pub frame: u32,
+    pub fps: f32,
+    pub window_sec: f32,
+    pub number_of_samples: usize,
+    pub channel: usize,
+    pub data_offset_sec: f32,
+    pub normalize: bool,
+}
+
 /// Errors occurring during audio visualization or decoding.
 #[derive(Debug)]
 pub enum AudioVizError {
@@ -256,16 +278,24 @@ pub fn get_waveform_portion_channel(
 /// Returns Remotion-compatible averaged waveform bars for a time window.
 /// Samples outside the decoded source are zero-padded, which keeps frame
 /// centered visualizers stable at the beginning and end of a composition.
-pub fn get_waveform_bars(
-    data: &AudioData,
-    start_sec: f32,
-    duration_sec: f32,
-    number_of_samples: usize,
-    channel: usize,
-    output_range: &str,
-    normalize: bool,
-    data_offset_sec: f32,
-) -> Vec<(usize, f32)> {
+pub fn get_waveform_bars(data: &AudioData, options: &WaveformBarsOptions) -> Vec<(usize, f32)> {
+    let WaveformBarsOptions {
+        start_sec,
+        duration_sec,
+        number_of_samples,
+        channel,
+        output_range,
+        normalize,
+        data_offset_sec,
+    } = options;
+    let (start_sec, duration_sec, number_of_samples, channel, normalize, data_offset_sec) = (
+        *start_sec,
+        *duration_sec,
+        *number_of_samples,
+        *channel,
+        *normalize,
+        *data_offset_sec,
+    );
     if data.channel_waveforms.is_empty()
         || data.sample_rate == 0
         || duration_sec <= 0.0
@@ -275,7 +305,8 @@ pub fn get_waveform_bars(
     }
     let waveform = &data.channel_waveforms[channel.min(data.channel_waveforms.len() - 1)];
     let start = ((start_sec - data_offset_sec) * data.sample_rate as f32).floor() as isize;
-    let end = ((start_sec - data_offset_sec + duration_sec) * data.sample_rate as f32).floor() as isize;
+    let end =
+        ((start_sec - data_offset_sec + duration_sec) * data.sample_rate as f32).floor() as isize;
     let length = (end - start).max(0) as usize;
     let block_size = length / number_of_samples;
     if block_size == 0 {
@@ -315,14 +346,26 @@ pub fn get_waveform_bars(
 /// Frame-based native counterpart of Remotion's `visualizeAudioWaveform`.
 pub fn visualize_audio_waveform(
     data: &AudioData,
-    frame: u32,
-    fps: f32,
-    window_sec: f32,
-    number_of_samples: usize,
-    channel: usize,
-    data_offset_sec: f32,
-    normalize: bool,
+    options: &VisualizeAudioWaveformOptions,
 ) -> Vec<f32> {
+    let VisualizeAudioWaveformOptions {
+        frame,
+        fps,
+        window_sec,
+        number_of_samples,
+        channel,
+        data_offset_sec,
+        normalize,
+    } = options;
+    let (frame, fps, window_sec, number_of_samples, channel, data_offset_sec, normalize) = (
+        *frame,
+        *fps,
+        *window_sec,
+        *number_of_samples,
+        *channel,
+        *data_offset_sec,
+        *normalize,
+    );
     if !fps.is_finite() || fps <= 0.0 || !window_sec.is_finite() || window_sec <= 0.0 {
         return Vec::new();
     }
@@ -332,13 +375,15 @@ pub fn visualize_audio_waveform(
     let start = frame as f32 / fps - window_sec / 2.0;
     get_waveform_bars(
         data,
-        start,
-        window_sec,
-        number_of_samples,
-        channel,
-        "minus-one-to-one",
-        normalize,
-        data_offset_sec,
+        &WaveformBarsOptions {
+            start_sec: start,
+            duration_sec: window_sec,
+            number_of_samples,
+            channel,
+            output_range: "minus-one-to-one".to_owned(),
+            normalize,
+            data_offset_sec,
+        },
     )
     .into_iter()
     .map(|(_, amplitude)| amplitude)
@@ -469,7 +514,18 @@ mod tests {
             sample_rate: 4,
             duration_secs: 1.0,
         };
-        let bars = get_waveform_bars(&data, -0.5, 1.5, 2, 0, "minus-one-to-one", false, 0.0);
+        let bars = get_waveform_bars(
+            &data,
+            &WaveformBarsOptions {
+                start_sec: -0.5,
+                duration_sec: 1.5,
+                number_of_samples: 2,
+                channel: 0,
+                output_range: "minus-one-to-one".into(),
+                normalize: false,
+                data_offset_sec: 0.0,
+            },
+        );
         assert_eq!(bars.len(), 2);
         assert_eq!(bars[0].0, 0);
         assert!((bars[0].1 + (0.25 / 3.0)).abs() < 1.0e-6);
@@ -483,7 +539,18 @@ mod tests {
             sample_rate: 6,
             duration_secs: 1.0,
         };
-        let bars = visualize_audio_waveform(&data, 1, 6.0, 1.0, 2, 0, 0.0, false);
+        let bars = visualize_audio_waveform(
+            &data,
+            &VisualizeAudioWaveformOptions {
+                frame: 1,
+                fps: 6.0,
+                window_sec: 1.0,
+                number_of_samples: 2,
+                channel: 0,
+                data_offset_sec: 0.0,
+                normalize: false,
+            },
+        );
         assert_eq!(bars.len(), 2);
         assert!(bars[0] <= 0.0);
         assert!(bars[1] >= 0.0);
