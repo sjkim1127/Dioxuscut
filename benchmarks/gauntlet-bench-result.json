@@ -1,0 +1,26 @@
+{
+  "workload": "The Gauntlet: 1080p 30fps 900-frame (30s) Heavy Stress Scene",
+  "features": [
+    "2x Simultaneous Decoded MP4 Video Streams (PiP)",
+    "20 High-Res PNG Image Cards with Sinusoidal Floating",
+    "60 Floating Light Particle Orbs",
+    "Heavy Glassmorphism Layer with Blur Sigma 30.0",
+    "Multilingual Text (Korean, English, Symbols, Emojis)",
+    "900 Total Frames (5x standard duration)"
+  ],
+  "concurrency": 4,
+  "platform": "darwin (arm64)",
+  "cpu": "Apple M4 Pro",
+  "bundle_ms": 453.05675,
+  "browser_startup_ms": 537.557375,
+  "remotion": {
+    "render_ms": 60279.912041,
+    "fps": 14.93034693527515
+  },
+  "dioxuscut": {
+    "process_ms": 45859.7385,
+    "render_ms": 45844.3,
+    "fps": 19.62505739102721
+  },
+  "speedup": 1.3144408148118856
+}
