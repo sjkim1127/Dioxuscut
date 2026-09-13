@@ -2669,29 +2669,38 @@ fn compile_nodes(
                     instance.grayscale[0] = 1.0 - (1.0 - instance.grayscale[0]) * (1.0 - grayscale);
                     instance.contrast[0] *= contrast;
                     instance.saturation[0] *= saturation;
-                    if let Some((
-                        clip_rects,
-                        mask_opacity,
-                        mask_kinds,
-                        mask_shapes,
-                        mask_color0,
-                        mask_color1,
-                        mask_color2,
-                        mask_color3,
-                        mask_stop_positions,
-                        mask_stop_counts,
-                    )) = mask_info
-                    {
-                        instance.clip_rects = clip_rects;
-                        instance.mask_opacity = mask_opacity;
-                        instance.mask_kinds = mask_kinds;
-                        instance.mask_shapes = mask_shapes;
-                        instance.mask_color0 = mask_color0;
-                        instance.mask_color1 = mask_color1;
-                        instance.mask_color2 = mask_color2;
-                        instance.mask_color3 = mask_color3;
-                        instance.mask_stop_positions = mask_stop_positions;
-                        instance.mask_stop_counts = mask_stop_counts;
+                    if let Some(mask_info) = mask_info {
+                        apply_gpu_mask_info(instance, mask_info);
+                    }
+                }
+            }
+
+            SceneNode::Layer {
+                opacity: layer_opacity,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: Some(clip),
+                mask: None,
+                mask_mode: crate::scene::MaskMode::Alpha,
+                filters,
+                shadow: None,
+                children,
+                ..
+            } if gpu_layer_effects(filters, *layer_opacity).is_some()
+                && gpu_clip_mask_info(clip, transform).is_some() =>
+            {
+                let (layer_opacity, brightness, grayscale, contrast, saturation) =
+                    gpu_layer_effects(filters, *layer_opacity).unwrap();
+                let mask_info = gpu_clip_mask_info(clip, transform);
+                let start = output.len();
+                compile_nodes(children, transform, opacity * layer_opacity, output, font)?;
+                for command in &mut output[start..] {
+                    let instance = command.instance_mut();
+                    instance.brightness[0] *= brightness;
+                    instance.grayscale[0] = 1.0 - (1.0 - instance.grayscale[0]) * (1.0 - grayscale);
+                    instance.contrast[0] *= contrast;
+                    instance.saturation[0] *= saturation;
+                    if let Some(mask_info) = mask_info {
+                        apply_gpu_mask_info(instance, mask_info);
                     }
                 }
             }
@@ -2778,6 +2787,71 @@ fn gpu_layer_effects(
     )
 }
 
+type GpuMaskInfo = (
+    [[f32; 4]; 4],
+    [f32; 4],
+    [u32; 4],
+    [[f32; 4]; 4],
+    [[f32; 4]; 4],
+    [[f32; 4]; 4],
+    [[f32; 4]; 4],
+    [[f32; 4]; 4],
+    [[f32; 4]; 4],
+    [u32; 4],
+);
+
+fn gpu_clip_mask_info(
+    clip: &crate::scene::ClipRegion,
+    transform: Transform,
+) -> Option<GpuMaskInfo> {
+    let crate::scene::ClipRegion::Rect {
+        x,
+        y,
+        w,
+        h,
+        corner_radius,
+    } = clip
+    else {
+        return None;
+    };
+    let node = SceneNode::Rect {
+        x: *x,
+        y: *y,
+        w: *w,
+        h: *h,
+        fill: Color::WHITE,
+        stroke: None,
+        stroke_width: 0.0,
+        corner_radius: *corner_radius,
+    };
+    gpu_mask_shapes(&[node], transform, crate::scene::MaskMode::Alpha)
+}
+
+fn apply_gpu_mask_info(instance: &mut GpuInstance, info: GpuMaskInfo) {
+    let (
+        clip_rects,
+        mask_opacity,
+        mask_kinds,
+        mask_shapes,
+        mask_color0,
+        mask_color1,
+        mask_color2,
+        mask_color3,
+        mask_stop_positions,
+        mask_stop_counts,
+    ) = info;
+    instance.clip_rects = clip_rects;
+    instance.mask_opacity = mask_opacity;
+    instance.mask_kinds = mask_kinds;
+    instance.mask_shapes = mask_shapes;
+    instance.mask_color0 = mask_color0;
+    instance.mask_color1 = mask_color1;
+    instance.mask_color2 = mask_color2;
+    instance.mask_color3 = mask_color3;
+    instance.mask_stop_positions = mask_stop_positions;
+    instance.mask_stop_counts = mask_stop_counts;
+}
+
 fn valid_gpu_gradient_stops(stops: &[crate::scene::GradientStop]) -> bool {
     if !(2..=4).contains(&stops.len())
         || (stops.first().map(|stop| stop.position) != Some(0.0))
@@ -2796,18 +2870,7 @@ fn gpu_mask_shapes(
     mask: &[SceneNode],
     transform: Transform,
     mask_mode: crate::scene::MaskMode,
-) -> Option<(
-    [[f32; 4]; 4],
-    [f32; 4],
-    [u32; 4],
-    [[f32; 4]; 4],
-    [[f32; 4]; 4],
-    [[f32; 4]; 4],
-    [[f32; 4]; 4],
-    [[f32; 4]; 4],
-    [[f32; 4]; 4],
-    [u32; 4],
-)> {
+) -> Option<GpuMaskInfo> {
     if mask.is_empty() || mask.len() > 4 {
         return None;
     }
@@ -4278,6 +4341,49 @@ mod tests {
         for (x, y) in [(16, 16), (1, 1)] {
             assert_eq!(gpu_image.get_pixel(x, y), cpu_image.get_pixel(x, y));
         }
+    }
+
+    #[test]
+    fn gpu_layer_clip_rect_matches_cpu_at_stable_pixels() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping layer clip GPU test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Layer {
+                opacity: 1.0,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: Some(crate::scene::ClipRegion::Rect {
+                    x: 4.0,
+                    y: 4.0,
+                    w: 24.0,
+                    h: 24.0,
+                    corner_radius: 0.0,
+                }),
+                mask: None,
+                mask_mode: crate::scene::MaskMode::Alpha,
+                filters: Vec::new(),
+                shadow: None,
+                children: vec![SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 32.0,
+                    h: 32.0,
+                    fill: Color::rgb(255, 0, 0),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                }],
+            }],
+        };
+        assert!(gpu_supports_scene(&scene));
+        let config = FrameConfig::new(32, 32, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        assert_eq!(gpu_image.get_pixel(16, 16), cpu_image.get_pixel(16, 16));
+        assert_eq!(gpu_image.get_pixel(1, 1), cpu_image.get_pixel(1, 1));
     }
 
     #[test]
