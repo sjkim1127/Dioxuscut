@@ -260,8 +260,10 @@ the returned length; native reads seek locally and read exactly the requested
 bytes. `parseMedia()` also accepts Remotion-shaped `onDimensions`,
 `onDurationInSeconds`, and `onParseProgress` callbacks; progress is currently
 metadata-level (the byte total remains unknown) until the incremental container
-parser lands. These APIs are the foundation for adding sample parsers without
-forcing a whole asset into memory.
+parser lands. WAV metadata is already parsed incrementally, and
+`probeIsoBmff()` discovers MP4/MOV top-level boxes (`ftyp`, `moov`, `mdat`)
+without reading payloads. These APIs are the foundation for adding sample
+parsers without forcing a whole asset into memory.
 
 Studio integrations may use `watchStaticFile(fileName, callback)` and dispatch
 `remotion_staticFilesChanged` with `{files: [{name, lastModified}]}`. The

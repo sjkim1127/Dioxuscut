@@ -293,12 +293,13 @@ export async function parseMedia({
   const selectFields = (result) => !Array.isArray(fields) || fields.length === 0
     ? result
     : Object.fromEntries(fields.filter((field) => field in result).map((field) => [field, result[field]]));
+  const container = await probeIsoBmff(src).catch(() => null);
   const wav = await parseWavMetadata(src).catch(() => null);
   if (wav) {
     await onDimensions?.(null);
     await onDurationInSeconds?.(wav.durationInSeconds);
     await onParseProgress?.({ bytes: 0, percentage: 1, totalBytes: null });
-    return selectFields(wav);
+    return selectFields({ ...wav, container: 'wav' });
   }
   const [video, image, audioDuration] = await Promise.all([
     getVideoMetadata(src).catch(() => null),
@@ -318,6 +319,7 @@ export async function parseMedia({
     dimensions,
     videoTracks: video ? [{ width: video.width, height: video.height, aspectRatio: video.aspectRatio }] : [],
     audioTracks: audioDuration !== null ? [{ durationInSeconds: audioDuration }] : [],
+    container: container?.container ?? null,
     isRemote: /^https?:\/\//i.test(src),
   };
   return selectFields(result);
@@ -394,6 +396,47 @@ export async function parseWavMetadata(source, { requestInit } = {}) {
     isRemote: /^https?:\/\//i.test(source),
     audioFormat: format.audioFormat,
   };
+}
+
+// Bounded ISO-BMFF structure probe. It discovers top-level boxes without
+// fetching media payloads, which is useful for remote MP4/MOV assets and is
+// the first stage of the native/browser container parser shared contract.
+export async function probeIsoBmff(source, { requestInit, maxBytes = 16 * 1024 * 1024 } = {}) {
+  if (!Number.isInteger(maxBytes) || maxBytes < 8 || maxBytes > 16 * 1024 * 1024) {
+    throw new RangeError('probeIsoBmff maxBytes must be between 8 and 16 MiB');
+  }
+  const boxes = [];
+  let offset = 0;
+  while (offset + 8 <= maxBytes) {
+    const head = await readMediaRange(source, offset, offset + 8, { requestInit });
+    if (head.length < 8) break;
+    const size32 = uint32be(head, 0);
+    const type = ascii(head, 4, 4);
+    let headerSize = 8;
+    let size = size32;
+    if (size32 === 1) {
+      const extended = await readMediaRange(source, offset + 8, offset + 16, { requestInit });
+      if (extended.length < 8) break;
+      size = Number((BigInt(uint32be(extended, 0)) << 32n) | BigInt(uint32be(extended, 4)));
+      headerSize = 16;
+    } else if (size32 === 0) {
+      break;
+    }
+    if (!Number.isSafeInteger(size) || size < headerSize || offset + size > maxBytes) break;
+    boxes.push({ type, offset, size, headerSize, payloadOffset: offset + headerSize });
+    offset += size;
+  }
+  if (!boxes.some(({ type }) => type === 'ftyp')) return null;
+  return {
+    container: 'iso-base-media',
+    boxes,
+    hasMovieHeader: boxes.some(({ type }) => type === 'moov'),
+    isRemote: /^https?:\/\//i.test(source),
+  };
+}
+
+function uint32be(bytes, offset) {
+  return ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0;
 }
 
 // Browser equivalent of @remotion/media-utils/getAudioDurationInSeconds.
@@ -1169,6 +1212,7 @@ window.dioxuscut = {
   getVideoMetadata,
   parseMedia,
   parseWavMetadata,
+  probeIsoBmff,
   readMediaRange,
   getAudioDurationInSeconds,
   getAudioDuration,
