@@ -345,6 +345,13 @@ export function getInputProps() {
     : JSON.parse(JSON.stringify(activeProps));
 }
 
+export function getRemotionEnvironment() {
+  const isRendering = window.__DIOXUSCUT_HEADLESS_RENDER__ === true;
+  return { isRendering, isStudio: !isRendering, isPlayer: false };
+}
+
+export const useRemotionEnvironment = getRemotionEnvironment;
+
 // Explicit frame input keeps this scene deterministic for future exports.
 function renderDefaultFrame({ composition, frame: nextFrame, fps, props, width, height }) {
   frame = nextFrame;
@@ -552,6 +559,8 @@ window.dioxuscut = {
   staticFile,
   getStaticFiles,
   getInputProps,
+  getRemotionEnvironment,
+  useRemotionEnvironment,
 };
 
 function resize() {

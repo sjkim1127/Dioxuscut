@@ -39,6 +39,7 @@ try {
         frame: window.dioxuscut.useCurrentFrame(),
         config: window.dioxuscut.useVideoConfig(),
         inputProps: window.dioxuscut.getInputProps(),
+        environment: window.dioxuscut.useRemotionEnvironment(),
         staticFile: window.dioxuscut.staticFile('assets/demo.png'),
         staticFiles: window.dioxuscut.getStaticFiles(),
       };
@@ -170,6 +171,8 @@ try {
     'static files did not expose the active request assets');
   assert(result.hookContext.inputProps.title === 'smoke' && result.hookContext.inputProps.nested.value === 1,
     `input props were not synchronized: ${JSON.stringify(result.hookContext.inputProps)}`);
+  assert(result.hookContext.environment.isRendering && !result.hookContext.environment.isPlayer,
+    `unexpected render environment: ${JSON.stringify(result.hookContext.environment)}`);
   assert(result.imageDimensions.width === 1 && result.imageDimensions.height === 1,
     `unexpected image dimensions: ${JSON.stringify(result.imageDimensions)}`);
   assert(result.cachedImageDimensions.width === 1 && result.cachedImageDimensions.height === 1,

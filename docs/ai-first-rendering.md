@@ -197,6 +197,9 @@ on the current project render request.
 `window.dioxuscut.getInputProps()` returns a cloned snapshot of the active
 project props, matching the non-hook Remotion API while preventing a
 composition from mutating the host-owned request object.
+`getRemotionEnvironment()` (and its hook-shaped alias
+`useRemotionEnvironment()`) reports `{isRendering, isStudio, isPlayer}` so a
+composition can distinguish headless export from interactive preview.
 For non-React Three.js compositions, `window.dioxuscut.useVideoTexture(src,
 {frame, fps})` (also available as `getVideoTexture`) returns a cached
 `THREE.VideoTexture` after `loadeddata` and
