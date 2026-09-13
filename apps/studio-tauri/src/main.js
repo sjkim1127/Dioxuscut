@@ -1971,7 +1971,11 @@ async function seekVideoTexture(entry, options) {
   if (entry.frame === frame && entry.playbackRate === playbackRate && entry.startFrom === normalizedStartFrom) return;
   if (entry.seekPromise) await entry.seekPromise;
   if (entry.frame === frame && entry.playbackRate === playbackRate && entry.startFrom === normalizedStartFrom) return;
-  const time = Math.max(0, (frame + (Number.isFinite(startFrom) ? startFrom : 0)) * playbackRate / fps);
+  // Match Remotion's getExpectedMediaFrameUncorrected(): the media starts at
+  // startFrom, and playbackRate applies only to frames after that point.
+  const time = Math.max(0, (frame <= normalizedStartFrom
+    ? frame
+    : normalizedStartFrom + (frame - normalizedStartFrom) * playbackRate) / fps);
   const { video } = entry;
   if (Math.abs(video.currentTime - time) <= 1e-4 && video.readyState >= 2) {
     entry.frame = frame;
