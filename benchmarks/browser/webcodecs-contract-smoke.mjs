@@ -70,6 +70,15 @@ try {
   await page.route('**/assets/webm-fixture.webm', (route) => route.fulfill({
     status: 200, contentType: 'video/webm', body: webmFixture,
   }));
+  let rejectedWebmRange = false;
+  await page.route('**/assets/webm-416-fixture.webm', (route) => {
+    const range = route.request().headers().range;
+    if (range && !rejectedWebmRange && !/^bytes=0-3$/.test(range)) {
+      rejectedWebmRange = true;
+      return route.fulfill({ status: 416, contentType: 'text/plain', body: 'range not satisfiable' });
+    }
+    return route.fulfill({ status: 200, contentType: 'video/webm', body: webmFixture });
+  });
   await page.route('**/assets/webm-vp8-fixture.webm', (route) => route.fulfill({
     status: 200, contentType: 'video/webm', body: webmVp8Fixture,
   }));
@@ -110,6 +119,7 @@ try {
       onKeyframes: (value) => webmEvents.push(['keyframes', value[0]?.positionInBytes]),
     });
     const webmSamples = await window.dioxuscut.readWebmSamples('/assets/webm-fixture.webm', 1);
+    const webm416Samples = await window.dioxuscut.readWebmSamples('/assets/webm-416-fixture.webm', 1, { maxSamples: 1 });
     const webmChunks = webmSamples.slice(0, 2).map((sample) =>
       window.dioxuscut.createWebmEncodedVideoChunk(sample, 1 / 24));
     const webmFrames = await window.dioxuscut.decodeWebmVideo('/assets/webm-fixture.webm', {
@@ -241,6 +251,7 @@ try {
         keyframeCallback: webmEvents,
         cues: webmMetadata.keyframes?.length ?? 0,
         samples: webmSamples.length,
+        rangeFallbackSamples: webm416Samples.length,
         decoded: webmFrames.length,
         streamed: { count: streamedWebmFrames, returnValue: streamedWebmResult },
         audioSamples: webmAudioSamples.length,
@@ -303,6 +314,7 @@ try {
   assert.ok(result.webm.keyframeCallback.some(([name, position]) => name === 'keyframes' && position > 0));
   assert.ok(result.webm.cues > 0);
   assert.ok(result.webm.samples > 0);
+  assert.equal(result.webm.rangeFallbackSamples, 1);
   assert.equal(result.webm.decoded, 3);
   assert.equal(result.webm.streamed.count, 3);
   assert.equal(result.webm.streamed.returnValue, null);
