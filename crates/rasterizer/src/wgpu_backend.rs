@@ -171,6 +171,7 @@ struct InstanceData {
     color2: vec4<f32>,
     brightness: vec4<f32>,
     grayscale: vec4<f32>,
+    contrast: vec4<f32>,
     // corner radius, stroke width, angle, inherited opacity
     params: vec4<f32>,
     // x' = dot(transform_x.xyz, vec3(x, y, 1))
@@ -281,21 +282,24 @@ fn linear_to_srgb(channel: f32) -> f32 {
 }
 
 fn apply_color_filters(color: vec4<f32>, instance: InstanceData) -> vec4<f32> {
-    var rgb = color.rgb * instance.brightness.x;
+    if instance.brightness.x == 1.0 && instance.grayscale.x == 0.0 && instance.contrast.x == 1.0 {
+        return color;
+    }
+    var srgb = color.rgb;
+    if instance.kind_data.x != 5u {
+        srgb = vec3<f32>(
+            linear_to_srgb(clamp(color.r, 0.0, 1.0)),
+            linear_to_srgb(clamp(color.g, 0.0, 1.0)),
+            linear_to_srgb(clamp(color.b, 0.0, 1.0)),
+        );
+    }
+    srgb = srgb * instance.brightness.x;
     if instance.grayscale.x > 0.0 {
-        var srgb = rgb;
-        if instance.kind_data.x != 5u {
-            srgb = vec3<f32>(
-                linear_to_srgb(clamp(rgb.r, 0.0, 1.0)),
-                linear_to_srgb(clamp(rgb.g, 0.0, 1.0)),
-                linear_to_srgb(clamp(rgb.b, 0.0, 1.0)),
-            );
-        }
         let gray = dot(srgb, vec3<f32>(0.2126, 0.7152, 0.0722));
         srgb = mix(srgb, vec3<f32>(gray), instance.grayscale.x);
-        rgb = srgb;
     }
-    return vec4<f32>(rgb, color.a);
+    srgb = (srgb - vec3<f32>(0.5)) * instance.contrast.x + vec3<f32>(0.5);
+    return vec4<f32>(clamp(srgb, vec3<f32>(0.0), vec3<f32>(1.0)), color.a);
 }
 
 @fragment
@@ -2165,6 +2169,7 @@ struct GpuInstance {
     color2: [f32; 4],
     brightness: [f32; 4],
     grayscale: [f32; 4],
+    contrast: [f32; 4],
     params: [f32; 4],
     transform_x: [f32; 4],
     transform_y: [f32; 4],
@@ -2183,6 +2188,7 @@ impl GpuInstance {
             color2: [0.0; 4],
             brightness: [1.0, 0.0, 0.0, 0.0],
             grayscale: [0.0, 0.0, 0.0, 0.0],
+            contrast: [1.0, 0.0, 0.0, 0.0],
             params: [0.0, 0.0, 0.0, opacity],
             transform_x,
             transform_y,
@@ -2518,7 +2524,7 @@ fn compile_nodes(
                 children,
                 ..
             } if gpu_layer_effects(filters, *layer_opacity).is_some() => {
-                let (layer_opacity, brightness, grayscale) =
+                let (layer_opacity, brightness, grayscale, contrast) =
                     gpu_layer_effects(filters, *layer_opacity).unwrap();
                 let start = output.len();
                 compile_nodes(children, transform, opacity * layer_opacity, output, font)?;
@@ -2526,6 +2532,7 @@ fn compile_nodes(
                     let instance = command.instance_mut();
                     instance.brightness[0] *= brightness;
                     instance.grayscale[0] = 1.0 - (1.0 - instance.grayscale[0]) * (1.0 - grayscale);
+                    instance.contrast[0] *= contrast;
                 }
             }
 
@@ -2544,27 +2551,37 @@ fn compile_nodes(
 fn gpu_layer_effects(
     filters: &[crate::scene::SceneFilter],
     layer_opacity: f32,
-) -> Option<(f32, f32, f32)> {
+) -> Option<(f32, f32, f32, f32)> {
     if !layer_opacity.is_finite() {
         return None;
     }
     filters.iter().try_fold(
-        (layer_opacity, 1.0, 0.0),
-        |(opacity, brightness, grayscale), filter| match filter {
+        (layer_opacity, 1.0, 0.0, 1.0),
+        |(opacity, brightness, grayscale, contrast), filter| match filter {
             crate::scene::SceneFilter::Opacity { amount }
                 if amount.is_finite() && (0.0..=1.0).contains(amount) =>
             {
-                Some((opacity * amount, brightness, grayscale))
+                Some((opacity * amount, brightness, grayscale, contrast))
             }
             crate::scene::SceneFilter::Brightness { amount }
                 if amount.is_finite() && (0.0..=10.0).contains(amount) =>
             {
-                Some((opacity, brightness * amount, grayscale))
+                Some((opacity, brightness * amount, grayscale, contrast))
             }
             crate::scene::SceneFilter::Grayscale { amount }
                 if amount.is_finite() && (0.0..=1.0).contains(amount) =>
             {
-                Some((opacity, brightness, grayscale + amount - grayscale * amount))
+                Some((
+                    opacity,
+                    brightness,
+                    grayscale + amount - grayscale * amount,
+                    contrast,
+                ))
+            }
+            crate::scene::SceneFilter::Contrast { factor }
+                if factor.is_finite() && *factor >= 0.0 =>
+            {
+                Some((opacity, brightness, grayscale, contrast * factor))
             }
             _ => None,
         },
@@ -3414,7 +3431,7 @@ mod tests {
     }
 
     #[test]
-    fn gpu_grayscale_filter_matches_cpu_for_normal_layer() {
+    fn gpu_grayscale_and_contrast_filters_match_cpu_for_normal_layer() {
         let Ok(gpu) = WgpuBackend::new() else {
             println!("GPU backend unavailable; skipping grayscale GPU test");
             return;
@@ -3426,7 +3443,10 @@ mod tests {
                 clip: None,
                 mask: None,
                 mask_mode: crate::scene::MaskMode::Alpha,
-                filters: vec![crate::scene::SceneFilter::Grayscale { amount: 1.0 }],
+                filters: vec![
+                    crate::scene::SceneFilter::Grayscale { amount: 1.0 },
+                    crate::scene::SceneFilter::Contrast { factor: 1.5 },
+                ],
                 shadow: None,
                 children: vec![SceneNode::Rect {
                     x: 8.0,
