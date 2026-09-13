@@ -173,6 +173,7 @@ struct InstanceData {
     grayscale: vec4<f32>,
     contrast: vec4<f32>,
     saturation: vec4<f32>,
+    clip_rect: vec4<f32>,
     // corner radius, stroke width, angle, inherited opacity
     params: vec4<f32>,
     // x' = dot(transform_x.xyz, vec3(x, y, 1))
@@ -192,6 +193,7 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) local_position: vec2<f32>,
     @location(1) @interpolate(flat) instance_index: u32,
+    @location(2) transformed_position: vec2<f32>,
 };
 
 fn to_clip_position(pixel_position: vec2<f32>) -> vec4<f32> {
@@ -229,7 +231,7 @@ fn vs_main(
         dot(instance.transform_x.xyz, value),
         dot(instance.transform_y.xyz, value),
     );
-    return VertexOutput(to_clip_position(transformed), pixel_pos, iid);
+    return VertexOutput(to_clip_position(transformed), pixel_pos, iid, transformed);
 }
 
 struct MeshVertexInput {
@@ -247,7 +249,7 @@ fn vs_mesh(
         dot(instance.transform_x.xyz, value),
         dot(instance.transform_y.xyz, value),
     );
-    return VertexOutput(to_clip_position(transformed), vertex.position, iid);
+    return VertexOutput(to_clip_position(transformed), vertex.position, iid, transformed);
 }
 
 fn gradient_color(instance_idx: u32, t: f32) -> vec4<f32> {
@@ -308,6 +310,13 @@ fn apply_color_filters(color: vec4<f32>, instance: InstanceData) -> vec4<f32> {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let instance = instances[in.instance_index];
+    if instance.clip_rect.z >= 0.0 &&
+        (in.transformed_position.x < instance.clip_rect.x ||
+         in.transformed_position.y < instance.clip_rect.y ||
+         in.transformed_position.x >= instance.clip_rect.x + instance.clip_rect.z ||
+         in.transformed_position.y >= instance.clip_rect.y + instance.clip_rect.w) {
+        discard;
+    }
     let shape_type = instance.kind_data.x;
     let shape = instance.shape_bounds;
     var col = instance.color;
@@ -370,6 +379,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 @fragment
 fn fs_solid(in: VertexOutput) -> @location(0) vec4<f32> {
     let instance = instances[in.instance_index];
+    if instance.clip_rect.z >= 0.0 &&
+        (in.transformed_position.x < instance.clip_rect.x ||
+         in.transformed_position.y < instance.clip_rect.y ||
+         in.transformed_position.x >= instance.clip_rect.x + instance.clip_rect.z ||
+         in.transformed_position.y >= instance.clip_rect.y + instance.clip_rect.w) {
+        discard;
+    }
     let color = apply_color_filters(instance.color, instance);
     return vec4<f32>(color.rgb, color.a * instance.params.w);
 }
@@ -377,6 +393,13 @@ fn fs_solid(in: VertexOutput) -> @location(0) vec4<f32> {
 @fragment
 fn fs_image(in: VertexOutput) -> @location(0) vec4<f32> {
     let instance = instances[in.instance_index];
+    if instance.clip_rect.z >= 0.0 &&
+        (in.transformed_position.x < instance.clip_rect.x ||
+         in.transformed_position.y < instance.clip_rect.y ||
+         in.transformed_position.x >= instance.clip_rect.x + instance.clip_rect.z ||
+         in.transformed_position.y >= instance.clip_rect.y + instance.clip_rect.w) {
+        discard;
+    }
     let bounds = instance.shape_bounds;
     let local = (in.local_position - bounds.xy) / max(bounds.zw, vec2<f32>(0.000001));
     let uv = mix(instance.params.xy, instance.params.zw, clamp(local, vec2<f32>(0.0), vec2<f32>(1.0)));
@@ -388,6 +411,13 @@ fn fs_image(in: VertexOutput) -> @location(0) vec4<f32> {
 @fragment
 fn fs_text(in: VertexOutput) -> @location(0) vec4<f32> {
     let instance = instances[in.instance_index];
+    if instance.clip_rect.z >= 0.0 &&
+        (in.transformed_position.x < instance.clip_rect.x ||
+         in.transformed_position.y < instance.clip_rect.y ||
+         in.transformed_position.x >= instance.clip_rect.x + instance.clip_rect.z ||
+         in.transformed_position.y >= instance.clip_rect.y + instance.clip_rect.w) {
+        discard;
+    }
     let bounds = instance.shape_bounds;
     let local = (in.local_position - bounds.xy) / max(bounds.zw, vec2<f32>(0.000001));
     let uv = mix(instance.params.xy, instance.params.zw, clamp(local, vec2<f32>(0.0), vec2<f32>(1.0)));
@@ -2174,6 +2204,7 @@ struct GpuInstance {
     grayscale: [f32; 4],
     contrast: [f32; 4],
     saturation: [f32; 4],
+    clip_rect: [f32; 4],
     params: [f32; 4],
     transform_x: [f32; 4],
     transform_y: [f32; 4],
@@ -2194,6 +2225,7 @@ impl GpuInstance {
             grayscale: [0.0, 0.0, 0.0, 0.0],
             contrast: [1.0, 0.0, 0.0, 0.0],
             saturation: [1.0, 0.0, 0.0, 0.0],
+            clip_rect: [-1.0, -1.0, -1.0, -1.0],
             params: [0.0, 0.0, 0.0, opacity],
             transform_x,
             transform_y,
@@ -2523,14 +2555,21 @@ fn compile_nodes(
                 opacity: layer_opacity,
                 blend_mode: crate::scene::BlendMode::Normal,
                 clip: None,
-                mask: None,
+                mask,
+                mask_mode,
                 filters,
                 shadow: None,
                 children,
                 ..
-            } if gpu_layer_effects(filters, *layer_opacity).is_some() => {
+            } if gpu_layer_effects(filters, *layer_opacity).is_some()
+                && transform == Transform::identity()
+                && (*mask_mode == crate::scene::MaskMode::Alpha)
+                && (mask.is_none()
+                    || gpu_alpha_rect_mask(mask.as_deref().unwrap_or(&[])).is_some()) =>
+            {
                 let (layer_opacity, brightness, grayscale, contrast, saturation) =
                     gpu_layer_effects(filters, *layer_opacity).unwrap();
+                let clip_rect = mask.as_deref().and_then(gpu_alpha_rect_mask);
                 let start = output.len();
                 compile_nodes(children, transform, opacity * layer_opacity, output, font)?;
                 for command in &mut output[start..] {
@@ -2539,6 +2578,9 @@ fn compile_nodes(
                     instance.grayscale[0] = 1.0 - (1.0 - instance.grayscale[0]) * (1.0 - grayscale);
                     instance.contrast[0] *= contrast;
                     instance.saturation[0] *= saturation;
+                    if let Some(clip_rect) = clip_rect {
+                        instance.clip_rect = clip_rect;
+                    }
                 }
             }
 
@@ -2622,6 +2664,34 @@ fn gpu_layer_effects(
             _ => None,
         },
     )
+}
+
+fn gpu_alpha_rect_mask(mask: &[SceneNode]) -> Option<[f32; 4]> {
+    let [SceneNode::Rect {
+        x,
+        y,
+        w,
+        h,
+        fill,
+        stroke: None,
+        stroke_width,
+        corner_radius,
+    }] = mask
+    else {
+        return None;
+    };
+    if ![*x, *y, *w, *h, *stroke_width, *corner_radius]
+        .iter()
+        .all(|value| value.is_finite())
+        || *w <= 0.0
+        || *h <= 0.0
+        || *stroke_width != 0.0
+        || *corner_radius != 0.0
+        || fill.a != 255
+    {
+        return None;
+    }
+    Some([*x, *y, *w, *h])
 }
 
 #[cfg(test)]
@@ -3557,6 +3627,80 @@ mod tests {
                 "GPU/CPU saturation channel {channel} mismatch: {gpu_center:?} vs {cpu_center:?}"
             );
         }
+    }
+
+    #[test]
+    fn gpu_opaque_alpha_rect_mask_matches_cpu_layer_clip() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping alpha mask GPU test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![
+                SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 32.0,
+                    h: 32.0,
+                    fill: Color::rgb(0, 0, 255),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                },
+                SceneNode::Layer {
+                    opacity: 1.0,
+                    blend_mode: crate::scene::BlendMode::Normal,
+                    clip: None,
+                    mask: Some(vec![SceneNode::Rect {
+                        x: 8.0,
+                        y: 0.0,
+                        w: 16.0,
+                        h: 32.0,
+                        fill: Color::WHITE,
+                        stroke: None,
+                        stroke_width: 0.0,
+                        corner_radius: 0.0,
+                    }]),
+                    mask_mode: crate::scene::MaskMode::Alpha,
+                    filters: Vec::new(),
+                    shadow: None,
+                    children: vec![SceneNode::Rect {
+                        x: 0.0,
+                        y: 0.0,
+                        w: 32.0,
+                        h: 32.0,
+                        fill: Color::rgb(255, 0, 0),
+                        stroke: None,
+                        stroke_width: 0.0,
+                        corner_radius: 0.0,
+                    }],
+                },
+            ],
+        };
+        assert!(gpu_supports_scene(&scene));
+        let config = FrameConfig::new(32, 32, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        let mean_error: f64 = gpu_image
+            .pixels()
+            .zip(cpu_image.pixels())
+            .map(|(a, b)| {
+                (0..4)
+                    .map(|channel| {
+                        (i16::from(a[channel]) - i16::from(b[channel])).unsigned_abs() as u64
+                    })
+                    .sum::<u64>()
+            })
+            .sum::<u64>() as f64
+            / (32 * 32 * 4) as f64;
+        assert!(
+            mean_error < 2.0,
+            "GPU/CPU alpha mask mean error was {mean_error}"
+        );
+        assert_eq!(gpu_image.get_pixel(4, 16), cpu_image.get_pixel(4, 16));
+        assert_eq!(gpu_image.get_pixel(16, 16), cpu_image.get_pixel(16, 16));
     }
 
     #[test]
