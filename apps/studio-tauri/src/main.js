@@ -1909,6 +1909,9 @@ export async function getVideoTexture(source, options = {}) {
   if (typeof source !== 'string' || !source) throw new TypeError('getVideoTexture expects a source URL');
   const cached = videoTextureCache.get(source);
   if (cached) {
+    if (Number.isFinite(Number(options.playbackRate)) && Number(options.playbackRate) > 0) {
+      cached.video.playbackRate = Number(options.playbackRate);
+    }
     await seekVideoTexture(cached, options);
     return cached.texture;
   }
@@ -1917,6 +1920,9 @@ export async function getVideoTexture(source, options = {}) {
   video.muted = options.muted ?? true;
   video.loop = options.loop ?? false;
   video.playsInline = true;
+  if (Number.isFinite(Number(options.playbackRate)) && Number(options.playbackRate) > 0) {
+    video.playbackRate = Number(options.playbackRate);
+  }
   video.src = source;
   const ready = video.readyState >= 2 ? Promise.resolve() : new Promise((resolve, reject) => {
     video.addEventListener('loadeddata', resolve, { once: true });
@@ -1950,11 +1956,14 @@ export const useOffthreadVideoTexture = getOffthreadVideoTexture;
 async function seekVideoTexture(entry, options) {
   const frame = Number(options.frame);
   const fps = Number(options.fps ?? 30);
+  const playbackRate = Number(options.playbackRate ?? 1);
+  const startFrom = Number(options.startFrom ?? 0);
   if (!Number.isFinite(frame) || !Number.isFinite(fps) || fps <= 0) return;
+  if (!Number.isFinite(playbackRate) || playbackRate <= 0) return;
   if (entry.frame === frame) return;
   if (entry.seekPromise) await entry.seekPromise;
   if (entry.frame === frame) return;
-  const time = Math.max(0, frame / fps);
+  const time = Math.max(0, (frame + (Number.isFinite(startFrom) ? startFrom : 0)) * playbackRate / fps);
   const { video } = entry;
   if (Math.abs(video.currentTime - time) <= 1e-4 && video.readyState >= 2) {
     entry.frame = frame;
