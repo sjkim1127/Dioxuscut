@@ -1,5 +1,11 @@
 // Framework-free reference composition for registerThreeComposition().
 export function register(api) {
+  // Exercise the same readiness contract used by media-heavy compositions:
+  // setup may briefly block capture while an async resource is prepared.
+  const buffer = api.useBufferState?.();
+  const unblock = buffer?.delayPlayback?.().unblock;
+  if (unblock) setTimeout(unblock, 0);
+
   api.registerThreeComposition('three_lifecycle_preview', {
     setup({ THREE }) {
       const scene = new THREE.Scene();
