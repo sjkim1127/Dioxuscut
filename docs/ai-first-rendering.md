@@ -191,6 +191,9 @@ For adapters that expect Remotion's hook-shaped API, the same host exposes
 `window.dioxuscut.useVideoConfig()`. These return the current explicit frame and
 the synchronized `{fps, width, height, durationInFrames}` for the active
 request; they do not introduce React or a browser render loop.
+`window.dioxuscut.staticFile(path)` resolves a portable asset URL against the
+active Vite/Tauri origin, and `getStaticFiles()` returns the asset paths declared
+on the current project render request.
 For non-React Three.js compositions, `window.dioxuscut.useVideoTexture(src,
 {frame, fps})` (also available as `getVideoTexture`) returns a cached
 `THREE.VideoTexture` after `loadeddata` and

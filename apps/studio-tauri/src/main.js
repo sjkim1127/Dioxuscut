@@ -324,6 +324,20 @@ export function useVideoConfig() {
   return { ...videoConfig };
 }
 
+// Small compatibility layer for Remotion's static-file helpers. The browser
+// host owns URL resolution, so compositions stay portable between Vite,
+// packaged Tauri assets, and a remote preview origin.
+export function staticFile(path) {
+  if (typeof path !== 'string' || !path.trim()) {
+    throw new TypeError('staticFile expects a non-empty path');
+  }
+  return new URL(path.replace(/^\/+/, ''), document.baseURI).toString();
+}
+
+export function getStaticFiles() {
+  return [...activeAssets];
+}
+
 // Explicit frame input keeps this scene deterministic for future exports.
 function renderDefaultFrame({ composition, frame: nextFrame, fps, props, width, height }) {
   frame = nextFrame;
@@ -446,6 +460,7 @@ async function syncCanvasImages(nextFrame) {
 export async function renderFrame({ composition = 'three_preview', frame: nextFrame, fps = 30, props: inputProps = {}, assets = [], timeline = [], width, height, durationInFrames }) {
   const props = inputProps && typeof inputProps === 'object' ? inputProps : {};
   frame = nextFrame;
+  activeAssets = Array.isArray(assets) ? [...assets] : [];
   videoConfig = {
     ...videoConfig,
     fps,
@@ -526,6 +541,8 @@ window.dioxuscut = {
   releaseVideoTexture,
   useCurrentFrame,
   useVideoConfig,
+  staticFile,
+  getStaticFiles,
 };
 
 function resize() {
@@ -539,6 +556,7 @@ resize();
 
 let frame = 0;
 let videoConfig = { fps: 30, width: 1280, height: 720, durationInFrames: 150 };
+let activeAssets = [];
 let playing = true;
 let currentJobId = null;
 let playbackStartedAt = performance.now();

@@ -38,6 +38,8 @@ try {
       hookContext = {
         frame: window.dioxuscut.useCurrentFrame(),
         config: window.dioxuscut.useVideoConfig(),
+        staticFile: window.dioxuscut.staticFile('assets/demo.png'),
+        staticFiles: window.dioxuscut.getStaticFiles(),
       };
       const { frame } = context;
       let media = document.querySelector('video[data-dioxuscut-smoke]');
@@ -161,6 +163,10 @@ try {
   assert(result.hookContext.config.fps === 10 && result.hookContext.config.width === 320 &&
     result.hookContext.config.height === 180 && result.hookContext.config.durationInFrames === 60,
   `unexpected hook video config: ${JSON.stringify(result.hookContext.config)}`);
+  assert(result.hookContext.staticFile.endsWith('/assets/demo.png') && result.hookContext.staticFile.startsWith('http'),
+    `unexpected staticFile URL: ${result.hookContext.staticFile}`);
+  assert(result.hookContext.staticFiles.length === 1 && result.hookContext.staticFiles[0].endsWith('/package.json'),
+    'static files did not expose the active request assets');
   assert(result.imageDimensions.width === 1 && result.imageDimensions.height === 1,
     `unexpected image dimensions: ${JSON.stringify(result.imageDimensions)}`);
   assert(result.cachedImageDimensions.width === 1 && result.cachedImageDimensions.height === 1,
