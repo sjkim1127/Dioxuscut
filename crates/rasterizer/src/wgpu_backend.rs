@@ -3795,6 +3795,28 @@ fn gpu_layer_effects(
     if !layer_opacity.is_finite() {
         return None;
     }
+    if filters
+        .iter()
+        .any(|filter| matches!(filter, crate::scene::SceneFilter::ColorGrading { .. }))
+        && filters.iter().any(|filter| {
+            matches!(
+                filter,
+                crate::scene::SceneFilter::Brightness { .. }
+                    | crate::scene::SceneFilter::Grayscale { .. }
+                    | crate::scene::SceneFilter::Contrast { .. }
+                    | crate::scene::SceneFilter::Saturation { .. }
+                    | crate::scene::SceneFilter::Invert { .. }
+                    | crate::scene::SceneFilter::HueRotate { .. }
+                    | crate::scene::SceneFilter::Tint { .. }
+                    | crate::scene::SceneFilter::Duotone { .. }
+            )
+        })
+    {
+        // ColorGrading has its own gamma/contrast/saturation/tint order in
+        // TinySkia. Do not claim GPU support for a chain whose CPU order
+        // cannot be represented by the packed instance fields.
+        return None;
+    }
     filters.iter().try_fold(
         (layer_opacity, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0),
         |(opacity, brightness, grayscale, contrast, saturation, invert, hue), filter| match filter {
@@ -3918,7 +3940,7 @@ fn gpu_layer_effects(
                 contrast: grading_contrast,
                 saturation: grading_saturation,
                 gamma,
-                tint,
+                ..
             } if grading_contrast.is_finite()
                 && *grading_contrast >= 0.0
                 && grading_saturation.is_finite()
@@ -5674,6 +5696,20 @@ mod tests {
         ];
         let (_, _, _, _, _, amount, _) = gpu_layer_effects(&filters, 1.0).unwrap();
         assert!((amount - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn gpu_color_grading_does_not_claim_mixed_color_filter_order() {
+        let filters = [
+            crate::scene::SceneFilter::Brightness { amount: 1.2 },
+            crate::scene::SceneFilter::ColorGrading {
+                contrast: 1.1,
+                saturation: 0.9,
+                gamma: 1.2,
+                tint: None,
+            },
+        ];
+        assert!(gpu_layer_effects(&filters, 1.0).is_none());
     }
 
     #[test]
