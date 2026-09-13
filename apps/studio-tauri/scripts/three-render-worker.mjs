@@ -1,7 +1,7 @@
 import { createInterface } from 'node:readline';
 import { Buffer } from 'node:buffer';
 import { existsSync } from 'node:fs';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { chromium } from 'playwright-core';
 
@@ -26,6 +26,13 @@ const frameRetries = Number.isInteger(configuredFrameRetries) && configuredFrame
   ? configuredFrameRetries
   : 1;
 const write = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
+const pendingFrameFiles = new Set();
+const cleanupFrameFiles = () => {
+  for (const path of pendingFrameFiles) {
+    try { unlinkSync(path); } catch {}
+  }
+  pendingFrameFiles.clear();
+};
 const renderFrame = (request) => new Promise((resolve, reject) => {
   const timer = setTimeout(
     () => reject(new Error(`renderFrame timed out after ${frameTimeoutMs}ms`)),
@@ -68,7 +75,7 @@ let queue = Promise.resolve();
 rl.on('line', (line) => { queue = queue.then(async () => {
   let message;
   try { message = JSON.parse(line); } catch { return write({ type: 'error', frame: null, message: 'invalid JSON' }); }
-  if (message.type === 'shutdown') { await browser.close(); process.exit(0); }
+  if (message.type === 'shutdown') { cleanupFrameFiles(); await browser.close(); process.exit(0); }
   if (message.type !== 'render') return;
   try {
     const request = message;
@@ -104,6 +111,7 @@ rl.on('line', (line) => { queue = queue.then(async () => {
     if (fileTransport) {
       const path = `${tmpdir()}/dioxuscut-frame-${process.pid}-${request.frame}-${Date.now()}.${imageType}`;
       writeFileSync(path, screenshot);
+      pendingFrameFiles.add(path);
       write({ type: 'frame', frame: request.frame, width: request.width, height: request.height, file_path: path });
     } else {
     write({ type: 'frame', frame: request.frame, width: request.width, height: request.height,
@@ -116,7 +124,7 @@ rl.on('line', (line) => { queue = queue.then(async () => {
   }
 }); });
 
-process.once('SIGTERM', async () => { await browser.close(); process.exit(0); });
+process.once('SIGTERM', async () => { cleanupFrameFiles(); await browser.close(); process.exit(0); });
 
 function findBrowserExecutable() {
   const candidates = process.platform === 'darwin'
