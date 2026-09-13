@@ -619,7 +619,8 @@ async function readBoundedResponse(response, maxBytes) {
 async function readWebmSamplesFromCue(source, trackNumber = 1, options = {}) {
   const metadata = options.metadata?.cues ? options.metadata : await parseWebmHeader(source);
   if (!metadata?.cues?.length) return [];
-  const cues = metadata.cues.filter((cue) => cue.trackNumber === trackNumber || cue.trackNumber == null);
+  const trackCues = metadata.cues.filter((cue) => cue.trackNumber === trackNumber || cue.trackNumber == null);
+  const cues = trackCues.length ? trackCues : metadata.cues;
   const cueIndex = Math.max(0, Number(options.cueIndex ?? 0));
   const start = cues[cueIndex]?.clusterPosition;
   if (!Number.isSafeInteger(start)) return [];
@@ -753,7 +754,8 @@ export async function readWebmSamples(source, trackNumber = 1, options = {}) {
   if (!metadata?.cues?.length) return [];
   const maxSamples = Number.isInteger(options.maxSamples) ? options.maxSamples : Infinity;
   if (maxSamples <= 0) return [];
-  const matchingCues = metadata.cues.filter((cue) => cue.trackNumber === trackNumber || cue.trackNumber == null);
+  const trackCues = metadata.cues.filter((cue) => cue.trackNumber === trackNumber || cue.trackNumber == null);
+  const matchingCues = trackCues.length ? trackCues : metadata.cues;
   const startCue = Math.max(0, Number(options.cueIndex ?? 0));
   const maxCues = Number.isInteger(options.maxCues) ? Math.max(1, options.maxCues) : 32;
   const cueIndexes = matchingCues.slice(startCue, startCue + maxCues).map((_, index) => startCue + index);
