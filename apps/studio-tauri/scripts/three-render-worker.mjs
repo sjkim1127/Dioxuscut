@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { chromium } from 'playwright-core';
+import { PNG } from 'pngjs';
 
 const args = new Map(process.argv.slice(2).flatMap((arg) => {
   const [key, value] = arg.split('=', 2);
@@ -113,7 +114,8 @@ rl.on('line', (line) => { queue = queue.then(async () => {
     if (lastError) throw lastError;
     const imageType = request.image_format === 'jpeg' ? 'jpeg' : 'png';
     const fileTransport = request.transport === 'file';
-    const screenshot = await page.screenshot({ type: imageType, ...(fileTransport ? {} : { encoding: 'base64' }),
+    const rgbaTransport = request.transport === 'rgba';
+    const screenshot = await page.screenshot({ type: imageType, ...(fileTransport || rgbaTransport ? {} : { encoding: 'base64' }),
       omitBackground: imageType === 'png' && request.transparent === true,
       quality: imageType === 'jpeg' ? (request.jpeg_quality ?? 90) : undefined });
     if (fileTransport) {
@@ -121,6 +123,16 @@ rl.on('line', (line) => { queue = queue.then(async () => {
       writeFileSync(path, screenshot);
       pendingFrameFiles.add(path);
       write({ type: 'frame', frame: request.frame, width: request.width, height: request.height, file_path: path });
+    } else if (rgbaTransport) {
+      if (imageType !== 'png') throw new Error('rgba transport requires PNG screenshot encoding');
+      const decoded = PNG.sync.read(screenshot);
+      write({ type: 'frame', frame: request.frame, width: decoded.width, height: decoded.height,
+        video_frame: {
+          width: decoded.width,
+          height: decoded.height,
+          timestamp_us: Math.round((request.frame / Math.max(request.fps ?? 30, 1)) * 1_000_000),
+          rgba_base64: Buffer.from(decoded.data).toString('base64'),
+        } });
     } else {
     write({ type: 'frame', frame: request.frame, width: request.width, height: request.height,
       ...(imageType === 'png'

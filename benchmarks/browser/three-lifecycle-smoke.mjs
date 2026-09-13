@@ -21,10 +21,15 @@ try {
   assert.ok(ready.compositions.includes('three_lifecycle_preview'));
   assert.ok(ready.compositions.includes('three_audio_reactive_preview'));
   for (const frame of [0, 15, 30]) {
-    child.stdin.write(`${JSON.stringify({ type: 'render', composition: 'three_lifecycle_preview', frame, fps: 30, width: 640, height: 360, props: { color: '#ff8844' } })}\n`);
+    child.stdin.write(`${JSON.stringify({ type: 'render', composition: 'three_lifecycle_preview', frame, fps: 30, width: 640, height: 360, props: { color: '#ff8844' }, ...(frame === 0 ? { transport: 'rgba' } : {}) })}\n`);
     const response = await waitFor((message) => message.type === 'frame' && message.frame === frame);
     assert.equal(response.width, 640);
     assert.equal(response.height, 360);
+    if (frame === 0) {
+      assert.equal(response.video_frame.width, 640);
+      assert.equal(response.video_frame.height, 360);
+      assert.equal(Buffer.from(response.video_frame.rgba_base64, 'base64').length, 640 * 360 * 4);
+    }
   }
   for (const frame of [0, 15, 30]) {
     child.stdin.write(`${JSON.stringify({ type: 'render', composition: 'three_audio_reactive_preview', frame, fps: 30, width: 640, height: 360 })}\n`);
