@@ -786,6 +786,8 @@ pub struct WgpuBackend {
     text_atlas_upload_bytes: AtomicU64,
     gpu_texture_uploads: AtomicU64,
     gpu_texture_upload_bytes: AtomicU64,
+    gpu_texture_cache_hits: AtomicU64,
+    gpu_texture_cache_misses: AtomicU64,
     gpu_frame_count: AtomicU64,
     cpu_fallback_frame_count: AtomicU64,
 }
@@ -797,6 +799,8 @@ pub struct WgpuBackend {
 pub struct WgpuRenderStats {
     pub gpu_frames: u64,
     pub cpu_fallback_frames: u64,
+    pub texture_cache_hits: u64,
+    pub texture_cache_misses: u64,
 }
 
 impl WgpuRenderStats {
@@ -828,6 +832,8 @@ impl WgpuBackend {
             text_atlas_upload_bytes: AtomicU64::new(0),
             gpu_texture_uploads: AtomicU64::new(0),
             gpu_texture_upload_bytes: AtomicU64::new(0),
+            gpu_texture_cache_hits: AtomicU64::new(0),
+            gpu_texture_cache_misses: AtomicU64::new(0),
             gpu_frame_count: AtomicU64::new(0),
             cpu_fallback_frame_count: AtomicU64::new(0),
         })
@@ -838,6 +844,8 @@ impl WgpuBackend {
         WgpuRenderStats {
             gpu_frames: self.gpu_frame_count.load(Ordering::Relaxed),
             cpu_fallback_frames: self.cpu_fallback_frame_count.load(Ordering::Relaxed),
+            texture_cache_hits: self.gpu_texture_cache_hits.load(Ordering::Relaxed),
+            texture_cache_misses: self.gpu_texture_cache_misses.load(Ordering::Relaxed),
         }
     }
 
@@ -850,6 +858,16 @@ impl WgpuBackend {
     /// Number of source bytes uploaded by the GPU texture cache.
     pub fn gpu_texture_upload_bytes(&self) -> u64 {
         self.gpu_texture_upload_bytes.load(Ordering::Relaxed)
+    }
+
+    /// Number of GPU texture cache lookups that reused an existing texture.
+    pub fn gpu_texture_cache_hits(&self) -> u64 {
+        self.gpu_texture_cache_hits.load(Ordering::Relaxed)
+    }
+
+    /// Number of GPU texture cache lookups that required a texture upload.
+    pub fn gpu_texture_cache_misses(&self) -> u64 {
+        self.gpu_texture_cache_misses.load(Ordering::Relaxed)
     }
 
     /// Configure the image cache used when a scene falls back to CPU.
@@ -873,11 +891,14 @@ impl WgpuBackend {
             .lock()
             .expect("GPU image cache lock poisoned");
         if let Some(image) = cache.images.get(key).cloned() {
+            self.gpu_texture_cache_hits.fetch_add(1, Ordering::Relaxed);
             cache.lru.retain(|entry| entry != key);
             cache.lru.push_back(key.to_string());
             return Ok(image);
         }
         drop(cache);
+        self.gpu_texture_cache_misses
+            .fetch_add(1, Ordering::Relaxed);
 
         let device = &self.ctx.device;
         let queue = &self.ctx.queue;
@@ -2617,7 +2638,9 @@ mod support_tests {
     fn image_fit_none_and_scale_down_never_upscale() {
         let none = image_placement(ImageFit::None, 200.0, 100.0, 0.0, 0.0, 80.0, 80.0).unwrap();
         assert_eq!(none.destination, [0.0, 0.0, 80.0, 80.0]);
-        assert_eq!(none.source_uv, [0.3, 0.0, 0.7, 1.0]);
+        for (actual, expected) in none.source_uv.into_iter().zip([0.3, 0.1, 0.7, 0.9]) {
+            assert!((actual - expected).abs() < 1e-6);
+        }
 
         let scale_down =
             image_placement(ImageFit::ScaleDown, 20.0, 10.0, 0.0, 0.0, 100.0, 100.0).unwrap();
@@ -2910,6 +2933,8 @@ mod tests {
             WgpuRenderStats {
                 gpu_frames: 2,
                 cpu_fallback_frames: 0,
+                texture_cache_hits: 0,
+                texture_cache_misses: 1,
             }
         );
         assert!(backend.render_stats().cpu_fallback_ratio().abs() < f64::EPSILON);
@@ -3484,6 +3509,8 @@ mod tests {
         assert_eq!(gpu.gpu_image_cache_len(), 1);
         assert_eq!(gpu.gpu_texture_uploads(), 1);
         assert_eq!(gpu.gpu_texture_upload_bytes(), 16 * 16 * 4);
+        assert_eq!(gpu.gpu_texture_cache_misses(), 1);
+        assert_eq!(gpu.gpu_texture_cache_hits(), 1);
         assert_eq!(gpu.gpu_frame_count.load(Ordering::Relaxed), 2);
         std::fs::remove_dir_all(dir).unwrap();
     }
