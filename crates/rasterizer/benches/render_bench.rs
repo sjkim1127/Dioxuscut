@@ -439,18 +439,26 @@ fn bench_gpu_video_frames(c: &mut Criterion) {
     group.finish();
     let cold_stats = backend.render_stats();
     let warm_stats = warm_backend.render_stats();
+    let cold_timing = backend.video_timing_stats();
+    let warm_timing = warm_backend.video_timing_stats();
     eprintln!(
-        "video benchmark stats: cold_sequence frames={} cache_hits={} cache_misses={} uploads={} upload_bytes={}; warm_frame frames={} cache_hits={} cache_misses={} uploads={} upload_bytes={}",
+        "video benchmark stats: cold_sequence frames={} cache_hits={} cache_misses={} uploads={} upload_bytes={} decode_ms={:.3} upload_ms={:.3} gpu_readback_ms={:.3}; warm_frame frames={} cache_hits={} cache_misses={} uploads={} upload_bytes={} decode_ms={:.3} upload_ms={:.3} gpu_readback_ms={:.3}",
         cold_stats.gpu_frames,
         cold_stats.texture_cache_hits,
         cold_stats.texture_cache_misses,
         backend.gpu_texture_uploads(),
         backend.gpu_texture_upload_bytes(),
+        cold_timing.video_decode_ns as f64 / 1_000_000.0,
+        cold_timing.texture_upload_ns as f64 / 1_000_000.0,
+        cold_timing.gpu_submit_readback_ns as f64 / 1_000_000.0,
         warm_stats.gpu_frames,
         warm_stats.texture_cache_hits,
         warm_stats.texture_cache_misses,
         warm_backend.gpu_texture_uploads(),
         warm_backend.gpu_texture_upload_bytes(),
+        warm_timing.video_decode_ns as f64 / 1_000_000.0,
+        warm_timing.texture_upload_ns as f64 / 1_000_000.0,
+        warm_timing.gpu_submit_readback_ns as f64 / 1_000_000.0,
     );
     let _ = std::fs::remove_dir_all(dir);
 }

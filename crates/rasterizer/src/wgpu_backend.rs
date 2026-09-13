@@ -60,6 +60,7 @@ use lyon_tessellation::{FillOptions, FillTessellator, FillVertex};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tiny_skia::{Path as TinyPath, PathSegment, Stroke, Transform};
 use wgpu::util::DeviceExt;
 
@@ -788,6 +789,9 @@ pub struct WgpuBackend {
     gpu_texture_upload_bytes: AtomicU64,
     gpu_texture_cache_hits: AtomicU64,
     gpu_texture_cache_misses: AtomicU64,
+    video_decode_ns: AtomicU64,
+    texture_upload_ns: AtomicU64,
+    gpu_submit_readback_ns: AtomicU64,
     gpu_frame_count: AtomicU64,
     cpu_fallback_frame_count: AtomicU64,
 }
@@ -801,6 +805,20 @@ pub struct WgpuRenderStats {
     pub cpu_fallback_frames: u64,
     pub texture_cache_hits: u64,
     pub texture_cache_misses: u64,
+}
+
+/// Monotonic timing accumulators for the native video texture path.
+///
+/// `video_decode_ns` covers decoded-frame cache lookup and FFmpeg decode;
+/// `texture_upload_ns` covers creation/upload of a cache-miss texture;
+/// `gpu_submit_readback_ns` covers command submission through CPU readback
+/// after texture preparation. These are cumulative counters, not per-frame
+/// averages, and therefore remain meaningful across streaming renders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct WgpuVideoTimingStats {
+    pub video_decode_ns: u64,
+    pub texture_upload_ns: u64,
+    pub gpu_submit_readback_ns: u64,
 }
 
 impl WgpuRenderStats {
@@ -834,6 +852,9 @@ impl WgpuBackend {
             gpu_texture_upload_bytes: AtomicU64::new(0),
             gpu_texture_cache_hits: AtomicU64::new(0),
             gpu_texture_cache_misses: AtomicU64::new(0),
+            video_decode_ns: AtomicU64::new(0),
+            texture_upload_ns: AtomicU64::new(0),
+            gpu_submit_readback_ns: AtomicU64::new(0),
             gpu_frame_count: AtomicU64::new(0),
             cpu_fallback_frame_count: AtomicU64::new(0),
         })
@@ -870,6 +891,15 @@ impl WgpuBackend {
         self.gpu_texture_cache_misses.load(Ordering::Relaxed)
     }
 
+    /// Return cumulative timings for the native video texture pipeline.
+    pub fn video_timing_stats(&self) -> WgpuVideoTimingStats {
+        WgpuVideoTimingStats {
+            video_decode_ns: self.video_decode_ns.load(Ordering::Relaxed),
+            texture_upload_ns: self.texture_upload_ns.load(Ordering::Relaxed),
+            gpu_submit_readback_ns: self.gpu_submit_readback_ns.load(Ordering::Relaxed),
+        }
+    }
+
     /// Configure the image cache used when a scene falls back to CPU.
     pub fn with_image_cache_bytes(mut self, max_bytes: usize) -> Self {
         self.fallback = self.fallback.with_image_cache_bytes(max_bytes);
@@ -899,6 +929,7 @@ impl WgpuBackend {
         drop(cache);
         self.gpu_texture_cache_misses
             .fetch_add(1, Ordering::Relaxed);
+        let upload_start = Instant::now();
 
         let device = &self.ctx.device;
         let queue = &self.ctx.queue;
@@ -954,6 +985,8 @@ impl WgpuBackend {
             width: decoded.width(),
             height: decoded.height(),
         });
+        self.texture_upload_ns
+            .fetch_add(upload_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
         self.gpu_texture_uploads.fetch_add(1, Ordering::Relaxed);
         self.gpu_texture_upload_bytes.fetch_add(
             u64::from(resource.width) * u64::from(resource.height) * 4,
@@ -1117,7 +1150,10 @@ impl WgpuBackend {
         sampling_fps: f64,
         looped: bool,
     ) -> Result<Arc<GpuImageResource>, RasterError> {
+        let decode_start = Instant::now();
         let frame = self.video_cache.load(src, time, sampling_fps, looped)?;
+        self.video_decode_ns
+            .fetch_add(decode_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
         let frame_index = self
             .video_cache
             .frame_index_for(src, time, sampling_fps, looped)?;
@@ -1666,6 +1702,10 @@ impl RasterizerBackend for WgpuBackend {
             &res.slots[slot_idx],
             shader_suffix,
         )?;
+        // Texture preparation (including video decode and cache-miss upload)
+        // is measured separately. This interval is GPU command submission,
+        // synchronization, and CPU readback only.
+        let gpu_submit_start = Instant::now();
 
         let mut out_pixels = None;
         let mut scratch = Vec::new();
@@ -1693,6 +1733,10 @@ impl RasterizerBackend for WgpuBackend {
         let image = RgbaImage::from_raw(width, height, pixels).ok_or_else(|| {
             RasterError::ImageEncode("Failed to assemble RgbaImage from GPU readback".into())
         })?;
+        self.gpu_submit_readback_ns.fetch_add(
+            gpu_submit_start.elapsed().as_nanos() as u64,
+            Ordering::Relaxed,
+        );
         self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
         Ok(image)
     }
