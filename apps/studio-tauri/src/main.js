@@ -290,6 +290,16 @@ export async function parseMedia({
   // This metadata facade does not yet expose container byte counts. Report the
   // same progress shape as @remotion/media-parser with an unknown total.
   await onParseProgress?.({ bytes: 0, percentage: 0, totalBytes: null });
+  const selectFields = (result) => !Array.isArray(fields) || fields.length === 0
+    ? result
+    : Object.fromEntries(fields.filter((field) => field in result).map((field) => [field, result[field]]));
+  const wav = await parseWavMetadata(src).catch(() => null);
+  if (wav) {
+    await onDimensions?.(null);
+    await onDurationInSeconds?.(wav.durationInSeconds);
+    await onParseProgress?.({ bytes: 0, percentage: 1, totalBytes: null });
+    return selectFields(wav);
+  }
   const [video, image, audioDuration] = await Promise.all([
     getVideoMetadata(src).catch(() => null),
     getImageDimensions(src).catch(() => null),
@@ -310,8 +320,7 @@ export async function parseMedia({
     audioTracks: audioDuration !== null ? [{ durationInSeconds: audioDuration }] : [],
     isRemote: /^https?:\/\//i.test(src),
   };
-  if (!Array.isArray(fields) || fields.length === 0) return result;
-  return Object.fromEntries(fields.filter((field) => field in result).map((field) => [field, result[field]]));
+  return selectFields(result);
 }
 
 // Browser counterpart of the native bounded range reader used by the
@@ -336,6 +345,55 @@ export async function readMediaRange(source, start, endExclusive, { requestInit 
     throw new Error(`media range response length ${bytes.length} did not match requested length ${length}`);
   }
   return bytes;
+}
+
+function ascii(bytes, offset, length) {
+  return String.fromCharCode(...bytes.subarray(offset, offset + length));
+}
+
+function uint32le(bytes, offset) {
+  return (bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)) >>> 0;
+}
+
+// Incremental WAV probe: only RIFF headers and chunk headers are fetched.
+// This mirrors the bounded-reader design of @remotion/media-parser without
+// downloading PCM payloads merely to answer metadata queries.
+export async function parseWavMetadata(source, { requestInit } = {}) {
+  const header = await readMediaRange(source, 0, 12, { requestInit });
+  if (header.length < 12 || ascii(header, 0, 4) !== 'RIFF' || ascii(header, 8, 4) !== 'WAVE') return null;
+  let offset = 12;
+  let format = null;
+  let dataBytes = null;
+  for (let chunk = 0; chunk < 4096; chunk += 1) {
+    const chunkHeader = await readMediaRange(source, offset, offset + 8, { requestInit });
+    if (chunkHeader.length < 8) break;
+    const id = ascii(chunkHeader, 0, 4);
+    const size = uint32le(chunkHeader, 4);
+    if (!Number.isSafeInteger(size) || size < 0) break;
+    if (id === 'fmt ' && size >= 16) {
+      const bytes = await readMediaRange(source, offset + 8, offset + 24, { requestInit });
+      format = {
+        audioFormat: bytes[0] | (bytes[1] << 8),
+        channels: bytes[2] | (bytes[3] << 8),
+        sampleRate: uint32le(bytes, 4) >>> 0,
+        blockAlign: bytes[12] | (bytes[13] << 8),
+      };
+    } else if (id === 'data') {
+      dataBytes = size;
+    }
+    offset += 8 + size + (size & 1);
+    if (format && dataBytes !== null) break;
+  }
+  if (!format || !format.channels || !format.sampleRate || !format.blockAlign || dataBytes === null) return null;
+  const durationInSeconds = dataBytes / (format.sampleRate * format.blockAlign);
+  return {
+    durationInSeconds,
+    audioTracks: [{ channels: format.channels, sampleRate: format.sampleRate }],
+    dimensions: null,
+    videoTracks: [],
+    isRemote: /^https?:\/\//i.test(source),
+    audioFormat: format.audioFormat,
+  };
 }
 
 // Browser equivalent of @remotion/media-utils/getAudioDurationInSeconds.
@@ -1110,6 +1168,7 @@ window.dioxuscut = {
   getImageDimensions,
   getVideoMetadata,
   parseMedia,
+  parseWavMetadata,
   readMediaRange,
   getAudioDurationInSeconds,
   getAudioDuration,
