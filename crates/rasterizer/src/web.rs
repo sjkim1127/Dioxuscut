@@ -72,6 +72,12 @@ impl WebFrameTiming {
             timeline_frame: timestamp_us as f64 / 1_000_000.0 * fps,
         })
     }
+
+    /// Difference between the media presentation position and the requested
+    /// output frame, expressed in output frames.
+    pub fn drift_frames(&self, output_frame: u32) -> f64 {
+        self.timeline_frame - output_frame as f64
+    }
 }
 
 impl WebVideoFrame {
@@ -235,6 +241,12 @@ mod tests {
         assert_eq!(frame.timeline_frame(0.0), None);
         assert_eq!(frame.timeline_frame(f64::NAN), None);
         assert_eq!(frame.timeline_frame(f64::INFINITY), None);
+    }
+
+    #[test]
+    fn webcodecs_timing_reports_subframe_drift() {
+        let timing = WebFrameTiming::from_timestamp(133_333, 30.0).unwrap();
+        assert!((timing.drift_frames(4) + 0.00001).abs() < 1e-6);
     }
 
     #[test]
