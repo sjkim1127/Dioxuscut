@@ -50,6 +50,7 @@ use crate::backend::{BackendCapabilities, FrameConfig, RasterError, RasterizerBa
 use crate::scene::{Color, GradientStop, Scene, SceneNode};
 use crate::tiny_skia_backend::{svgpath_to_tiny_skia, TinySkiaBackend};
 use image::RgbaImage;
+use std::sync::atomic::{AtomicU64, Ordering};
 use lyon_tessellation::geometry_builder::{BuffersBuilder, FillVertexConstructor, VertexBuffers};
 use lyon_tessellation::math::point;
 use lyon_tessellation::path::Path as LyonPath;
@@ -538,6 +539,17 @@ pub struct WgpuBackend {
     /// Per-resolution GPU resource pool.  Key = `(width, height)`.
     frame_resources: GpuResourcePool,
     fallback: TinySkiaBackend,
+    gpu_frame_count: AtomicU64,
+    cpu_fallback_frame_count: AtomicU64,
+}
+
+/// Runtime counters for deciding whether a WGPU render is actually using the
+/// GPU path. They are intentionally monotonic and lock-free so instrumentation
+/// does not perturb frame scheduling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WgpuRenderStats {
+    pub gpu_frames: u64,
+    pub cpu_fallback_frames: u64,
 }
 
 impl WgpuBackend {
@@ -548,7 +560,17 @@ impl WgpuBackend {
             ctx,
             frame_resources: Mutex::new(HashMap::new()),
             fallback: TinySkiaBackend::new(),
+            gpu_frame_count: AtomicU64::new(0),
+            cpu_fallback_frame_count: AtomicU64::new(0),
         })
+    }
+
+    /// Return the number of frames rendered by WGPU and by the CPU fallback.
+    pub fn render_stats(&self) -> WgpuRenderStats {
+        WgpuRenderStats {
+            gpu_frames: self.gpu_frame_count.load(Ordering::Relaxed),
+            cpu_fallback_frames: self.cpu_fallback_frame_count.load(Ordering::Relaxed),
+        }
     }
 
     /// Configure the image cache used when a scene falls back to CPU.
@@ -778,12 +800,14 @@ impl RasterizerBackend for WgpuBackend {
 
     fn render_frame(&self, scene: &Scene, config: &FrameConfig) -> Result<RgbaImage, RasterError> {
         let Some(commands) = compile_scene(scene) else {
+            self.cpu_fallback_frame_count.fetch_add(1, Ordering::Relaxed);
             return self.fallback.render_frame(scene, config);
         };
 
         if config.width > self.ctx.max_texture_dimension_2d
             || config.height > self.ctx.max_texture_dimension_2d
         {
+            self.cpu_fallback_frame_count.fetch_add(1, Ordering::Relaxed);
             return self.fallback.render_frame(scene, config);
         }
 
@@ -838,9 +862,11 @@ impl RasterizerBackend for WgpuBackend {
             RasterError::ImageEncode("Failed to assemble RgbaImage from GPU readback".into())
         })?;
 
-        RgbaImage::from_raw(width, height, pixels).ok_or_else(|| {
+        let image = RgbaImage::from_raw(width, height, pixels).ok_or_else(|| {
             RasterError::ImageEncode("Failed to assemble RgbaImage from GPU readback".into())
-        })
+        })?;
+        self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
+        Ok(image)
     }
 
     fn supports_streaming(&self) -> bool {
