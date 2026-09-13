@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { readFileSync, unlinkSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 const url = process.env.DIOXUSCUT_BROWSER_URL ?? 'http://127.0.0.1:1421';
@@ -21,7 +22,7 @@ try {
   assert.ok(ready.compositions.includes('three_lifecycle_preview'));
   assert.ok(ready.compositions.includes('three_audio_reactive_preview'));
   for (const frame of [0, 15, 30]) {
-    child.stdin.write(`${JSON.stringify({ type: 'render', composition: 'three_lifecycle_preview', frame, fps: 30, width: 640, height: 360, props: { color: '#ff8844' }, ...(frame === 0 ? { transport: 'rgba' } : {}) })}\n`);
+    child.stdin.write(`${JSON.stringify({ type: 'render', composition: 'three_lifecycle_preview', frame, fps: 30, width: 640, height: 360, props: { color: '#ff8844' }, ...(frame === 0 ? { transport: 'rgba' } : frame === 15 ? { transport: 'rgba_file' } : {}) })}\n`);
     const response = await waitFor((message) => message.type === 'frame' && message.frame === frame);
     assert.equal(response.width, 640);
     assert.equal(response.height, 360);
@@ -29,6 +30,13 @@ try {
       assert.equal(response.video_frame.width, 640);
       assert.equal(response.video_frame.height, 360);
       assert.equal(Buffer.from(response.video_frame.rgba_base64, 'base64').length, 640 * 360 * 4);
+    }
+    if (frame === 15) {
+      assert.equal(response.video_frame.width, 640);
+      assert.equal(response.video_frame.height, 360);
+      assert.match(response.video_frame.file_path, /dioxuscut-rgba-/);
+      assert.equal(readFileSync(response.video_frame.file_path).length, 640 * 360 * 4);
+      unlinkSync(response.video_frame.file_path);
     }
   }
   for (const frame of [0, 15, 30]) {
