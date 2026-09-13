@@ -255,6 +255,7 @@ fn bench_gpu_scenes(c: &mut Criterion) {
         ("hello_world", scene_hello_world()),
         ("grid_25x14", scene_grid(25, 14)),
         ("complex_gradients", scene_complex_gradients()),
+        ("image_cpu_fallback", scene_image_fallback()),
     ];
 
     for (name, scene) in scenes {
