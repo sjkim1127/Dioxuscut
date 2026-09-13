@@ -765,6 +765,7 @@ pub struct WgpuBackend {
     /// source, rather than once per rendered frame.
     gpu_images: GpuImageCache,
     text_atlas: Mutex<Option<Arc<GpuTextAtlasResource>>>,
+    text_atlas_upload_bytes: AtomicU64,
     gpu_frame_count: AtomicU64,
     cpu_fallback_frame_count: AtomicU64,
 }
@@ -802,6 +803,7 @@ impl WgpuBackend {
             video_cache: VideoFrameCache::default(),
             gpu_images: Mutex::new(GpuImageCacheState::new(256 * 1024 * 1024)),
             text_atlas: Mutex::new(None),
+            text_atlas_upload_bytes: AtomicU64::new(0),
             gpu_frame_count: AtomicU64::new(0),
             cpu_fallback_frame_count: AtomicU64::new(0),
         })
@@ -952,6 +954,10 @@ impl WgpuBackend {
                         },
                         wgpu::Extent3d { width: rect.width, height: rect.height, depth_or_array_layers: 1 },
                     );
+                    self.text_atlas_upload_bytes.fetch_add(
+                        u64::from(rect.width) * u64::from(rect.height),
+                        Ordering::Relaxed,
+                    );
                     resource.generation.store(snapshot.generation, Ordering::Release);
                     return resource.clone();
                 }
@@ -974,6 +980,10 @@ impl WgpuBackend {
             &snapshot.pixels,
             wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(snapshot.width), rows_per_image: Some(snapshot.height) },
             wgpu::Extent3d { width: snapshot.width, height: snapshot.height, depth_or_array_layers: 1 },
+        );
+        self.text_atlas_upload_bytes.fetch_add(
+            u64::from(snapshot.width) * u64::from(snapshot.height),
+            Ordering::Relaxed,
         );
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
@@ -1029,6 +1039,11 @@ impl WgpuBackend {
             .expect("text atlas GPU lock poisoned")
             .as_ref()
             .map(|resource| resource.generation.load(Ordering::Acquire))
+    }
+
+    /// Number of R8 atlas bytes uploaded since backend creation.
+    pub fn text_atlas_upload_bytes(&self) -> u64 {
+        self.text_atlas_upload_bytes.load(Ordering::Relaxed)
     }
 
     fn submit_frame_to_slot(
@@ -2409,6 +2424,7 @@ mod tests {
             .render_frame(&scene, &FrameConfig::new(96, 32, 0, 30.0))
             .unwrap();
         let generation = gpu.text_atlas_cache_generation();
+        let first_upload_bytes = gpu.text_atlas_upload_bytes();
         let updated_scene = Scene {
             nodes: vec![SceneNode::Text {
                 x: 4.0,
@@ -2425,6 +2441,9 @@ mod tests {
         assert!(image.pixels().any(|pixel| pixel[3] > 0));
         assert!(second.pixels().any(|pixel| pixel[3] > 0));
         assert!(gpu.text_atlas_cache_generation().unwrap() > generation.unwrap());
+        let second_upload_bytes = gpu.text_atlas_upload_bytes();
+        assert!(second_upload_bytes > first_upload_bytes);
+        assert!(second_upload_bytes - first_upload_bytes < 2048 * 2048);
         let alpha_error: u64 = image
             .pixels()
             .zip(cpu.pixels())
