@@ -115,7 +115,7 @@ impl BrowserFrameBackend {
                 }),
             transport: std::env::var("DIOXUSCUT_BROWSER_TRANSPORT")
                 .ok()
-                .filter(|value| value == "file"),
+                .filter(|value| matches!(value.as_str(), "file" | "rgba_file")),
             transport_retries: browser_transport_retries_from_env(),
             props: Mutex::new(serde_json::json!({})),
             cache: FrameCacheManager::default(),
@@ -579,12 +579,21 @@ impl BrowserFrameBackend {
                                 frame,
                                 reason: "video frame dimensions overflow RGBA size".into(),
                             })?;
-                    let bytes = base64::engine::general_purpose::STANDARD
-                        .decode(video_frame.rgba_base64)
-                        .map_err(|e| RasterError::Frame {
+                    let bytes = if let Some(path) = video_frame.file_path {
+                        let bytes = std::fs::read(&path).map_err(|e| RasterError::Frame {
                             frame,
-                            reason: e.to_string(),
+                            reason: format!("unable to read browser RGBA frame file {path}: {e}"),
                         })?;
+                        let _ = std::fs::remove_file(&path);
+                        bytes
+                    } else {
+                        base64::engine::general_purpose::STANDARD
+                            .decode(video_frame.rgba_base64)
+                            .map_err(|e| RasterError::Frame {
+                                frame,
+                                reason: e.to_string(),
+                            })?
+                    };
                     if video_frame.width != width
                         || video_frame.height != height
                         || bytes.len() != expected
@@ -844,6 +853,27 @@ mod tests {
                 timeline_frame: 37.5,
             })
         );
+        let raw_path = root.join("frame.rgba");
+        fs::write(&raw_path, [5_u8, 6, 7, 8]).unwrap();
+        let file_script = root.join("worker-file.sh");
+        fs::write(
+            &file_script,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' '{{\"type\":\"ready\",\"protocol\":1}}'\nread request\nprintf '%s\\n' '{{\"type\":\"frame\",\"frame\":3,\"width\":1,\"height\":1,\"video_frame\":{{\"width\":1,\"height\":1,\"timestamp_us\":1250000,\"file_path\":\"{}\"}}}}'\n",
+                raw_path.display()
+            ),
+        )
+        .unwrap();
+        let file_backend =
+            BrowserFrameBackend::new("/bin/sh", &file_script, "http://unused").unwrap();
+        let mut file_request = request.clone();
+        file_request.transport = Some("rgba_file".into());
+        let (file_image, file_timing) = file_backend
+            .render_web_frame_with_timing(&file_request)
+            .unwrap();
+        assert_eq!(file_image.as_raw(), &[5, 6, 7, 8]);
+        assert_eq!(file_timing, timing);
+        assert!(!raw_path.exists());
         let (cached_image, cached_timing) = backend.render_web_frame_with_timing(&request).unwrap();
         assert_eq!(cached_image.as_raw(), image.as_raw());
         assert_eq!(cached_timing, timing);

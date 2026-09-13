@@ -52,7 +52,11 @@ pub struct WebVideoFrame {
     /// WebCodecs timestamp in microseconds.
     pub timestamp_us: i64,
     /// Tightly packed top-to-bottom RGBA8 bytes.
+    #[serde(default)]
     pub rgba_base64: String,
+    /// Optional process-local raw RGBA file used by the `rgba_file` transport.
+    #[serde(default)]
+    pub file_path: Option<String>,
 }
 
 /// Timing metadata attached to a browser-produced WebCodecs frame.
@@ -275,6 +279,7 @@ mod tests {
             height: 1,
             timestamp_us: 1_250_000,
             rgba_base64: String::new(),
+            file_path: None,
         };
         assert_eq!(frame.timestamp_seconds(), 1.25);
         assert_eq!(frame.timeline_frame(30.0), Some(37.5));
@@ -293,6 +298,7 @@ mod tests {
             height: 1,
             timestamp_us: 1_000_000,
             rgba_base64: String::new(),
+            file_path: None,
         };
         assert_eq!(frame.timeline_frame(0.0), None);
         assert_eq!(frame.timeline_frame(f64::NAN), None);
@@ -329,6 +335,7 @@ mod tests {
             height: 8,
             timestamp_us: 0,
             rgba_base64: String::new(),
+            file_path: None,
         };
         assert_eq!(frame.expected_rgba_bytes(), Some(512));
         let overflowing = WebVideoFrame {
@@ -336,6 +343,7 @@ mod tests {
             height: u32::MAX,
             timestamp_us: 0,
             rgba_base64: String::new(),
+            file_path: None,
         };
         assert_eq!(overflowing.expected_rgba_bytes(), None);
     }

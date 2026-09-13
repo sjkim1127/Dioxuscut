@@ -134,6 +134,11 @@ temporary PNG/JPEG and the Rust backend removes it after decoding. This mode is
 useful for local Tauri/CLI jobs; the default remains JSON/base64 for maximum
 portability.
 
+For raw WebGL/Canvas RGBA frames, set `DIOXUSCUT_BROWSER_TRANSPORT=rgba_file`.
+The worker writes tightly packed RGBA8 bytes to a process-scoped temporary file
+and returns only its path, avoiding base64 expansion while preserving lossless
+pixel transport. The Rust backend removes the file after reading it.
+
 For browser compositions that intentionally render transparency, set
 `DIOXUSCUT_BROWSER_TRANSPARENT=1`. This forwards Remotion's `omitBackground`
 behavior to Playwright for PNG frames; JPEG transport remains opaque by

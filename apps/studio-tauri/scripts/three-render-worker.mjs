@@ -115,7 +115,8 @@ rl.on('line', (line) => { queue = queue.then(async () => {
     const imageType = request.image_format === 'jpeg' ? 'jpeg' : 'png';
     const fileTransport = request.transport === 'file';
     const rgbaTransport = request.transport === 'rgba';
-    if (rgbaTransport) {
+    const rgbaFileTransport = request.transport === 'rgba_file';
+    if (rgbaTransport || rgbaFileTransport) {
       const directRgba = await page.evaluate(() => {
         const canvas = [...document.querySelectorAll('canvas')]
           .sort((a, b) => (b.width * b.height) - (a.width * a.height))[0];
@@ -148,9 +149,16 @@ rl.on('line', (line) => { queue = queue.then(async () => {
         return { width, height, rgba_base64: btoa(binary) };
       });
       if (directRgba) {
+        let videoFrame = directRgba;
+        if (rgbaFileTransport) {
+          const path = `${tmpdir()}/dioxuscut-rgba-${process.pid}-${request.frame}-${Date.now()}.bin`;
+          writeFileSync(path, Buffer.from(directRgba.rgba_base64, 'base64'));
+          pendingFrameFiles.add(path);
+          videoFrame = {width: directRgba.width, height: directRgba.height, file_path: path};
+        }
         write({ type: 'frame', frame: request.frame, width: directRgba.width, height: directRgba.height,
           video_frame: {
-            ...directRgba,
+            ...videoFrame,
             timestamp_us: Math.round((request.frame / Math.max(request.fps ?? 30, 1)) * 1_000_000),
           } });
         return;
