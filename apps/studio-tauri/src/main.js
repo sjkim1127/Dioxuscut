@@ -61,6 +61,7 @@ const preloadedSources = new Map();
 const imageDimensionsCache = new Map();
 const videoMetadataCache = new Map();
 const webmMetadataCache = new Map();
+const webmClusterCache = new Map();
 const audioDurationCache = new Map();
 const audioDataCache = new Map();
 const videoTextureCache = new Map();
@@ -620,6 +621,8 @@ async function readWebmSamplesFromCue(source, trackNumber = 1, options = {}) {
   const cueIndex = Math.max(0, Number(options.cueIndex ?? 0));
   const start = cues[cueIndex]?.clusterPosition;
   if (!Number.isSafeInteger(start)) return [];
+  const cacheKey = `${source}|${trackNumber}|${cueIndex}`;
+  if (options.cache !== false && webmClusterCache.has(cacheKey)) return webmClusterCache.get(cacheKey);
   const next = cues.slice(cueIndex + 1).find((cue) => cue.clusterPosition > start)?.clusterPosition;
   const requestedEnd = (next ?? start + 16 * 1024 * 1024);
   const response = await fetch(source, { headers: { Range: `bytes=${start}-${requestedEnd - 1}` } });
@@ -721,6 +724,11 @@ async function readWebmSamplesFromCue(source, trackNumber = 1, options = {}) {
     }
   };
   parseRange(0, bytes.length);
+  if (options.cache !== false) {
+    webmClusterCache.delete(cacheKey);
+    webmClusterCache.set(cacheKey, samples);
+    while (webmClusterCache.size > 8) webmClusterCache.delete(webmClusterCache.keys().next().value);
+  }
   return samples;
 }
 
