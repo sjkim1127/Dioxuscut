@@ -1931,7 +1931,14 @@ export async function getVideoTexture(source, options = {}) {
   await ready;
   const texture = new THREE.VideoTexture(video);
   texture.colorSpace = THREE.SRGBColorSpace;
-  const entry = { video, texture, frame: null, seekPromise: null };
+  const entry = {
+    video,
+    texture,
+    frame: null,
+    playbackRate: null,
+    startFrom: null,
+    seekPromise: null,
+  };
   videoTextureCache.set(source, entry);
   await seekVideoTexture(entry, options);
   return texture;
@@ -1960,13 +1967,16 @@ async function seekVideoTexture(entry, options) {
   const startFrom = Number(options.startFrom ?? 0);
   if (!Number.isFinite(frame) || !Number.isFinite(fps) || fps <= 0) return;
   if (!Number.isFinite(playbackRate) || playbackRate <= 0) return;
-  if (entry.frame === frame) return;
+  const normalizedStartFrom = Number.isFinite(startFrom) ? startFrom : 0;
+  if (entry.frame === frame && entry.playbackRate === playbackRate && entry.startFrom === normalizedStartFrom) return;
   if (entry.seekPromise) await entry.seekPromise;
-  if (entry.frame === frame) return;
+  if (entry.frame === frame && entry.playbackRate === playbackRate && entry.startFrom === normalizedStartFrom) return;
   const time = Math.max(0, (frame + (Number.isFinite(startFrom) ? startFrom : 0)) * playbackRate / fps);
   const { video } = entry;
   if (Math.abs(video.currentTime - time) <= 1e-4 && video.readyState >= 2) {
     entry.frame = frame;
+    entry.playbackRate = playbackRate;
+    entry.startFrom = normalizedStartFrom;
     return;
   }
   entry.seekPromise = new Promise((resolve, reject) => {
@@ -1990,7 +2000,11 @@ async function seekVideoTexture(entry, options) {
       callbackId = video.requestVideoFrameCallback(() => finish());
     }
     video.currentTime = time;
-  }).then(() => { entry.frame = frame; });
+  }).then(() => {
+    entry.frame = frame;
+    entry.playbackRate = playbackRate;
+    entry.startFrom = normalizedStartFrom;
+  });
   try {
     await entry.seekPromise;
   } finally {
