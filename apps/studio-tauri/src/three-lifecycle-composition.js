@@ -1,10 +1,19 @@
 // Framework-free reference composition for registerThreeComposition().
-export function register(api) {
+export async function register(api) {
   // Exercise the same readiness contract used by media-heavy compositions:
   // setup may briefly block capture while an async resource is prepared.
   const buffer = api.useBufferState?.();
   const unblock = buffer?.delayPlayback?.().unblock;
   if (unblock) setTimeout(unblock, 0);
+
+  const prefetched = api.prefetch?.('data:text/plain,three-prefetch-fixture', { method: 'base64' });
+  if (prefetched) {
+    const prefetchedUrl = await prefetched.waitUntilDone();
+    if (!prefetchedUrl.startsWith('data:text/plain;base64,')) {
+      throw new Error('prefetch did not return a base64 data URL');
+    }
+    prefetched.free();
+  }
 
   api.registerThreeComposition('three_lifecycle_preview', {
     setup({ THREE }) {
