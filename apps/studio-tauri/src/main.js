@@ -1909,6 +1909,8 @@ export async function getVideoTexture(source, options = {}) {
   if (typeof source !== 'string' || !source) throw new TypeError('getVideoTexture expects a source URL');
   const cached = videoTextureCache.get(source);
   if (cached) {
+    if (typeof options.muted === 'boolean') cached.video.muted = options.muted;
+    if (typeof options.loop === 'boolean') cached.video.loop = options.loop;
     if (Number.isFinite(Number(options.playbackRate)) && Number(options.playbackRate) > 0) {
       cached.video.playbackRate = Number(options.playbackRate);
     }
