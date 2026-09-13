@@ -241,6 +241,21 @@ to receive `{durationInSeconds, width, height, aspectRatio, isRemote}` with
 source-level caching.
 `window.dioxuscut.getAudioDurationInSeconds(src)` (also available as
 `getAudioDuration`) provides the cached duration for audio-driven compositions.
+Audio analysis is shared through `getAudioData(src, {sampleRate, requestInit})`
+and the hook-shaped alias `useAudioData`. The host also provides
+`getWindowedAudioData()`/`useWindowedAudioData()`, `getWaveformPortion()`,
+`visualizeAudioWaveform()`, and `visualizeAudio()` for frame-driven waveform
+and spectrum work. `audioBufferToDataUrl()` converts synthesized Web Audio to a
+float32 WAV data URL, while `prefetch()` plus `usePreload()` keeps media in a
+blob/base64 cache and reports streaming progress. These are framework-free
+adapters: React is not required in a Three.js composition. Native Rust exposes
+the corresponding `get_waveform_bars()` and `visualize_audio_waveform()` APIs
+through `dioxuscut_media`.
+
+Studio integrations may use `watchStaticFile(fileName, callback)` and dispatch
+`remotion_staticFilesChanged` with `{files: [{name, lastModified}]}`. The
+returned `cancel()` handle makes the watcher safe to use during composition
+hot reloads.
 
 Each worker owns one Chromium page and serializes its own requests; the shared
 streaming pipeline schedules different frames across the pool while preserving
