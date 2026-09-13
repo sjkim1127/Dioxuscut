@@ -178,6 +178,17 @@ See `benchmarks/BATTLE_REPORT.md` for the latest comprehensive battle report.
 
 The native Docker image must be built with the Linux multi-stage Dockerfile;
 do not copy `target/release/dioxuscut` from macOS or Windows into the image.
+
+Build and run a functional Linux smoke test from the repository root:
+
+```sh
+docker build --platform linux/arm64 -f benchmarks/docker/Dockerfile.dioxuscut -t dioxuscut:latest .
+sh benchmarks/docker/smoke.sh
+```
+
+The smoke test renders 16 native H.264 frames inside the container and checks
+the resulting MP4 with `ffprobe`. Set `IMAGE`, `PLATFORM`, or `OUT_DIR` to
+test another image, architecture, or output directory.
 From the repository root, OrbStack or Docker can build and execute it with:
 
 ```sh
