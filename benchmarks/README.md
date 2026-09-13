@@ -61,6 +61,13 @@ rendering, and screenshot capture with:
 node benchmarks/browser/three-lifecycle-smoke.mjs
 ```
 
+The native 3D emission path can be measured independently of rasterization
+and FFmpeg with:
+
+```sh
+cargo run --locked --release -p dioxuscut-composition --example mesh3d_bench
+```
+
 Both scene definitions render 32 opaque moving rectangles at 1280x720, 30 fps,
 180 frames, using the same spring parameters. Each uses four render workers,
 H.264, CRF 18, and the fast x264 preset. Both use the same system FFmpeg binary;
