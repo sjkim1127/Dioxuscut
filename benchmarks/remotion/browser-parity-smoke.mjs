@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import path from 'node:path';
+import {performance} from 'node:perf_hooks';
 import {bundle} from '@remotion/bundler';
 import {openBrowser, renderStill, selectComposition} from '@remotion/renderer';
 
@@ -29,16 +30,24 @@ await page.waitForFunction(() => typeof window.dioxuscut?.renderFrame === 'funct
 
 try {
   const comparisons = [];
+  let dioxusTotalMs = 0;
+  let remotionTotalMs = 0;
   for (const frame of frames) {
     const dioxusPath = path.join(output, `dioxuscut-${frame}.png`);
     const remotionPath = path.join(output, `remotion-${frame}.png`);
+    const dioxusStart = performance.now();
     await page.evaluate((nextFrame) => window.dioxuscut.renderFrame({
       composition: 'SpringRects', frame: nextFrame, fps: 30, width: 320, height: 180,
       durationInFrames: 60, props: {}, assets: [], timeline: [],
     }), frame);
     const dioxusPng = await page.evaluate(() => document.querySelector('#preview-canvas').toDataURL('image/png'));
     writeFileSync(dioxusPath, Buffer.from(dioxusPng.split(',')[1], 'base64'));
+    const dioxusMs = performance.now() - dioxusStart;
+    const remotionStart = performance.now();
     await renderStill({...remotionCommon, composition, frame, imageFormat: 'png', output: remotionPath});
+    const remotionMs = performance.now() - remotionStart;
+    dioxusTotalMs += dioxusMs;
+    remotionTotalMs += remotionMs;
     const dioxusPixels = readFileSync(dioxusPath);
     const remotionPixels = readFileSync(remotionPath);
     const dioxusDecoded = PNG.sync.read(dioxusPixels);
@@ -46,11 +55,16 @@ try {
     const identical = dioxusDecoded.width === remotionDecoded.width
       && dioxusDecoded.height === remotionDecoded.height
       && dioxusDecoded.data.equals(remotionDecoded.data);
-    comparisons.push({frame, identical, width: dioxusDecoded.width, height: dioxusDecoded.height,
-      dioxusBytes: dioxusDecoded.data.length, remotionBytes: remotionDecoded.data.length});
+    comparisons.push({frame, identical, dioxusMs, remotionMs, width: dioxusDecoded.width,
+      height: dioxusDecoded.height, dioxusBytes: dioxusDecoded.data.length,
+      remotionBytes: remotionDecoded.data.length});
     assert.equal(identical, true, `PNG bytes differ at frame ${frame}`);
   }
-  console.log(JSON.stringify({frames, comparisons}, null, 2));
+  console.log(JSON.stringify({frames, comparisons, totals: {
+    dioxusTotalMs, remotionTotalMs,
+    dioxusMeanMs: dioxusTotalMs / frames.length,
+    remotionMeanMs: remotionTotalMs / frames.length,
+  }}, null, 2));
 } finally {
   await dioxusBrowser.close();
   await remotionBrowser.close({silent: true});
