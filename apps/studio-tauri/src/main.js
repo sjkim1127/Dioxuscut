@@ -807,6 +807,7 @@ export function avccToAnnexB(data, lengthSize = 4) {
 // the caller and must be closed when no longer needed.
 export async function decodeIsoBmffVideo(source, {
   trackIndex = 0, startSample = 0, endSample = Infinity, maxSamples = 256, codec, description, options = {},
+  onFrame,
 } = {}) {
   if (typeof VideoDecoder === 'undefined') throw new Error('VideoDecoder is not available in this runtime');
   if (typeof codec !== 'string' || !codec) throw new TypeError('decodeIsoBmffVideo requires a codec string');
@@ -816,10 +817,11 @@ export async function decodeIsoBmffVideo(source, {
   if (!Number.isInteger(maxSamples) || maxSamples <= 0) throw new RangeError('maxSamples must be a positive integer');
   const samples = ranges.filter(({ sampleIndex }) => sampleIndex >= startSample && sampleIndex < endSample).slice(0, maxSamples);
   if (!samples.length) throw new RangeError('decodeIsoBmffVideo found no samples in the requested range');
-  const frames = [];
+  if (onFrame !== undefined && typeof onFrame !== 'function') throw new TypeError('onFrame must be a function');
+  const frames = onFrame ? null : [];
   let failure;
   const decoder = new VideoDecoder({
-    output: (frame) => frames.push(frame),
+    output: (frame) => { if (onFrame) onFrame(frame); else frames.push(frame); },
     error: (error) => { failure = error; },
   });
   const decoderConfig = { codec, ...(description ? { description } : {}) };
@@ -842,7 +844,7 @@ export async function decodeIsoBmffVideo(source, {
     if (failure) throw failure;
     return frames;
   } catch (error) {
-    for (const frame of frames) frame.close();
+    for (const frame of frames ?? []) frame.close();
     throw error;
   } finally {
     if (decoder.state !== 'closed') decoder.close();
@@ -851,7 +853,7 @@ export async function decodeIsoBmffVideo(source, {
 
 export async function decodeIsoBmffAudio(source, {
   trackIndex = 0, startSample = 0, endSample = Infinity, maxSamples = 256, codec, description,
-  numberOfChannels, sampleRate, options = {},
+  numberOfChannels, sampleRate, options = {}, onAudioData,
 } = {}) {
   if (typeof AudioDecoder === 'undefined') throw new Error('AudioDecoder is not available in this runtime');
   if (typeof codec !== 'string' || !codec) throw new TypeError('decodeIsoBmffAudio requires a codec string');
@@ -861,10 +863,11 @@ export async function decodeIsoBmffAudio(source, {
   if (!Number.isInteger(maxSamples) || maxSamples <= 0) throw new RangeError('maxSamples must be a positive integer');
   const samples = ranges.filter(({ sampleIndex }) => sampleIndex >= startSample && sampleIndex < endSample).slice(0, maxSamples);
   if (!samples.length) throw new RangeError('decodeIsoBmffAudio found no samples in the requested range');
-  const chunks = [];
+  if (onAudioData !== undefined && typeof onAudioData !== 'function') throw new TypeError('onAudioData must be a function');
+  const chunks = onAudioData ? null : [];
   let failure;
   const decoder = new AudioDecoder({
-    output: (audio) => chunks.push(audio),
+    output: (audio) => { if (onAudioData) onAudioData(audio); else chunks.push(audio); },
     error: (error) => { failure = error; },
   });
   const decoderConfig = {
@@ -891,9 +894,9 @@ export async function decodeIsoBmffAudio(source, {
     }
     await decoder.flush();
     if (failure) throw failure;
-    return chunks;
+    return onAudioData ? null : chunks;
   } catch (error) {
-    for (const chunk of chunks) chunk.close();
+    for (const chunk of chunks ?? []) chunk.close();
     throw error;
   } finally {
     if (decoder.state !== 'closed') decoder.close();
