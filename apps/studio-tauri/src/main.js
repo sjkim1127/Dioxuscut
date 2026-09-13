@@ -728,6 +728,24 @@ export function makeIsoBmffWebCodecsConfig(track) {
   throw new Error(`unsupported ISO-BMFF codec configuration: ${config.type}`);
 }
 
+export function avccToAnnexB(data, lengthSize = 4) {
+  if (!(data instanceof Uint8Array) || ![1, 2, 4].includes(lengthSize)) {
+    throw new TypeError('avccToAnnexB expects Uint8Array data and a length size of 1, 2, or 4');
+  }
+  const output = [];
+  let offset = 0;
+  while (offset + lengthSize <= data.length) {
+    let length = 0;
+    for (let index = 0; index < lengthSize; index += 1) length = length * 256 + data[offset + index];
+    offset += lengthSize;
+    if (length <= 0 || offset + length > data.length) throw new RangeError('invalid AVCC NAL unit length');
+    output.push(0, 0, 0, 1, ...data.subarray(offset, offset + length));
+    offset += length;
+  }
+  if (offset !== data.length) throw new RangeError('truncated AVCC sample');
+  return new Uint8Array(output);
+}
+
 // Decode a bounded sequence of ISO-BMFF samples with Chromium WebCodecs.
 // `codecConfig` is caller-supplied because avcC/hvcC normalization and codec
 // string selection depend on the sample entry; returned VideoFrames belong to
@@ -1608,6 +1626,7 @@ window.dioxuscut = {
   readIsoBmffSample,
   createIsoBmffEncodedChunk,
   makeIsoBmffWebCodecsConfig,
+  avccToAnnexB,
   decodeIsoBmffVideo,
   decodeIsoBmffAudio,
   readMediaRange,

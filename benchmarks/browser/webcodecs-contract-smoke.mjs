@@ -19,6 +19,7 @@ try {
       keyframe: true,
     };
     const chunk = window.dioxuscut.createIsoBmffEncodedChunk(sample);
+    const annexB = window.dioxuscut.avccToAnnexB(new Uint8Array([0, 0, 0, 2, 0x65, 0x88]));
     const support = await VideoDecoder.isConfigSupported({ codec: 'avc1.42E01E' });
     const audio = window.dioxuscut.createIsoBmffEncodedChunk({
       data: new Uint8Array([0xff, 0xf1, 0x50, 0x80]), timestamp: 2, duration: 0.02,
@@ -26,6 +27,7 @@ try {
     const audioSupport = await AudioDecoder.isConfigSupported({ codec: 'mp4a.40.2', numberOfChannels: 2, sampleRate: 48000 });
     return {
       type: chunk.type, timestamp: chunk.timestamp, duration: chunk.duration, supported: support.supported,
+      annexB: [...annexB],
       audioTimestamp: audio.timestamp, audioDuration: audio.duration, audioSupported: audioSupport.supported,
     };
   });
@@ -33,6 +35,7 @@ try {
   assert.equal(result.timestamp, 1_250_000);
   assert.equal(result.duration, Math.round(1_000_000 / 30));
   assert.equal(result.supported, true);
+  assert.deepEqual(result.annexB, [0, 0, 0, 1, 0x65, 0x88]);
   assert.equal(result.audioTimestamp, 2_000_000);
   assert.equal(result.audioDuration, 20_000);
   assert.equal(result.audioSupported, true);
