@@ -52,7 +52,7 @@ function spawnWorker() {
         width: 1280, height: 720, props: {},
         ...(imageFormat === 'jpeg' ? {image_format: 'jpeg', jpeg_quality: jpegQuality} : {}),
         ...(transparent ? {transparent: true} : {}),
-        ...(transport === 'file' ? {transport: 'file'} : {}),
+        ...(transport === 'file' || transport === 'rgba' ? {transport} : {}),
       }) + '\n');
     });
     (async () => {
@@ -96,6 +96,6 @@ try {
   await Promise.all(workers.map((worker) => worker.close()));
 }
 const sorted = [...samples].sort((a, b) => a - b);
-const report = {backend: 'chromium-three-worker', url, frames, width: 1280, height: 720, repeats, workers: concurrency, image_format: imageFormat ?? 'png', jpeg_quality: imageFormat === 'jpeg' ? jpegQuality : null, transparent, samples_ms: samples, median_ms: sorted[Math.floor(sorted.length / 2)], fps_equivalent: frames / (sorted[Math.floor(sorted.length / 2)] / 1000), node: process.version, platform: process.platform, arch: process.arch};
+const report = {backend: 'chromium-three-worker', url, frames, width: 1280, height: 720, repeats, workers: concurrency, image_format: imageFormat ?? 'png', jpeg_quality: imageFormat === 'jpeg' ? jpegQuality : null, transport: transport ?? 'encoded', transparent, samples_ms: samples, median_ms: sorted[Math.floor(sorted.length / 2)], fps_equivalent: frames / (sorted[Math.floor(sorted.length / 2)] / 1000), node: process.version, platform: process.platform, arch: process.arch};
 if (output) writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`);
 console.log(JSON.stringify(report, null, 2));
