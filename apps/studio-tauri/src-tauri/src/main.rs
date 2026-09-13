@@ -334,6 +334,14 @@ fn start_render_job(
             if let Some(retries) = project.settings.browser_transport_retries {
                 backend = backend.with_transport_retries(retries);
             }
+            if project
+                .settings
+                .browser_transport
+                .as_deref()
+                .is_some_and(|transport| transport.trim().eq_ignore_ascii_case("file"))
+            {
+                backend = backend.with_file_transport(true);
+            }
             backend
                 .set_composition(&project.composition)
                 .map_err(|error| error.to_string())?;
