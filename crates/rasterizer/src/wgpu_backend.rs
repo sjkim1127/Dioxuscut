@@ -1599,6 +1599,44 @@ mod tests {
     }
 
     #[test]
+    fn render_stats_distinguish_gpu_and_cpu_fallback_frames() {
+        let Ok(backend) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping render stats test");
+            return;
+        };
+        let config = FrameConfig::new(64, 64, 0, 30.0);
+        let gpu_scene = Scene {
+            nodes: vec![SceneNode::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 64.0,
+                h: 64.0,
+                fill: Color::WHITE,
+                stroke: None,
+                stroke_width: 0.0,
+                corner_radius: 0.0,
+            }],
+        };
+        let fallback_scene = Scene {
+            nodes: vec![SceneNode::Text {
+                x: 2.0,
+                y: 16.0,
+                content: "fallback".into(),
+                font_size: 12.0,
+                color: Color::WHITE,
+                font_weight: 400,
+                font_sources: Vec::new(),
+            }],
+        };
+        backend.render_frame(&gpu_scene, &config).unwrap();
+        backend.render_frame(&fallback_scene, &config).unwrap();
+        assert_eq!(backend.render_stats(), WgpuRenderStats {
+            gpu_frames: 1,
+            cpu_fallback_frames: 1,
+        });
+    }
+
+    #[test]
     fn gpu_renders_transformed_path_stroke_and_three_stop_gradient() {
         let Ok(gpu) = WgpuBackend::new() else {
             println!("GPU backend unavailable; skipping render comparison");
