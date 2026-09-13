@@ -57,6 +57,14 @@ try {
     }, 'audio');
     const audioSupport = await AudioDecoder.isConfigSupported({ codec: 'mp4a.40.2', numberOfChannels: 2, sampleRate: 48000 });
     const parsed = await window.dioxuscut.parseIsoBmffMovieHeader('/assets/showcase.mp4');
+    const parseEvents = [];
+    await window.dioxuscut.parseMedia({
+      src: '/assets/showcase.mp4',
+      onDimensions: (value) => parseEvents.push(['dimensions', value?.width ?? null]),
+      onDurationInSeconds: (value) => parseEvents.push(['duration', value]),
+      onContainer: (value) => parseEvents.push(['container', value]),
+      onTracks: (value) => parseEvents.push(['tracks', value.length]),
+    });
     const ranged = await window.dioxuscut.readMediaRange('/range.bin', 2, 6);
     const samples = await window.dioxuscut.readIsoBmffSamples('/assets/showcase.mp4', 0, [0, 1, 2], {
       parsed, concurrency: 2,
@@ -111,6 +119,7 @@ try {
         sampleDescriptionIndex: parsed.tracks[0].sampleTables.sampleRanges[sampleIndex].sampleDescriptionIndex,
       })),
       ranged: [...ranged],
+      parseEvents,
       decoded,
       videoDecodeMs,
       decodedAudio,

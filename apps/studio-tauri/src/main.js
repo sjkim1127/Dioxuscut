@@ -279,10 +279,20 @@ export async function parseMedia({
   fields,
   onDimensions,
   onDurationInSeconds,
+  onFps,
+  onVideoCodec,
+  onAudioCodec,
+  onSampleRate,
+  onNumberOfAudioChannels,
+  onContainer,
+  onTracks,
   onParseProgress,
 } = {}) {
   if (typeof src !== 'string' || !src) throw new TypeError('parseMedia expects {src}');
-  for (const [name, callback] of Object.entries({ onDimensions, onDurationInSeconds, onParseProgress })) {
+  for (const [name, callback] of Object.entries({
+    onDimensions, onDurationInSeconds, onFps, onVideoCodec, onAudioCodec,
+    onSampleRate, onNumberOfAudioChannels, onContainer, onTracks, onParseProgress,
+  })) {
     if (callback !== undefined && typeof callback !== 'function') {
       throw new TypeError(`parseMedia expects ${name} to be a function`);
     }
@@ -298,6 +308,11 @@ export async function parseMedia({
   if (wav) {
     await onDimensions?.(null);
     await onDurationInSeconds?.(wav.durationInSeconds);
+    await onSampleRate?.(wav.sampleRate);
+    await onNumberOfAudioChannels?.(wav.audioTracks[0]?.channels ?? null);
+    await onAudioCodec?.(wav.audioFormat === 1 ? 'pcm' : null);
+    await onContainer?.('wav');
+    await onTracks?.([]);
     await onParseProgress?.({ bytes: 0, percentage: 1, totalBytes: null });
     return selectFields({ ...wav, container: 'wav', tracks: [] });
   }
@@ -311,8 +326,23 @@ export async function parseMedia({
   }
   const dimensions = video ? { width: video.width, height: video.height } : image;
   const durationInSeconds = video?.durationInSeconds ?? audioDuration ?? container?.durationInSeconds ?? 0;
+  const videoTrack = container?.tracks?.find((track) => track.type === 'video');
+  const audioTrack = container?.tracks?.find((track) => track.type === 'audio');
+  const videoSamples = videoTrack?.sampleTables?.sampleTimestamps ?? [];
+  const fps = videoSamples.length > 1 && videoSamples[1].timestamp > videoSamples[0].timestamp
+    ? 1 / (videoSamples[1].timestamp - videoSamples[0].timestamp)
+    : null;
+  const videoCodec = videoTrack?.codecConfig?.type ?? null;
+  const audioCodec = audioTrack?.codecConfig?.type ?? null;
   await onDimensions?.(dimensions);
   await onDurationInSeconds?.(durationInSeconds);
+  if (fps !== null) await onFps?.(fps);
+  if (videoCodec !== null) await onVideoCodec?.(videoCodec);
+  if (audioCodec !== null) await onAudioCodec?.(audioCodec);
+  if (audioTrack?.sampleRate != null) await onSampleRate?.(audioTrack.sampleRate);
+  if (audioTrack?.numberOfChannels != null) await onNumberOfAudioChannels?.(audioTrack.numberOfChannels);
+  if (container?.container != null) await onContainer?.(container.container);
+  await onTracks?.(container?.tracks ?? []);
   await onParseProgress?.({ bytes: 0, percentage: 1, totalBytes: null });
   const result = {
     durationInSeconds,
