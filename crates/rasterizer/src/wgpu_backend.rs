@@ -1442,15 +1442,34 @@ impl RasterizerBackend for WgpuBackend {
     }
 
     fn render_frame(&self, scene: &Scene, config: &FrameConfig) -> Result<RgbaImage, RasterError> {
-        if scene
-            .nodes
-            .iter()
-            .all(|node| matches!(node, SceneNode::Shader { .. }))
-            && !scene.nodes.is_empty()
+        if !scene.nodes.is_empty()
+            && scene
+                .nodes
+                .iter()
+                .all(|node| matches!(node, SceneNode::Shader { .. }))
         {
             let image = self.render_shader_layers(scene, config)?;
             self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
             return Ok(image);
+        }
+        if let Some(shader_start) = scene
+            .nodes
+            .iter()
+            .position(|node| matches!(node, SceneNode::Shader { .. }))
+        {
+            if scene.nodes[shader_start..]
+                .iter()
+                .all(|node| matches!(node, SceneNode::Shader { .. }))
+            {
+                let base = Scene {
+                    nodes: scene.nodes[..shader_start].to_vec(),
+                };
+                if compile_scene(&base, &self.fallback).is_some() {
+                    let mut image = self.render_frame(&base, config)?;
+                    self.composite_shader_layers(&mut image, &scene.nodes[shader_start..])?;
+                    return Ok(image);
+                }
+            }
         }
         let Some(commands) = compile_scene(scene, &self.fallback) else {
             self.cpu_fallback_frame_count
@@ -1635,7 +1654,16 @@ impl WgpuBackend {
         config: &FrameConfig,
     ) -> Result<RgbaImage, RasterError> {
         let mut output = RgbaImage::new(config.width, config.height);
-        for node in &scene.nodes {
+        self.composite_shader_layers(&mut output, &scene.nodes)?;
+        Ok(output)
+    }
+
+    fn composite_shader_layers(
+        &self,
+        output: &mut RgbaImage,
+        nodes: &[SceneNode],
+    ) -> Result<(), RasterError> {
+        for node in nodes {
             let SceneNode::Shader {
                 x,
                 y,
@@ -1670,14 +1698,9 @@ impl WgpuBackend {
                     pixel[3] = (f32::from(pixel[3]) * *opacity).round() as u8;
                 }
             }
-            image::imageops::overlay(
-                &mut output,
-                &layer,
-                (*x).round() as i64,
-                (*y).round() as i64,
-            );
+            image::imageops::overlay(output, &layer, (*x).round() as i64, (*y).round() as i64);
         }
-        Ok(output)
+        Ok(())
     }
 }
 
@@ -2848,6 +2871,48 @@ mod tests {
             "overlap was {overlap:?}"
         );
         assert_eq!(image.get_pixel(10, 4)[3], 0);
+    }
+
+    #[test]
+    fn gpu_shader_suffix_composites_after_regular_gpu_scene() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping mixed shader test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![
+                SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 16.0,
+                    h: 10.0,
+                    fill: Color::rgb(255, 0, 0),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                },
+                SceneNode::Shader {
+                    x: 4.0,
+                    y: 2.0,
+                    w: 6.0,
+                    h: 4.0,
+                    source: "return vec4<f32>(0.0, 0.0, 1.0, 1.0);".into(),
+                    time: 0.0,
+                    params: [0.0; 4],
+                    opacity: 0.5,
+                },
+            ],
+        };
+        let image = gpu
+            .render_frame(&scene, &FrameConfig::new(16, 10, 0, 30.0))
+            .unwrap();
+        assert_eq!(gpu.render_stats().gpu_frames, 1);
+        assert_eq!(image.get_pixel(1, 1)[0], 255);
+        let overlap = image.get_pixel(6, 4);
+        assert!(
+            overlap[0] > 80 && overlap[2] > 80,
+            "overlap was {overlap:?}"
+        );
     }
 
     #[test]
