@@ -751,6 +751,7 @@ type GpuImageCache = Mutex<GpuImageCacheState>;
 /// that existed in earlier versions.
 pub struct WgpuBackend {
     ctx: GpuContext,
+    shader_runner: crate::shader::WgpuShaderRunner,
     /// Per-resolution GPU resource pool.  Key = `(width, height)`.
     frame_resources: GpuResourcePool,
     fallback: TinySkiaBackend,
@@ -795,8 +796,10 @@ impl WgpuBackend {
     /// Create a new GPU backend. Initialises the device and render pipeline.
     pub fn new() -> Result<Self, RasterError> {
         let ctx = GpuContext::new()?;
+        let shader_runner = crate::shader::WgpuShaderRunner::new()?;
         Ok(Self {
             ctx,
+            shader_runner,
             frame_resources: Mutex::new(HashMap::new()),
             fallback: TinySkiaBackend::new(),
             image_cache: ImageCache::default(),
@@ -1378,6 +1381,13 @@ impl RasterizerBackend for WgpuBackend {
     }
 
     fn render_frame(&self, scene: &Scene, config: &FrameConfig) -> Result<RgbaImage, RasterError> {
+        if let [SceneNode::Shader { x, y, w, h, source, time, params, opacity }] = scene.nodes.as_slice() {
+            if *x == 0.0 && *y == 0.0 && *w == config.width as f32 && *h == config.height as f32 && *opacity == 1.0 {
+                let image = self.shader_runner.render(config.width, config.height, *time as f32, *params, source)?;
+                self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
+                return Ok(image);
+            }
+        }
         let Some(commands) = compile_scene(scene, &self.fallback) else {
             self.cpu_fallback_frame_count.fetch_add(1, Ordering::Relaxed);
             return self.fallback.render_frame(scene, config);
@@ -2517,6 +2527,30 @@ mod tests {
             .sum();
         let mean_alpha_error = alpha_error as f64 / (96 * 32) as f64;
         assert!(mean_alpha_error < 12.0, "GPU/CPU text alpha mean error was {mean_alpha_error}");
+    }
+
+    #[test]
+    fn gpu_fullscreen_shader_uses_wgpu_shader_runner() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping shader GPU test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Shader {
+                x: 0.0,
+                y: 0.0,
+                w: 32.0,
+                h: 16.0,
+                source: "return vec4<f32>(uv.x, uv.y, 0.25, 1.0);".into(),
+                time: 0.0,
+                params: [1.0, 1.0, 1.0, 1.0],
+                opacity: 1.0,
+            }],
+        };
+        let image = gpu.render_frame(&scene, &FrameConfig::new(32, 16, 0, 30.0)).unwrap();
+        assert_eq!(gpu.render_stats().gpu_frames, 1);
+        assert!(image.get_pixel(1, 1)[2] > 0);
+        assert_ne!(image.get_pixel(1, 1), image.get_pixel(30, 14));
     }
 
     #[test]
