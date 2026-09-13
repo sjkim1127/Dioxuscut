@@ -1,6 +1,6 @@
 # ⚔️ Remotion vs Dioxuscut: 3-Axis Benchmark Battle Report
 
-**Generated**: 2026-09-13 07:21:32
+**Generated**: 2026-09-13 09:59:46
 **Platform**: macOS (Apple Silicon)
 
 ---
@@ -11,10 +11,10 @@ Remotion requires Node.js and Chromium renderer/GPU child processes, while Dioxu
 
 | Workload | Remotion (Chromium 4 Workers) | **Dioxuscut (tiny-skia 4 Threads)** | Difference / Advantage |
 |:---|:---:|:---:|:---:|
-| **720p Spring Scene Peak RAM** | not measured | **143.72 MB** | **no memory ratio claim** |
-| **1080p Cyberpunk VFX Peak RAM**| not measured | **286.69 MB** | **no memory ratio claim** |
-| **720p Spring Scene Render Duration** | 10.125 s | **0.572 s** | **18.66x paired speedup when measured** |
-| **1080p VFX Render Duration** | not measured by this harness | **8.541 s** | **no speedup claim** |
+| **720p Spring Scene Peak RAM** | not measured | **143.84 MB** | **no memory ratio claim** |
+| **1080p Cyberpunk VFX Peak RAM**| not measured | **277.77 MB** | **no memory ratio claim** |
+| **720p Spring Scene Render Duration** | 10.125 s | **1.347 s** | **18.66x paired speedup when measured** |
+| **1080p VFX Render Duration** | not measured by this harness | **9.683 s** | **no speedup claim** |
 
 ### 🖥️ Concurrency Capacity on Common Cloud Servers (Available RAM)
 
@@ -38,9 +38,9 @@ Features exercised:
 - Animated procedural neon laser grid
 
 **Dioxuscut 1080p Result**:
-- Duration: **8.541s** (180 frames @ 30fps)
-- Average Throughput: **21.1 FPS**
-- Peak Memory: **286.69 MB** (Completely immune to browser GC spikes)
+- Duration: **9.683s** (180 frames @ 30fps)
+- Average Throughput: **18.6 FPS**
+- Peak Memory: **277.77 MB** (Completely immune to browser GC spikes)
 
 ---
 
