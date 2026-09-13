@@ -179,6 +179,10 @@ struct InstanceData {
     mask_shapes: array<vec4<f32>, 4>,
     mask_color0: array<vec4<f32>, 4>,
     mask_color1: array<vec4<f32>, 4>,
+    mask_color2: array<vec4<f32>, 4>,
+    mask_color3: array<vec4<f32>, 4>,
+    mask_stop_positions: array<vec4<f32>, 4>,
+    mask_stop_counts: vec4<u32>,
     // corner radius, stroke width, angle, inherited opacity
     params: vec4<f32>,
     // x' = dot(transform_x.xyz, vec3(x, y, 1))
@@ -430,15 +434,15 @@ fn mask_coverage(position: vec2<f32>, instance: InstanceData) -> f32 {
     let opacity1 = instance.mask_opacity[1];
     let opacity2 = instance.mask_opacity[2];
     let opacity3 = instance.mask_opacity[3];
-    if opacity0 >= 0.0 { has_mask = true; coverage = mask_shape_coverage(position, rect0, instance.mask_shapes[0], instance.mask_kinds.x, opacity0, instance.mask_color0[0], instance.mask_color1[0], coverage); }
-    if opacity1 >= 0.0 { has_mask = true; coverage = mask_shape_coverage(position, rect1, instance.mask_shapes[1], instance.mask_kinds.y, opacity1, instance.mask_color0[1], instance.mask_color1[1], coverage); }
-    if opacity2 >= 0.0 { has_mask = true; coverage = mask_shape_coverage(position, rect2, instance.mask_shapes[2], instance.mask_kinds.z, opacity2, instance.mask_color0[2], instance.mask_color1[2], coverage); }
-    if opacity3 >= 0.0 { has_mask = true; coverage = mask_shape_coverage(position, rect3, instance.mask_shapes[3], instance.mask_kinds.w, opacity3, instance.mask_color0[3], instance.mask_color1[3], coverage); }
+    if opacity0 >= 0.0 { has_mask = true; coverage = mask_shape_coverage(position, rect0, instance.mask_shapes[0], instance.mask_kinds.x, opacity0, instance.mask_color0[0], instance.mask_color1[0], instance.mask_color2[0], instance.mask_color3[0], instance.mask_stop_positions[0], instance.mask_stop_counts.x, coverage); }
+    if opacity1 >= 0.0 { has_mask = true; coverage = mask_shape_coverage(position, rect1, instance.mask_shapes[1], instance.mask_kinds.y, opacity1, instance.mask_color0[1], instance.mask_color1[1], instance.mask_color2[1], instance.mask_color3[1], instance.mask_stop_positions[1], instance.mask_stop_counts.y, coverage); }
+    if opacity2 >= 0.0 { has_mask = true; coverage = mask_shape_coverage(position, rect2, instance.mask_shapes[2], instance.mask_kinds.z, opacity2, instance.mask_color0[2], instance.mask_color1[2], instance.mask_color2[2], instance.mask_color3[2], instance.mask_stop_positions[2], instance.mask_stop_counts.z, coverage); }
+    if opacity3 >= 0.0 { has_mask = true; coverage = mask_shape_coverage(position, rect3, instance.mask_shapes[3], instance.mask_kinds.w, opacity3, instance.mask_color0[3], instance.mask_color1[3], instance.mask_color2[3], instance.mask_color3[3], instance.mask_stop_positions[3], instance.mask_stop_counts.w, coverage); }
     if has_mask { return coverage; }
     return 1.0;
 }
 
-fn mask_shape_coverage(position: vec2<f32>, rect: vec4<f32>, shape: vec4<f32>, kind: u32, opacity: f32, color0: vec4<f32>, color1: vec4<f32>, current: f32) -> f32 {
+fn mask_shape_coverage(position: vec2<f32>, rect: vec4<f32>, shape: vec4<f32>, kind: u32, opacity: f32, color0: vec4<f32>, color1: vec4<f32>, color2: vec4<f32>, color3: vec4<f32>, positions: vec4<f32>, stop_count: u32, current: f32) -> f32 {
     var inside = position.x >= rect.x && position.y >= rect.y &&
         position.x < rect.x + rect.z && position.y < rect.y + rect.w;
     if kind == 1u {
@@ -456,7 +460,22 @@ fn mask_shape_coverage(position: vec2<f32>, rect: vec4<f32>, shape: vec4<f32>, k
         if kind == 4u {
             t = clamp(length(position - shape.xy) / max(shape.z, 0.000001), 0.0, 1.0);
         }
-        let color = mix(color0, color1, t);
+        var color = color0;
+        if stop_count >= 2u {
+            if t <= positions.y {
+                color = mix(color0, color1, clamp((t - positions.x) / max(positions.y - positions.x, 0.000001), 0.0, 1.0));
+            } else if stop_count == 2u {
+                color = color1;
+            } else if t <= positions.z {
+                color = mix(color1, color2, clamp((t - positions.y) / max(positions.z - positions.y, 0.000001), 0.0, 1.0));
+            } else if stop_count == 3u {
+                color = color2;
+            } else if t <= positions.w {
+                color = mix(color2, color3, clamp((t - positions.z) / max(positions.w - positions.z, 0.000001), 0.0, 1.0));
+            } else {
+                color = color3;
+            }
+        }
         shape_opacity = color.a;
         if kind == 3u {
             shape_opacity = dot(color.rgb, vec3<f32>(0.2126, 0.7152, 0.0722)) * color.a;
@@ -2252,6 +2271,10 @@ struct GpuInstance {
     mask_shapes: [[f32; 4]; 4],
     mask_color0: [[f32; 4]; 4],
     mask_color1: [[f32; 4]; 4],
+    mask_color2: [[f32; 4]; 4],
+    mask_color3: [[f32; 4]; 4],
+    mask_stop_positions: [[f32; 4]; 4],
+    mask_stop_counts: [u32; 4],
     params: [f32; 4],
     transform_x: [f32; 4],
     transform_y: [f32; 4],
@@ -2278,6 +2301,10 @@ impl GpuInstance {
             mask_shapes: [[0.0; 4]; 4],
             mask_color0: [[0.0; 4]; 4],
             mask_color1: [[0.0; 4]; 4],
+            mask_color2: [[0.0; 4]; 4],
+            mask_color3: [[0.0; 4]; 4],
+            mask_stop_positions: [[0.0; 4]; 4],
+            mask_stop_counts: [0; 4],
             params: [0.0, 0.0, 0.0, opacity],
             transform_x,
             transform_y,
@@ -2640,6 +2667,10 @@ fn compile_nodes(
                         mask_shapes,
                         mask_color0,
                         mask_color1,
+                        mask_color2,
+                        mask_color3,
+                        mask_stop_positions,
+                        mask_stop_counts,
                     )) = mask_info
                     {
                         instance.clip_rects = clip_rects;
@@ -2648,6 +2679,10 @@ fn compile_nodes(
                         instance.mask_shapes = mask_shapes;
                         instance.mask_color0 = mask_color0;
                         instance.mask_color1 = mask_color1;
+                        instance.mask_color2 = mask_color2;
+                        instance.mask_color3 = mask_color3;
+                        instance.mask_stop_positions = mask_stop_positions;
+                        instance.mask_stop_counts = mask_stop_counts;
                     }
                 }
             }
@@ -2745,6 +2780,10 @@ fn gpu_mask_shapes(
     [[f32; 4]; 4],
     [[f32; 4]; 4],
     [[f32; 4]; 4],
+    [[f32; 4]; 4],
+    [[f32; 4]; 4],
+    [[f32; 4]; 4],
+    [u32; 4],
 )> {
     if mask.is_empty() || mask.len() > 4 {
         return None;
@@ -2755,103 +2794,123 @@ fn gpu_mask_shapes(
     let mut shapes = [[0.0; 4]; 4];
     let mut colors0 = [[0.0; 4]; 4];
     let mut colors1 = [[0.0; 4]; 4];
+    let mut colors2 = [[0.0; 4]; 4];
+    let mut colors3 = [[0.0; 4]; 4];
+    let mut stop_positions = [[0.0; 4]; 4];
+    let mut stop_counts = [0; 4];
     for (index, node) in mask.iter().enumerate() {
-        let (x, y, w, h, fill, kind, shape, color0, color1) = match node {
-            SceneNode::Rect {
-                x,
-                y,
-                w,
-                h,
-                fill,
-                stroke: None,
-                stroke_width,
-                corner_radius,
-            } if [*x, *y, *w, *h, *stroke_width, *corner_radius]
-                .iter()
-                .all(|v| v.is_finite())
-                && *w > 0.0
-                && *h > 0.0
-                && *stroke_width == 0.0
-                && *corner_radius == 0.0 =>
-            {
-                (*x, *y, *w, *h, *fill, 0, [0.0; 4], [0.0; 4], [0.0; 4])
-            }
-            SceneNode::Circle {
-                cx,
-                cy,
-                r,
-                fill,
-                stroke: None,
-                stroke_width,
-            } if [*cx, *cy, *r, *stroke_width].iter().all(|v| v.is_finite())
-                && *r > 0.0
-                && *stroke_width == 0.0 =>
-            {
-                (
-                    *cx - *r,
-                    *cy - *r,
-                    *r * 2.0,
-                    *r * 2.0,
-                    *fill,
-                    1,
-                    [*cx, *cy, *r, 0.0],
-                    [0.0; 4],
-                    [0.0; 4],
-                )
-            }
-            SceneNode::LinearGradient {
-                x,
-                y,
-                w,
-                h,
-                angle_deg,
-                stops,
-            } if [*x, *y, *w, *h, *angle_deg].iter().all(|v| v.is_finite())
-                && *w > 0.0
-                && *h > 0.0
-                && stops.len() == 2
-                && (stops[0].position - 0.0).abs() <= f32::EPSILON
-                && (stops[1].position - 1.0).abs() <= f32::EPSILON =>
-            {
-                let half_diag = (*w * *w + *h * *h).sqrt() / 2.0;
-                let cx = *x + *w / 2.0;
-                let cy = *y + *h / 2.0;
-                let angle_rad = angle_deg.to_radians();
-                let dx = angle_rad.sin() * half_diag;
-                let dy = angle_rad.cos() * half_diag;
-                (
-                    *x,
-                    *y,
-                    *w,
-                    *h,
-                    Color::WHITE,
-                    2,
-                    [cx - dx, cy - dy, cx + dx, cy + dy],
-                    color_to_f32(stops[0].color),
-                    color_to_f32(stops[1].color),
-                )
-            }
-            SceneNode::RadialGradient { cx, cy, r, stops }
-                if [*cx, *cy, *r].iter().all(|v| v.is_finite())
+        let (x, y, w, h, fill, kind, shape, color0, color1, color2, color3, positions, count) =
+            match node {
+                SceneNode::Rect {
+                    x,
+                    y,
+                    w,
+                    h,
+                    fill,
+                    stroke: None,
+                    stroke_width,
+                    corner_radius,
+                } if [*x, *y, *w, *h, *stroke_width, *corner_radius]
+                    .iter()
+                    .all(|v| v.is_finite())
+                    && *w > 0.0
+                    && *h > 0.0
+                    && *stroke_width == 0.0
+                    && *corner_radius == 0.0 =>
+                {
+                    (
+                        *x, *y, *w, *h, *fill, 0, [0.0; 4], [0.0; 4], [0.0; 4], [0.0; 4], [0.0; 4],
+                        [0.0; 4], 0,
+                    )
+                }
+                SceneNode::Circle {
+                    cx,
+                    cy,
+                    r,
+                    fill,
+                    stroke: None,
+                    stroke_width,
+                } if [*cx, *cy, *r, *stroke_width].iter().all(|v| v.is_finite())
                     && *r > 0.0
+                    && *stroke_width == 0.0 =>
+                {
+                    (
+                        *cx - *r,
+                        *cy - *r,
+                        *r * 2.0,
+                        *r * 2.0,
+                        *fill,
+                        1,
+                        [*cx, *cy, *r, 0.0],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        0,
+                    )
+                }
+                SceneNode::LinearGradient {
+                    x,
+                    y,
+                    w,
+                    h,
+                    angle_deg,
+                    stops,
+                } if [*x, *y, *w, *h, *angle_deg].iter().all(|v| v.is_finite())
+                    && *w > 0.0
+                    && *h > 0.0
                     && stops.len() == 2
                     && (stops[0].position - 0.0).abs() <= f32::EPSILON
                     && (stops[1].position - 1.0).abs() <= f32::EPSILON =>
-            {
-                (
-                    *cx - *r,
-                    *cy - *r,
-                    *r * 2.0,
-                    *r * 2.0,
-                    Color::WHITE,
-                    4,
-                    [*cx, *cy, *r, 0.0],
-                    color_to_f32(stops[0].color),
-                    color_to_f32(stops[1].color),
-                )
-            }
-            _ => return None,
-        };
+                {
+                    let half_diag = (*w * *w + *h * *h).sqrt() / 2.0;
+                    let cx = *x + *w / 2.0;
+                    let cy = *y + *h / 2.0;
+                    let angle_rad = angle_deg.to_radians();
+                    let dx = angle_rad.sin() * half_diag;
+                    let dy = angle_rad.cos() * half_diag;
+                    (
+                        *x,
+                        *y,
+                        *w,
+                        *h,
+                        Color::WHITE,
+                        2,
+                        [cx - dx, cy - dy, cx + dx, cy + dy],
+                        color_to_f32(stops[0].color),
+                        color_to_f32(stops[1].color),
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0, 1.0, 0.0, 0.0],
+                        2,
+                    )
+                }
+                SceneNode::RadialGradient { cx, cy, r, stops }
+                    if [*cx, *cy, *r].iter().all(|v| v.is_finite())
+                        && *r > 0.0
+                        && stops.len() == 2
+                        && (stops[0].position - 0.0).abs() <= f32::EPSILON
+                        && (stops[1].position - 1.0).abs() <= f32::EPSILON =>
+                {
+                    (
+                        *cx - *r,
+                        *cy - *r,
+                        *r * 2.0,
+                        *r * 2.0,
+                        Color::WHITE,
+                        4,
+                        [*cx, *cy, *r, 0.0],
+                        color_to_f32(stops[0].color),
+                        color_to_f32(stops[1].color),
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0, 1.0, 0.0, 0.0],
+                        2,
+                    )
+                }
+                _ => return None,
+            };
         let kind = if kind == 2 && mask_mode == crate::scene::MaskMode::Luminance {
             3
         } else {
@@ -2919,8 +2978,23 @@ fn gpu_mask_shapes(
         };
         colors0[index] = color0;
         colors1[index] = color1;
+        colors2[index] = color2;
+        colors3[index] = color3;
+        stop_positions[index] = positions;
+        stop_counts[index] = count;
     }
-    Some((rects, opacities, kinds, shapes, colors0, colors1))
+    Some((
+        rects,
+        opacities,
+        kinds,
+        shapes,
+        colors0,
+        colors1,
+        colors2,
+        colors3,
+        stop_positions,
+        stop_counts,
+    ))
 }
 
 #[cfg(test)]
