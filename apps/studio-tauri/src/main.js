@@ -344,6 +344,13 @@ export async function readMediaRange(source, start, endExclusive, { requestInit 
   if (response.status === 206 && bytes.length !== length) {
     throw new Error(`media range response length ${bytes.length} did not match requested length ${length}`);
   }
+  if (response.status === 206) {
+    const contentRange = response.headers.get('Content-Range') ?? '';
+    const match = /^bytes\s+(\d+)-(\d+)\/(?:\d+|\*)$/i.exec(contentRange);
+    if (!match || Number(match[1]) !== start || Number(match[2]) !== endExclusive - 1) {
+      throw new Error(`media range response did not match requested range ${start}-${endExclusive - 1}`);
+    }
+  }
   if (response.status === 200) {
     if (start >= bytes.length) return new Uint8Array();
     return bytes.slice(start, Math.min(endExclusive, bytes.length));

@@ -10,6 +10,17 @@ const browser = await chromium.launch({ executablePath, headless: true });
 try {
   const page = await browser.newPage();
   const fixture = await readFile(new URL('../../assets/showcase.mp4', import.meta.url));
+  const rangeFixture = Buffer.from([0, 1, 2, 3, 4, 5, 6, 7]);
+  await page.route('**/range.bin', (route) => {
+    const range = /^bytes=(\d+)-(\d+)$/.exec(route.request().headers().range ?? '');
+    if (!range) return route.fulfill({ status: 416 });
+    const start = Number(range[1]); const end = Number(range[2]);
+    return route.fulfill({
+      status: 206, contentType: 'application/octet-stream',
+      headers: { 'Content-Range': `bytes ${start}-${end}/${rangeFixture.length}` },
+      body: rangeFixture.subarray(start, end + 1),
+    });
+  });
   await page.route('**/assets/showcase.mp4', (route) => route.fulfill({
     status: 200, contentType: 'video/mp4', body: fixture,
   }));
@@ -34,6 +45,7 @@ try {
     }, 'audio');
     const audioSupport = await AudioDecoder.isConfigSupported({ codec: 'mp4a.40.2', numberOfChannels: 2, sampleRate: 48000 });
     const parsed = await window.dioxuscut.parseIsoBmffMovieHeader('/assets/showcase.mp4');
+    const ranged = await window.dioxuscut.readMediaRange('/range.bin', 2, 6);
     const samples = await window.dioxuscut.readIsoBmffSamples('/assets/showcase.mp4', 0, [0, 1, 2], {
       parsed, concurrency: 2,
     });
@@ -52,6 +64,7 @@ try {
       batchSamples: samples.map(({ sampleIndex, offset, size, timestamp, keyframe, data }) => ({
         sampleIndex, offset, size, timestamp, keyframe, bytes: data.byteLength,
       })),
+      ranged: [...ranged],
     };
   });
   assert.equal(result.type, 'key');
@@ -75,6 +88,7 @@ try {
   assert.equal(result.batchSamples[0].timestamp, 0);
   assert.equal(result.batchSamples[0].keyframe, true);
   assert.ok(result.batchSamples.every(({ size, bytes }) => size === bytes && size > 0));
+  assert.deepEqual(result.ranged, [2, 3, 4, 5]);
   console.log(JSON.stringify({ status: 'ok', ...result }));
 } finally {
   await browser.close();
