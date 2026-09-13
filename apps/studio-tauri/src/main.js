@@ -312,9 +312,13 @@ export async function getAudioData(source) {
     const context = new AudioContext();
     try {
       const buffer = await context.decodeAudioData(await response.arrayBuffer());
+      const channelWaveforms = Array.from({ length: buffer.numberOfChannels }, (_, channel) =>
+        buffer.getChannelData(channel));
       return {
-        channelData: Array.from({ length: buffer.numberOfChannels }, (_, channel) =>
-          buffer.getChannelData(channel)),
+        // `channelWaveforms` is Remotion's v4 field; `channelData` is kept as
+        // the Web Audio-friendly alias used by browser visualizer libraries.
+        channelWaveforms,
+        channelData: channelWaveforms,
         sampleRate: buffer.sampleRate,
         durationInSeconds: buffer.duration,
         numberOfChannels: buffer.numberOfChannels,
@@ -334,6 +338,57 @@ export async function getAudioData(source) {
 // Hook-shaped alias for browser compositions. Consumers can await the same
 // promise from a frame render and use delayRender around it when necessary.
 export const useAudioData = getAudioData;
+
+// Lightweight browser equivalent of getWaveformPortion(). It preserves the
+// frame/time contract while reducing decoded PCM into visualization bars.
+export function getWaveformPortion({
+  audioData, startTimeInSeconds, durationInSeconds, numberOfSamples,
+  channel = 0, dataOffsetInSeconds = 0, outputRange = 'zero-to-one', normalize = true,
+}) {
+  if (!audioData?.channelWaveforms?.length || numberOfSamples <= 0) return [];
+  const waveform = audioData.channelWaveforms[Math.min(channel, audioData.channelWaveforms.length - 1)];
+  const start = Math.floor((startTimeInSeconds - dataOffsetInSeconds) * audioData.sampleRate);
+  const end = Math.floor((startTimeInSeconds - dataOffsetInSeconds + durationInSeconds) * audioData.sampleRate);
+  const padded = new Float32Array(Math.max(0, end - start));
+  for (let sample = Math.max(0, start); sample < Math.min(waveform.length, end); sample += 1) {
+    padded[sample - start] = waveform[sample];
+  }
+  const blockSize = Math.floor(padded.length / numberOfSamples);
+  if (blockSize === 0) return [];
+  const values = Array.from({ length: numberOfSamples }, (_, index) => {
+    let sum = 0;
+    for (let sample = 0; sample < blockSize; sample += 1) {
+      sum += Math.abs(padded[index * blockSize + sample]);
+    }
+    return sum / blockSize;
+  });
+  const scale = normalize ? Math.max(...values, 1e-9) : 1;
+  return values.map((value, index) => ({
+    index,
+    amplitude: outputRange === 'minus-one-to-one'
+      ? (value / scale) * (index % 2 === 0 ? -1 : 1)
+      : value / scale,
+  }));
+}
+
+export function visualizeAudioWaveform({
+  audioData, frame, fps, windowInSeconds, numberOfSamples,
+  channel = 0, dataOffsetInSeconds = 0, normalize = false,
+}) {
+  if (windowInSeconds * audioData.sampleRate < numberOfSamples) {
+    throw new TypeError('windowInSeconds must provide at least one audio sample per bar');
+  }
+  return getWaveformPortion({
+    audioData,
+    startTimeInSeconds: frame / fps - windowInSeconds / 2,
+    durationInSeconds: windowInSeconds,
+    numberOfSamples,
+    channel,
+    dataOffsetInSeconds,
+    outputRange: 'minus-one-to-one',
+    normalize,
+  }).map(({ amplitude }) => amplitude);
+}
 
 // Browser equivalent of Remotion's useVideoTexture for non-React Three.js
 // compositions. The element and texture are cached by source so a frame
@@ -699,6 +754,8 @@ window.dioxuscut = {
   getAudioDuration,
   getAudioData,
   useAudioData,
+  getWaveformPortion,
+  visualizeAudioWaveform,
   releaseVideoTexture,
   useCurrentFrame,
   useVideoConfig,
