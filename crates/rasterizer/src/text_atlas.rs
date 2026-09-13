@@ -11,6 +11,14 @@ pub(crate) struct AtlasEntry {
     pub baseline: u32,
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub(crate) struct TextAtlasSnapshot {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<u8>,
+}
+
 #[derive(Debug)]
 pub(crate) struct TextAtlas {
     width: u32,
@@ -89,6 +97,15 @@ impl TextAtlas {
         self.cursor_y = 0;
         self.row_height = 0;
         self.entries.clear();
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn snapshot(&self) -> TextAtlasSnapshot {
+        TextAtlasSnapshot {
+            width: self.width,
+            height: self.height,
+            pixels: self.pixels.clone(),
+        }
     }
 
     #[allow(dead_code)]
