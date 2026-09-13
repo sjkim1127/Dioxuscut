@@ -721,7 +721,7 @@ struct GpuTextAtlasResource {
     bind_group: wgpu::BindGroup,
     width: u32,
     height: u32,
-    generation: u64,
+    generation: AtomicU64,
 }
 
 impl GpuImageCacheState {
@@ -923,13 +923,38 @@ impl WgpuBackend {
         &self,
         snapshot: &crate::text_atlas::TextAtlasSnapshot,
     ) -> Arc<GpuTextAtlasResource> {
+        let queue = &self.ctx.queue;
         let mut cache = self.text_atlas.lock().expect("text atlas GPU lock poisoned");
         if let Some(resource) = cache.as_ref() {
-            if resource.width == snapshot.width
-                && resource.height == snapshot.height
-                && resource.generation == snapshot.generation
-            {
-                return resource.clone();
+            if resource.width == snapshot.width && resource.height == snapshot.height {
+                let generation = resource.generation.load(Ordering::Acquire);
+                if generation == snapshot.generation {
+                    return resource.clone();
+                }
+                if let Some(rect) = snapshot.dirty {
+                    let mut upload = Vec::with_capacity((rect.width * rect.height) as usize);
+                    for row in 0..rect.height {
+                        let start = ((rect.y + row) * snapshot.width + rect.x) as usize;
+                        upload.extend_from_slice(&snapshot.pixels[start..start + rect.width as usize]);
+                    }
+                    queue.write_texture(
+                        wgpu::ImageCopyTexture {
+                            texture: &resource._texture,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d { x: rect.x, y: rect.y, z: 0 },
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        &upload,
+                        wgpu::ImageDataLayout {
+                            offset: 0,
+                            bytes_per_row: Some(rect.width),
+                            rows_per_image: Some(rect.height),
+                        },
+                        wgpu::Extent3d { width: rect.width, height: rect.height, depth_or_array_layers: 1 },
+                    );
+                    resource.generation.store(snapshot.generation, Ordering::Release);
+                    return resource.clone();
+                }
             }
         }
         let device = &self.ctx.device;
@@ -967,7 +992,7 @@ impl WgpuBackend {
             bind_group,
             width: snapshot.width,
             height: snapshot.height,
-            generation: snapshot.generation,
+            generation: AtomicU64::new(snapshot.generation),
         });
         *cache = Some(resource.clone());
         resource
@@ -1003,7 +1028,7 @@ impl WgpuBackend {
             .lock()
             .expect("text atlas GPU lock poisoned")
             .as_ref()
-            .map(|resource| resource.generation)
+            .map(|resource| resource.generation.load(Ordering::Acquire))
     }
 
     fn submit_frame_to_slot(
@@ -2384,11 +2409,22 @@ mod tests {
             .render_frame(&scene, &FrameConfig::new(96, 32, 0, 30.0))
             .unwrap();
         let generation = gpu.text_atlas_cache_generation();
-        let second = gpu.render_frame(&scene, &FrameConfig::new(96, 32, 1, 30.0)).unwrap();
+        let updated_scene = Scene {
+            nodes: vec![SceneNode::Text {
+                x: 4.0,
+                y: 24.0,
+                content: "atlas update".into(),
+                font_size: 18.0,
+                color: Color::WHITE,
+                font_weight: 400,
+                font_sources: Vec::new(),
+            }],
+        };
+        let second = gpu.render_frame(&updated_scene, &FrameConfig::new(96, 32, 1, 30.0)).unwrap();
         assert_eq!(gpu.render_stats().gpu_frames, 2);
         assert!(image.pixels().any(|pixel| pixel[3] > 0));
         assert!(second.pixels().any(|pixel| pixel[3] > 0));
-        assert_eq!(generation, gpu.text_atlas_cache_generation());
+        assert!(gpu.text_atlas_cache_generation().unwrap() > generation.unwrap());
         let alpha_error: u64 = image
             .pixels()
             .zip(cpu.pixels())

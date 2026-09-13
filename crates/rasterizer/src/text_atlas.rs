@@ -17,7 +17,16 @@ pub(crate) struct TextAtlasSnapshot {
     pub width: u32,
     pub height: u32,
     pub generation: u64,
+    pub dirty: Option<AtlasRect>,
     pub pixels: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AtlasRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
 }
 
 #[derive(Debug)]
@@ -30,6 +39,7 @@ pub(crate) struct TextAtlas {
     row_height: u32,
     entries: HashMap<String, AtlasEntry>,
     generation: u64,
+    dirty: Option<AtlasRect>,
 }
 
 impl TextAtlas {
@@ -44,6 +54,7 @@ impl TextAtlas {
             row_height: 0,
             entries: HashMap::new(),
             generation: 0,
+            dirty: None,
         }
     }
 
@@ -86,6 +97,16 @@ impl TextAtlas {
         self.cursor_x = self.cursor_x.saturating_add(glyph_width);
         self.row_height = self.row_height.max(glyph_height);
         self.entries.insert(key, entry);
+        let rect = AtlasRect { x: entry.x, y: entry.y, width: entry.width, height: entry.height };
+        self.dirty = Some(match self.dirty {
+            Some(previous) => AtlasRect {
+                x: previous.x.min(rect.x),
+                y: previous.y.min(rect.y),
+                width: (previous.x + previous.width).max(rect.x + rect.width) - previous.x.min(rect.x),
+                height: (previous.y + previous.height).max(rect.y + rect.height) - previous.y.min(rect.y),
+            },
+            None => rect,
+        });
         self.generation = self.generation.wrapping_add(1);
         Some(entry)
     }
@@ -101,6 +122,7 @@ impl TextAtlas {
         self.cursor_y = 0;
         self.row_height = 0;
         self.entries.clear();
+        self.dirty = Some(AtlasRect { x: 0, y: 0, width: self.width, height: self.height });
         self.generation = self.generation.wrapping_add(1);
     }
 
@@ -110,6 +132,7 @@ impl TextAtlas {
             width: self.width,
             height: self.height,
             generation: self.generation,
+            dirty: self.dirty,
             pixels: self.pixels.clone(),
         }
     }
