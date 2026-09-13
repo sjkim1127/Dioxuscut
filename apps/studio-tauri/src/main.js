@@ -376,6 +376,40 @@ export function audioBufferToDataUrl(buffer) {
   return `data:audio/wav;base64,${window.btoa(binary)}`;
 }
 
+export function prefetch(source, { method = 'blob-url', credentials, contentType } = {}) {
+  if (typeof source !== 'string' || !source) throw new TypeError('prefetch expects a source URL');
+  const hashIndex = source.indexOf('#');
+  const base = hashIndex < 0 ? source : source.slice(0, hashIndex);
+  const suffix = hashIndex < 0 ? '' : source.slice(hashIndex);
+  const controller = new AbortController();
+  let released = false;
+  let objectUrl = null;
+  const done = fetch(base, { credentials, signal: controller.signal }).then(async (response) => {
+    if (!response.ok) throw new Error(`prefetch failed: ${response.status} ${response.statusText}`);
+    const blob = await response.blob();
+    if (released) return base;
+    if (method === 'base64') {
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      let binary = '';
+      for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)));
+      }
+      const type = contentType || blob.type || 'application/octet-stream';
+      return `data:${type};base64,${window.btoa(binary)}${suffix}`;
+    }
+    objectUrl = URL.createObjectURL(contentType ? new Blob([blob], { type: contentType }) : blob);
+    return `${objectUrl}${suffix}`;
+  });
+  return {
+    free() {
+      released = true;
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    },
+    waitUntilDone: () => done,
+  };
+}
+
 // Platform-neutral counterpart of Remotion's useWindowedAudioData. The host
 // does not require React: callers receive the window centered on the requested
 // frame plus its timeline offset, while getAudioData() keeps decoding cached.
@@ -958,6 +992,7 @@ window.dioxuscut = {
   getAudioData,
   useAudioData,
   audioBufferToDataUrl,
+  prefetch,
   getWindowedAudioData,
   getWaveformPortion,
   visualizeAudioWaveform,
