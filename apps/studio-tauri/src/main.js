@@ -426,6 +426,37 @@ function fftMagnitudes(samples) {
     Math.hypot(real[index], imaginary[index]));
 }
 
+function accurateFftMagnitudes(samples) {
+  const size = samples.length;
+  const complex = accurateFftComplex(samples);
+  return Array.from({ length: size / 2 }, (_, index) =>
+    Math.hypot(complex[index * 2], complex[index * 2 + 1]));
+}
+
+function accurateFftComplex(samples) {
+  const size = samples.length;
+  if (size === 1) return new Float64Array([samples[0], 0]);
+  const evens = new Float64Array(size / 2);
+  const odds = new Float64Array(size / 2);
+  for (let index = 0; index < size / 2; index += 1) {
+    evens[index] = samples[index * 2];
+    odds[index] = samples[index * 2 + 1];
+  }
+  const even = accurateFftComplex(evens);
+  const odd = accurateFftComplex(odds);
+  const result = new Float64Array(size * 2);
+  for (let index = 0; index < size; index += 2) {
+    const angle = -Math.PI * index / size;
+    const oddReal = odd[index] * Math.cos(angle) - odd[index + 1] * Math.sin(angle);
+    const oddImaginary = odd[index] * Math.sin(angle) + odd[index + 1] * Math.cos(angle);
+    result[index] = even[index / 2] + oddReal;
+    result[index + 1] = even[index / 2 + 1] + oddImaginary;
+    result[index + size] = even[index / 2] - oddReal;
+    result[index + size + 1] = even[index / 2 + 1] - oddImaginary;
+  }
+  return result;
+}
+
 export function visualizeAudio({
   audioData, frame, fps, numberOfSamples, optimizeFor = 'accuracy',
   dataOffsetInSeconds = 0, smoothing = true,
@@ -446,7 +477,9 @@ export function visualizeAudio({
       const value = waveform[actualStart + i] ?? 0;
       samples[i] = Math.max(-1, Math.min(1, value)) * 32767;
     }
-    const magnitudes = fftMagnitudes(samples);
+    const magnitudes = optimizeFor === 'accuracy'
+      ? accurateFftMagnitudes(samples)
+      : fftMagnitudes(samples);
     let maxMagnitude = 0;
     for (const sample of waveform) maxMagnitude = Math.max(maxMagnitude, Math.abs(sample));
     const maxInt = maxMagnitude * 32767 || 1;
