@@ -533,6 +533,29 @@ export function visualizeAudio({
   return current.map((value, index) => (value + neighbours[0][index] + neighbours[1][index]) / 3);
 }
 
+// Remotion-compatible Catmull-Rom-style SVG path helper for browser scenes.
+export function createSmoothSvgPath({ points = [] } = {}) {
+  const line = (a, b) => ({
+    length: Math.hypot(b.x - a.x, b.y - a.y),
+    angle: Math.atan2(b.y - a.y, b.x - a.x),
+  });
+  const controlPoint = (current, previous, next, reverse) => {
+    const previousPoint = previous || current;
+    const nextPoint = next || current;
+    const opposed = line(previousPoint, nextPoint);
+    const angle = opposed.angle + (reverse ? Math.PI : 0);
+    const length = opposed.length * 0.2;
+    return { x: current.x + Math.cos(angle) * length, y: current.y + Math.sin(angle) * length };
+  };
+  return points.reduce((path, current, index, all) => {
+    if (index === 0) return `M ${current.x},${current.y}`;
+    const previous = all[index - 1];
+    const cp1 = controlPoint(previous, all[index - 2], current, false);
+    const cp2 = controlPoint(current, previous, all[index + 1], true);
+    return `${path} C ${cp1.x},${cp1.y} ${cp2.x},${cp2.y} ${current.x},${current.y}`;
+  }, '');
+}
+
 // Browser equivalent of Remotion's useVideoTexture for non-React Three.js
 // compositions. The element and texture are cached by source so a frame
 // callback can reuse GPU resources across the entire render.
@@ -901,6 +924,7 @@ window.dioxuscut = {
   getWaveformPortion,
   visualizeAudioWaveform,
   visualizeAudio,
+  createSmoothSvgPath,
   releaseVideoTexture,
   useCurrentFrame,
   useVideoConfig,
