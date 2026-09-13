@@ -534,7 +534,7 @@ struct InFlight {
 pub struct WgpuBackend {
     ctx: GpuContext,
     /// Per-resolution GPU resource pool.  Key = `(width, height)`.
-    frame_resources: Mutex<HashMap<(u32, u32), GpuFrameResources>>,
+    frame_resources: Mutex<HashMap<(u32, u32), std::sync::Arc<Mutex<GpuFrameResources>>>>,
     fallback: TinySkiaBackend,
 }
 
@@ -788,13 +788,24 @@ impl RasterizerBackend for WgpuBackend {
         let width = config.width;
         let height = config.height;
 
-        let mut pool = self
-            .frame_resources
+        let resource = {
+            let mut pool = self
+                .frame_resources
+                .lock()
+                .map_err(|_| RasterError::Init("GPU resource pool mutex poisoned".into()))?;
+            pool.entry((width, height))
+                .or_insert_with(|| {
+                    std::sync::Arc::new(Mutex::new(GpuFrameResources::new(
+                        &self.ctx.device,
+                        width,
+                        height,
+                    )))
+                })
+                .clone()
+        };
+        let mut res = resource
             .lock()
-            .map_err(|_| RasterError::Init("GPU resource pool mutex poisoned".into()))?;
-        let res = pool
-            .entry((width, height))
-            .or_insert_with(|| GpuFrameResources::new(&self.ctx.device, width, height));
+            .map_err(|_| RasterError::Init("GPU frame resource mutex poisoned".into()))?;
 
         let slot_idx = res.active_index % RING_BUFFER_SIZE;
         res.active_index = res.active_index.wrapping_add(1);
@@ -811,7 +822,7 @@ impl RasterizerBackend for WgpuBackend {
                 submission_index,
                 rx,
             },
-            res,
+            &res,
             width,
             height,
             &mut scratch,
@@ -856,13 +867,24 @@ impl RasterizerBackend for WgpuBackend {
                 .render_stream(total, scene_fn, config_fn, consume_fn);
         }
 
-        let mut pool = self
-            .frame_resources
+        let resource = {
+            let mut pool = self
+                .frame_resources
+                .lock()
+                .map_err(|_| RasterError::Init("GPU resource pool mutex poisoned".into()))?;
+            pool.entry((width, height))
+                .or_insert_with(|| {
+                    std::sync::Arc::new(Mutex::new(GpuFrameResources::new(
+                        &self.ctx.device,
+                        width,
+                        height,
+                    )))
+                })
+                .clone()
+        };
+        let res = resource
             .lock()
-            .map_err(|_| RasterError::Init("GPU resource pool mutex poisoned".into()))?;
-        let res = pool
-            .entry((width, height))
-            .or_insert_with(|| GpuFrameResources::new(&self.ctx.device, width, height));
+            .map_err(|_| RasterError::Init("GPU frame resource mutex poisoned".into()))?;
 
         let mut in_flight: Option<InFlight> = None;
         let mut scratch = Vec::new();
@@ -873,7 +895,7 @@ impl RasterizerBackend for WgpuBackend {
 
             let Some(commands) = compile_scene(&scene) else {
                 if let Some(prev) = in_flight.take() {
-                    self.drain_slot(prev, res, width, height, &mut scratch, consume_fn)?;
+                    self.drain_slot(prev, &res, width, height, &mut scratch, consume_fn)?;
                 }
                 let img = self.fallback.render_frame(&scene, &cfg)?;
                 consume_fn(frame, img.as_raw())?;
@@ -885,7 +907,7 @@ impl RasterizerBackend for WgpuBackend {
             // If the target slot is currently occupied by an in-flight frame, drain it now
             if let Some(prev) = in_flight.take() {
                 if prev.slot_idx == slot_idx {
-                    self.drain_slot(prev, res, width, height, &mut scratch, consume_fn)?;
+                    self.drain_slot(prev, &res, width, height, &mut scratch, consume_fn)?;
                 } else {
                     in_flight = Some(prev);
                 }
@@ -897,7 +919,7 @@ impl RasterizerBackend for WgpuBackend {
 
             // Overlap: drain the previous frame while the newly submitted frame is being rendered on GPU
             if let Some(prev) = in_flight.take() {
-                self.drain_slot(prev, res, width, height, &mut scratch, consume_fn)?;
+                self.drain_slot(prev, &res, width, height, &mut scratch, consume_fn)?;
             }
 
             in_flight = Some(InFlight {
@@ -910,7 +932,7 @@ impl RasterizerBackend for WgpuBackend {
 
         // Drain any remaining in-flight frame at the end of the stream
         if let Some(prev) = in_flight.take() {
-            self.drain_slot(prev, res, width, height, &mut scratch, consume_fn)?;
+            self.drain_slot(prev, &res, width, height, &mut scratch, consume_fn)?;
         }
 
         Ok(())
