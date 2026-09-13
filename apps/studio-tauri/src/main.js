@@ -302,14 +302,19 @@ export async function readMediaRange(source, start, endExclusive, { requestInit 
   if (!Number.isInteger(start) || !Number.isInteger(endExclusive) || start < 0 || endExclusive < start) {
     throw new RangeError('readMediaRange expects a non-negative half-open range');
   }
-  if (endExclusive - start > 16 * 1024 * 1024) throw new RangeError('media range exceeds 16 MiB');
+  const length = endExclusive - start;
+  if (length > 16 * 1024 * 1024) throw new RangeError('media range exceeds 16 MiB');
+  if (length === 0) return new Uint8Array();
   const headers = new Headers(requestInit?.headers);
-  headers.set('Range', `bytes=${start}-${Math.max(start, endExclusive - 1)}`);
+  headers.set('Range', `bytes=${start}-${endExclusive - 1}`);
   const response = await fetch(source, { ...requestInit, headers });
   if (!response.ok) throw new Error(`media range request failed: ${response.status}`);
   const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.length > endExclusive - start && response.status !== 206) {
+  if (bytes.length > length && response.status !== 206) {
     throw new Error('media range response exceeded requested length');
+  }
+  if (response.status === 206 && bytes.length !== length) {
+    throw new Error(`media range response length ${bytes.length} did not match requested length ${length}`);
   }
   return bytes;
 }
