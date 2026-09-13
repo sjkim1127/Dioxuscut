@@ -339,6 +339,44 @@ export async function getAudioData(source) {
 // promise from a frame render and use delayRender around it when necessary.
 export const useAudioData = getAudioData;
 
+// Platform-neutral counterpart of Remotion's useWindowedAudioData. The host
+// does not require React: callers receive the window centered on the requested
+// frame plus its timeline offset, while getAudioData() keeps decoding cached.
+export async function getWindowedAudioData(source, {
+  frame, fps, windowInSeconds, channelIndex = 0,
+} = {}) {
+  if (!Number.isFinite(frame) || !Number.isFinite(fps) || fps <= 0) {
+    throw new TypeError('getWindowedAudioData requires a finite frame and positive fps');
+  }
+  if (!Number.isFinite(windowInSeconds) || windowInSeconds <= 0) {
+    throw new TypeError('windowInSeconds must be positive');
+  }
+  const audioData = await getAudioData(source);
+  if (!Number.isInteger(channelIndex) || channelIndex < 0 || channelIndex >= audioData.numberOfChannels) {
+    throw new RangeError(`Invalid channel index ${channelIndex} for ${audioData.numberOfChannels} channels`);
+  }
+  const currentTime = frame / fps;
+  const windowIndex = Math.floor(currentTime / windowInSeconds);
+  const startTime = windowIndex * windowInSeconds;
+  const startSample = Math.max(0, Math.floor(startTime * audioData.sampleRate));
+  const endSample = Math.min(
+    audioData.channelWaveforms[channelIndex].length,
+    Math.ceil((startTime + windowInSeconds) * audioData.sampleRate),
+  );
+  const waveform = audioData.channelWaveforms[channelIndex].slice(startSample, endSample);
+  return {
+    audioData: {
+      ...audioData,
+      channelWaveforms: [waveform],
+      channelData: [waveform],
+      numberOfChannels: 1,
+      durationInSeconds: waveform.length / audioData.sampleRate,
+      resultId: `${audioData.resultId}:window:${channelIndex}:${windowIndex}`,
+    },
+    dataOffsetInSeconds: startSample / audioData.sampleRate,
+  };
+}
+
 // Lightweight browser equivalent of getWaveformPortion(). It preserves the
 // frame/time contract while reducing decoded PCM into visualization bars.
 export function getWaveformPortion({
@@ -859,6 +897,7 @@ window.dioxuscut = {
   getAudioDuration,
   getAudioData,
   useAudioData,
+  getWindowedAudioData,
   getWaveformPortion,
   visualizeAudioWaveform,
   visualizeAudio,
