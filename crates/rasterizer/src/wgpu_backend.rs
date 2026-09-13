@@ -1177,7 +1177,7 @@ fn gpu_layer_opacity(filters: &[crate::scene::SceneFilter], layer_opacity: f32) 
         let crate::scene::SceneFilter::Opacity { amount } = filter else {
             return None;
         };
-        amount.is_finite().then(|| opacity * amount)
+        (amount.is_finite() && (0.0..=1.0).contains(amount)).then(|| opacity * amount)
     })
 }
 
@@ -1484,6 +1484,32 @@ mod support_tests {
         assert!(
             (compile_scene(&scene).unwrap()[0].instance().params[3] - 0.25).abs() < f32::EPSILON
         );
+    }
+
+    #[test]
+    fn invalid_opacity_filter_does_not_enter_gpu_path() {
+        let scene = Scene {
+            nodes: vec![SceneNode::Layer {
+                opacity: 1.0,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: None,
+                mask: None,
+                mask_mode: crate::scene::MaskMode::Alpha,
+                filters: vec![crate::scene::SceneFilter::Opacity { amount: 1.1 }],
+                shadow: None,
+                children: vec![SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 1.0,
+                    h: 1.0,
+                    fill: Color::WHITE,
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                }],
+            }],
+        };
+        assert!(!gpu_supports_scene(&scene));
     }
 }
 
