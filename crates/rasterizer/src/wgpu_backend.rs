@@ -177,6 +177,8 @@ struct InstanceData {
     vignette: vec4<f32>,
     // x = invert amount
     invert: vec4<f32>,
+    // x = hue rotation in degrees
+    hue: vec4<f32>,
     clip_rects: array<vec4<f32>, 4>,
     mask_opacity: vec4<f32>,
     mask_kinds: vec4<u32>,
@@ -305,6 +307,7 @@ fn apply_color_filters(color: vec4<f32>, instance: InstanceData) -> vec4<f32> {
         && instance.contrast.x == 1.0
         && instance.saturation.x == 1.0
         && instance.invert.x == 0.0
+        && instance.hue.x == 0.0
     {
         return color;
     }
@@ -325,6 +328,44 @@ fn apply_color_filters(color: vec4<f32>, instance: InstanceData) -> vec4<f32> {
     }
     srgb = (srgb - vec3<f32>(0.5)) * instance.contrast.x + vec3<f32>(0.5);
     srgb = mix(srgb, vec3<f32>(1.0) - srgb, clamp(instance.invert.x, 0.0, 1.0));
+    let max_channel = max(srgb.r, max(srgb.g, srgb.b));
+    let min_channel = min(srgb.r, min(srgb.g, srgb.b));
+    let delta = max_channel - min_channel;
+    let value = max_channel;
+    let saturation_value = select(0.0, delta / max_channel, max_channel > 0.0);
+    var hue_degrees = 0.0;
+    if delta > 0.000001 {
+        if max_channel == srgb.r {
+            hue_degrees = 60.0 * ((srgb.g - srgb.b) / delta);
+        } else if max_channel == srgb.g {
+            hue_degrees = 60.0 * ((srgb.b - srgb.r) / delta + 2.0);
+        } else {
+            hue_degrees = 60.0 * ((srgb.r - srgb.g) / delta + 4.0);
+        }
+    }
+    hue_degrees = (hue_degrees + instance.hue.x) % 360.0;
+    if hue_degrees < 0.0 {
+        hue_degrees = hue_degrees + 360.0;
+    }
+    let chroma = value * saturation_value;
+    let hue_sector = hue_degrees / 60.0;
+    let x = chroma * (1.0 - abs((hue_sector % 2.0) - 1.0));
+    let match_value = value - chroma;
+    var rotated = vec3<f32>(0.0);
+    if hue_sector < 1.0 {
+        rotated = vec3<f32>(chroma, x, 0.0);
+    } else if hue_sector < 2.0 {
+        rotated = vec3<f32>(x, chroma, 0.0);
+    } else if hue_sector < 3.0 {
+        rotated = vec3<f32>(0.0, chroma, x);
+    } else if hue_sector < 4.0 {
+        rotated = vec3<f32>(0.0, x, chroma);
+    } else if hue_sector < 5.0 {
+        rotated = vec3<f32>(x, 0.0, chroma);
+    } else {
+        rotated = vec3<f32>(chroma, 0.0, x);
+    }
+    srgb = rotated + vec3<f32>(match_value);
     return vec4<f32>(clamp(srgb, vec3<f32>(0.0), vec3<f32>(1.0)), color.a);
 }
 
@@ -2992,6 +3033,7 @@ struct GpuInstance {
     saturation: [f32; 4],
     vignette: [f32; 4],
     invert: [f32; 4],
+    hue: [f32; 4],
     clip_rects: [[f32; 4]; 4],
     mask_opacity: [f32; 4],
     mask_kinds: [u32; 4],
@@ -3024,6 +3066,7 @@ impl GpuInstance {
             saturation: [1.0, 0.0, 0.0, 0.0],
             vignette: [0.0, 0.0, 0.0, 0.0],
             invert: [0.0, 0.0, 0.0, 0.0],
+            hue: [0.0, 0.0, 0.0, 0.0],
             clip_rects: [[-1.0; 4]; 4],
             mask_opacity: [-1.0; 4],
             mask_kinds: [0; 4],
@@ -3459,7 +3502,7 @@ fn compile_nodes(
                 && gpu_layer_effects(filters, *layer_opacity).is_some()
                 && gpu_path_mask_from_svg(d, transform, Color::WHITE).is_some() =>
             {
-                let (layer_opacity, brightness, grayscale, contrast, saturation, invert) =
+                let (layer_opacity, brightness, grayscale, contrast, saturation, invert, hue) =
                     gpu_layer_effects(filters, *layer_opacity).unwrap();
                 let start = output.len();
                 compile_nodes(
@@ -3479,6 +3522,7 @@ fn compile_nodes(
                     instance.contrast[0] *= contrast;
                     instance.saturation[0] *= saturation;
                     instance.invert[0] = invert;
+                    instance.hue[0] = hue;
                     if let Some(vignette) = gpu_vignette(filters) {
                         instance.vignette = vignette;
                     }
@@ -3504,7 +3548,7 @@ fn compile_nodes(
                 && gpu_path_mask_from_node(mask_nodes.first().unwrap(), transform, *mask_mode)
                     .is_some() =>
             {
-                let (layer_opacity, brightness, grayscale, contrast, saturation, invert) =
+                let (layer_opacity, brightness, grayscale, contrast, saturation, invert, hue) =
                     gpu_layer_effects(filters, *layer_opacity).unwrap();
                 let start = output.len();
                 compile_nodes(
@@ -3525,6 +3569,7 @@ fn compile_nodes(
                     instance.contrast[0] *= contrast;
                     instance.saturation[0] *= saturation;
                     instance.invert[0] = invert;
+                    instance.hue[0] = hue;
                     if let Some(vignette) = gpu_vignette(filters) {
                         instance.vignette = vignette;
                     }
@@ -3564,7 +3609,7 @@ fn compile_nodes(
                     || gpu_mask_shapes(mask.as_deref().unwrap_or(&[]), transform, *mask_mode)
                         .is_some()) =>
             {
-                let (layer_opacity, brightness, grayscale, contrast, saturation, invert) =
+                let (layer_opacity, brightness, grayscale, contrast, saturation, invert, hue) =
                     gpu_layer_effects(filters, *layer_opacity).unwrap();
                 let mask_info = mask
                     .as_deref()
@@ -3602,6 +3647,7 @@ fn compile_nodes(
                     instance.contrast[0] *= contrast;
                     instance.saturation[0] *= saturation;
                     instance.invert[0] = invert;
+                    instance.hue[0] = hue;
                     if let Some(vignette) = gpu_vignette(filters) {
                         instance.vignette = vignette;
                     }
@@ -3624,7 +3670,7 @@ fn compile_nodes(
             } if gpu_layer_effects(filters, *layer_opacity).is_some()
                 && gpu_clip_mask_info(clip, transform).is_some() =>
             {
-                let (layer_opacity, brightness, grayscale, contrast, saturation, invert) =
+                let (layer_opacity, brightness, grayscale, contrast, saturation, invert, hue) =
                     gpu_layer_effects(filters, *layer_opacity).unwrap();
                 let mask_info = gpu_clip_mask_info(clip, transform);
                 let start = output.len();
@@ -3643,6 +3689,7 @@ fn compile_nodes(
                     instance.contrast[0] *= contrast;
                     instance.saturation[0] *= saturation;
                     instance.invert[0] = invert;
+                    instance.hue[0] = hue;
                     if let Some(vignette) = gpu_vignette(filters) {
                         instance.vignette = vignette;
                     }
@@ -3666,13 +3713,13 @@ fn compile_nodes(
 fn gpu_layer_effects(
     filters: &[crate::scene::SceneFilter],
     layer_opacity: f32,
-) -> Option<(f32, f32, f32, f32, f32, f32)> {
+) -> Option<(f32, f32, f32, f32, f32, f32, f32)> {
     if !layer_opacity.is_finite() {
         return None;
     }
     filters.iter().try_fold(
-        (layer_opacity, 1.0, 0.0, 1.0, 1.0, 0.0),
-        |(opacity, brightness, grayscale, contrast, saturation, invert), filter| match filter {
+        (layer_opacity, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0),
+        |(opacity, brightness, grayscale, contrast, saturation, invert, hue), filter| match filter {
             crate::scene::SceneFilter::Opacity { amount }
                 if amount.is_finite() && (0.0..=1.0).contains(amount) =>
             {
@@ -3683,6 +3730,7 @@ fn gpu_layer_effects(
                     contrast,
                     saturation,
                     invert,
+                    hue,
                 ))
             }
             crate::scene::SceneFilter::Brightness { amount }
@@ -3695,6 +3743,7 @@ fn gpu_layer_effects(
                     contrast,
                     saturation,
                     invert,
+                    hue,
                 ))
             }
             crate::scene::SceneFilter::Grayscale { amount }
@@ -3707,6 +3756,7 @@ fn gpu_layer_effects(
                     contrast,
                     saturation,
                     invert,
+                    hue,
                 ))
             }
             crate::scene::SceneFilter::Contrast { factor }
@@ -3719,6 +3769,7 @@ fn gpu_layer_effects(
                     contrast * factor,
                     saturation,
                     invert,
+                    hue,
                 ))
             }
             crate::scene::SceneFilter::Saturation { factor }
@@ -3731,6 +3782,7 @@ fn gpu_layer_effects(
                     contrast,
                     saturation * factor,
                     invert,
+                    hue,
                 ))
             }
             crate::scene::SceneFilter::Vignette {
@@ -3744,7 +3796,9 @@ fn gpu_layer_effects(
                 && (0.0..=1.0).contains(darkness)
                 && (0.0..=1.0).contains(roundness) =>
             {
-                Some((opacity, brightness, grayscale, contrast, saturation, invert))
+                Some((
+                    opacity, brightness, grayscale, contrast, saturation, invert, hue,
+                ))
             }
             crate::scene::SceneFilter::Invert { amount }
                 if amount.is_finite() && (0.0..=1.0).contains(amount) =>
@@ -3760,8 +3814,18 @@ fn gpu_layer_effects(
                     contrast,
                     saturation,
                     invert + *amount - 2.0 * invert * *amount,
+                    hue,
                 ))
             }
+            crate::scene::SceneFilter::HueRotate { degrees } if degrees.is_finite() => Some((
+                opacity,
+                brightness,
+                grayscale,
+                contrast,
+                saturation,
+                invert,
+                hue + *degrees,
+            )),
             _ => None,
         },
     )
@@ -5237,12 +5301,51 @@ mod tests {
     }
 
     #[test]
+    fn gpu_hue_rotate_filter_uses_gpu_layer_path() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping hue rotate GPU test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Layer {
+                opacity: 1.0,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: None,
+                mask: None,
+                mask_mode: crate::scene::MaskMode::Alpha,
+                filters: vec![crate::scene::SceneFilter::HueRotate { degrees: 120.0 }],
+                shadow: None,
+                children: vec![SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 16.0,
+                    h: 16.0,
+                    fill: Color::rgb(255, 0, 0),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                }],
+            }],
+        };
+        assert!(gpu_supports_scene(&scene));
+        let image = gpu
+            .render_frame(&scene, &FrameConfig::new(16, 16, 0, 30.0))
+            .unwrap();
+        let pixel = image.get_pixel(8, 8);
+        assert!(
+            pixel[0] < 8 && pixel[1] > 247 && pixel[2] < 8,
+            "pixel={pixel:?}"
+        );
+        assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
+    }
+
+    #[test]
     fn gpu_invert_filter_chain_composes_amounts_in_order() {
         let filters = [
             crate::scene::SceneFilter::Invert { amount: 0.25 },
             crate::scene::SceneFilter::Invert { amount: 0.5 },
         ];
-        let (_, _, _, _, _, amount) = gpu_layer_effects(&filters, 1.0).unwrap();
+        let (_, _, _, _, _, amount, _) = gpu_layer_effects(&filters, 1.0).unwrap();
         assert!((amount - 0.5).abs() < f32::EPSILON);
     }
 
