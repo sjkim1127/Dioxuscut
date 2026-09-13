@@ -432,4 +432,118 @@ impl WgpuShaderRunner {
             RasterError::ImageEncode("Failed to construct RgbaImage from shader output".into())
         })
     }
+
+    /// Record a shader draw directly into an existing RGBA8 render target.
+    /// The caller owns submission and may continue the same command encoder
+    /// with other scene passes, enabling future zero-readback compositing.
+    pub fn render_into(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+        time: f32,
+        params: [f32; 4],
+        source: &str,
+        load: wgpu::LoadOp<wgpu::Color>,
+    ) -> Result<(), RasterError> {
+        let wgsl = wrap_wgsl_shader(source);
+        let mut cache = self
+            .pipeline_cache
+            .lock()
+            .map_err(|_| RasterError::Init("Pipeline cache mutex poisoned".into()))?;
+        let pipeline = if let Some(pipeline) = cache.get(&wgsl) {
+            pipeline.clone()
+        } else {
+            let module = self
+                .device
+                .create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some("custom_shader_module"),
+                    source: wgpu::ShaderSource::Wgsl(wgsl.clone().into()),
+                });
+            let layout = self
+                .device
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("custom_shader_layout"),
+                    bind_group_layouts: &[&self.uniform_layout],
+                    push_constant_ranges: &[],
+                });
+            let pipeline = Arc::new(self.device.create_render_pipeline(
+                &wgpu::RenderPipelineDescriptor {
+                    label: Some("custom_shader_target_pipeline"),
+                    layout: Some(&layout),
+                    vertex: wgpu::VertexState {
+                        module: &module,
+                        entry_point: "vs_main",
+                        buffers: &[],
+                        compilation_options: Default::default(),
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &module,
+                        entry_point: "fs_main",
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: wgpu::TextureFormat::Rgba8Unorm,
+                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                        compilation_options: Default::default(),
+                    }),
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview: None,
+                    cache: None,
+                },
+            ));
+            cache.insert(wgsl, pipeline.clone());
+            pipeline
+        };
+        drop(cache);
+
+        let uniforms = ShaderUniforms {
+            resolution: [width as f32, height as f32],
+            time,
+            _pad: 0.0,
+            params,
+        };
+        let uniform_bytes = unsafe {
+            std::slice::from_raw_parts(
+                &uniforms as *const ShaderUniforms as *const u8,
+                std::mem::size_of::<ShaderUniforms>(),
+            )
+        };
+        let uniform_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("shader_target_uniforms"),
+                contents: uniform_bytes,
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("shader_target_bind_group"),
+            layout: &self.uniform_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("shader_target_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.draw(0..6, 0..1);
+        Ok(())
+    }
 }
