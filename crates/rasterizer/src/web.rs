@@ -63,7 +63,7 @@ pub struct WebFrameTiming {
 }
 
 /// Aggregate drift measurements for a rendered output-frame sequence.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct WebFrameDriftReport {
     pub sample_count: usize,
     pub mean_abs_drift_frames: f64,
@@ -95,6 +95,26 @@ impl WebFrameDriftReport {
             max_abs_drift_frames: max_abs_drift,
             non_contiguous_samples,
         })
+    }
+
+    /// Serialize a stable machine-readable validation artifact.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+
+    /// Serialize one CSV row matching [`Self::csv_header`].
+    pub fn csv_header() -> &'static str {
+        "sample_count,mean_abs_drift_frames,max_abs_drift_frames,non_contiguous_samples"
+    }
+
+    pub fn to_csv_row(&self) -> String {
+        format!(
+            "{},{:.9},{:.9},{}",
+            self.sample_count,
+            self.mean_abs_drift_frames,
+            self.max_abs_drift_frames,
+            self.non_contiguous_samples
+        )
     }
 }
 
@@ -298,6 +318,8 @@ mod tests {
         assert!(report.max_abs_drift_frames < 1e-5);
         assert!(report.mean_abs_drift_frames < 1e-5);
         assert_eq!(WebFrameDriftReport::from_samples(&[]), None);
+        assert!(report.to_json().unwrap().contains("\"sample_count\": 3"));
+        assert_eq!(report.to_csv_row(), "3,0.000003333,0.000010000,1");
     }
 
     #[test]
