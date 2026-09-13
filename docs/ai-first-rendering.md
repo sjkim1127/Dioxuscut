@@ -295,3 +295,7 @@ requiring the Studio UI.
 For render automation, set `DIOXUSCUT_JSON=1`. Successful and failed `render`
 commands then emit one machine-readable result line on stdout. Human tracing
 remains on stderr, so an agent can parse stdout without log filtering.
+`readIsoBmffSample(source, trackIndex, sampleIndex)` then fetches one encoded
+sample range and returns its bytes plus offset/keyframe metadata. The payload
+is intentionally decoder-neutral so Chromium WebCodecs and a future native
+decoder can share the same sample scheduler.

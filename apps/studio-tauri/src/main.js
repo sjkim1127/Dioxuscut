@@ -600,6 +600,24 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
   return { ...structure, durationInSeconds: Number.isFinite(durationInSeconds) ? durationInSeconds : null, tracks };
 }
 
+// Fetch exactly one ISO-BMFF sample. The returned payload is decoder-neutral;
+// callers can feed it to WebCodecs after applying the codec-specific
+// avcC/hvcC/av1C conversion required by the selected track.
+export async function readIsoBmffSample(source, trackIndex, sampleIndex, options = {}) {
+  if (!Number.isInteger(trackIndex) || trackIndex < 0 || !Number.isInteger(sampleIndex) || sampleIndex < 0) {
+    throw new RangeError('readIsoBmffSample expects non-negative integer indexes');
+  }
+  const parsed = await parseIsoBmffMovieHeader(source, options);
+  const track = parsed?.tracks?.[trackIndex];
+  const sample = track?.sampleTables?.sampleRanges?.[sampleIndex];
+  if (!sample) throw new RangeError(`sample ${sampleIndex} is not available on track ${trackIndex}`);
+  if (!Number.isSafeInteger(sample.offset) || !Number.isSafeInteger(sample.size) || sample.size <= 0) {
+    throw new Error(`sample ${sampleIndex} has an invalid byte range`);
+  }
+  const data = await readMediaRange(source, sample.offset, sample.offset + sample.size, options);
+  return { ...sample, data, trackIndex };
+}
+
 function uint32be(bytes, offset) {
   return ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0;
 }
@@ -1379,6 +1397,7 @@ window.dioxuscut = {
   parseWavMetadata,
   probeIsoBmff,
   parseIsoBmffMovieHeader,
+  readIsoBmffSample,
   readMediaRange,
   getAudioDurationInSeconds,
   getAudioDuration,
