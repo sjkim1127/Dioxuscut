@@ -453,7 +453,10 @@ async function parseWebmHeader(source) {
     for (let index = 0; index < width; index += 1) value = value * 256 + bytes[offset + index];
     return { width, value };
   };
-  const masters = new Set([0x1a45dfa3, 0x18538067, 0x1549a966, 0x1654ae6b, 0xae, 0xe0]);
+  const masters = new Set([
+    0x1a45dfa3, 0x18538067, 0x1549a966, 0x1654ae6b, 0xae, 0xe0,
+    0x1c53bb6b, 0xbb, 0xb7,
+  ]);
   const parseRange = (rangeStart, rangeEnd) => {
     let offset = rangeStart;
     while (offset + 2 <= rangeEnd) {
@@ -527,7 +530,7 @@ async function parseWebmHeader(source) {
 // deliberately rejected until their per-codec frame duration semantics are
 // implemented; ordinary browser-recorded WebM uses one frame per block.
 export async function readWebmSamples(source, trackNumber = 1, options = {}) {
-  const metadata = options.metadata ?? await parseWebmHeader(source);
+  const metadata = options.metadata?.cues ? options.metadata : await parseWebmHeader(source);
   if (!metadata?.cues?.length) return [];
   const cues = metadata.cues.filter((cue) => cue.trackNumber === trackNumber || cue.trackNumber == null);
   const cueIndex = Math.max(0, Number(options.cueIndex ?? 0));
