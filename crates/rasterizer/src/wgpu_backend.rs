@@ -925,6 +925,7 @@ impl RasterizerBackend for WgpuBackend {
                 if let Some(prev) = in_flight.take() {
                     self.drain_slot(prev, &res, width, height, &mut scratch, consume_fn)?;
                 }
+                self.cpu_fallback_frame_count.fetch_add(1, Ordering::Relaxed);
                 let img = self.fallback.render_frame(&scene, &cfg)?;
                 consume_fn(frame, img.as_raw())?;
                 continue;
@@ -944,6 +945,7 @@ impl RasterizerBackend for WgpuBackend {
             // Submit this frame to GPU
             let (submission_index, rx) =
                 self.submit_frame_to_slot(&commands, width, height, &res.slots[slot_idx])?;
+            self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
 
             // Overlap: drain the previous frame while the newly submitted frame is being rendered on GPU
             if let Some(prev) = in_flight.take() {
