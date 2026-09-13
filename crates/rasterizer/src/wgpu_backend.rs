@@ -1662,6 +1662,22 @@ mod tests {
             mean_alpha_error < 8.0,
             "CPU/GPU layer mean alpha error was {mean_alpha_error}"
         );
+        let rgb_error = gpu_image
+            .pixels()
+            .zip(cpu_image.pixels())
+            .map(|(gpu, cpu)| {
+                (0..3)
+                    .map(|channel| {
+                        (i16::from(gpu[channel]) - i16::from(cpu[channel])).unsigned_abs() as u64
+                    })
+                    .sum::<u64>()
+            })
+            .sum::<u64>();
+        let mean_rgb_error = rgb_error as f64 / (config.width * config.height * 3) as f64;
+        assert!(
+            mean_rgb_error < 8.0,
+            "CPU/GPU layer mean RGB error was {mean_rgb_error}"
+        );
     }
 
     #[test]
