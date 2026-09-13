@@ -559,6 +559,14 @@ struct GpuContext {
     image_pipeline: wgpu::RenderPipeline,
     path_mask_pipeline: wgpu::RenderPipeline,
     text_pipeline: wgpu::RenderPipeline,
+    multiply_pipeline: wgpu::RenderPipeline,
+    multiply_mesh_pipeline: wgpu::RenderPipeline,
+    multiply_image_pipeline: wgpu::RenderPipeline,
+    multiply_text_pipeline: wgpu::RenderPipeline,
+    screen_pipeline: wgpu::RenderPipeline,
+    screen_mesh_pipeline: wgpu::RenderPipeline,
+    screen_image_pipeline: wgpu::RenderPipeline,
+    screen_text_pipeline: wgpu::RenderPipeline,
     globals_layout: wgpu::BindGroupLayout,
     instance_layout: wgpu::BindGroupLayout,
     image_layout: wgpu::BindGroupLayout,
@@ -694,6 +702,99 @@ impl GpuContext {
             ],
             push_constant_ranges: &[],
         });
+
+        let make_blend_pipeline = |label: &'static str,
+                                   entry_point: &'static str,
+                                   mesh: bool,
+                                   blend: wgpu::BlendState| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: if mesh { "vs_mesh" } else { "vs_main" },
+                    buffers: if mesh {
+                        &[wgpu::VertexBufferLayout {
+                            array_stride: std::mem::size_of::<GpuVertex>() as u64,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: &MESH_ATTRIBUTES,
+                        }]
+                    } else {
+                        &[]
+                    },
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point,
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: RENDER_FORMAT,
+                        blend: Some(blend),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: if mesh {
+                    wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::TriangleList,
+                        ..Default::default()
+                    }
+                } else {
+                    wgpu::PrimitiveState::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: SAMPLE_COUNT,
+                    ..Default::default()
+                },
+                multiview: None,
+                cache: None,
+            })
+        };
+        let multiply = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::Dst,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent::OVER,
+        };
+        let screen = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::OneMinusDst,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent::OVER,
+        };
+        let multiply_pipeline =
+            make_blend_pipeline("dioxuscut_multiply_pipeline", "fs_main", false, multiply);
+        let multiply_mesh_pipeline = make_blend_pipeline(
+            "dioxuscut_multiply_mesh_pipeline",
+            "fs_solid",
+            true,
+            multiply,
+        );
+        let multiply_image_pipeline = make_blend_pipeline(
+            "dioxuscut_multiply_image_pipeline",
+            "fs_image",
+            false,
+            multiply,
+        );
+        let multiply_text_pipeline = make_blend_pipeline(
+            "dioxuscut_multiply_text_pipeline",
+            "fs_text",
+            false,
+            multiply,
+        );
+        let screen_pipeline =
+            make_blend_pipeline("dioxuscut_screen_pipeline", "fs_main", false, screen);
+        let screen_mesh_pipeline =
+            make_blend_pipeline("dioxuscut_screen_mesh_pipeline", "fs_solid", true, screen);
+        let screen_image_pipeline =
+            make_blend_pipeline("dioxuscut_screen_image_pipeline", "fs_image", false, screen);
+        let screen_text_pipeline =
+            make_blend_pipeline("dioxuscut_screen_text_pipeline", "fs_text", false, screen);
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("dioxuscut_pipeline"),
@@ -862,6 +963,14 @@ impl GpuContext {
             image_pipeline,
             path_mask_pipeline,
             text_pipeline,
+            multiply_pipeline,
+            multiply_mesh_pipeline,
+            multiply_image_pipeline,
+            multiply_text_pipeline,
+            screen_pipeline,
+            screen_mesh_pipeline,
+            screen_image_pipeline,
+            screen_text_pipeline,
             globals_layout,
             instance_layout,
             image_layout,
@@ -2014,15 +2123,27 @@ impl WgpuBackend {
                         let start = i;
                         while i < commands.len()
                             && matches!(commands[i], DrawCommand::Analytic { .. })
+                            && commands[i].instance().kind_data[2]
+                                == commands[start].instance().kind_data[2]
                         {
                             i += 1;
                         }
-                        pass.set_pipeline(&self.ctx.pipeline);
+                        let pipeline = match commands[start].instance().kind_data[2] {
+                            1 => &self.ctx.multiply_pipeline,
+                            2 => &self.ctx.screen_pipeline,
+                            _ => &self.ctx.pipeline,
+                        };
+                        pass.set_pipeline(pipeline);
                         pass.draw(0..6, start as u32..i as u32);
                     }
                     DrawCommand::Mesh { indices, .. } => {
                         let (vb, ib) = mesh_buffers[i].as_ref().expect("mesh buffers allocated");
-                        pass.set_pipeline(&self.ctx.mesh_pipeline);
+                        let pipeline = match commands[i].instance().kind_data[2] {
+                            1 => &self.ctx.multiply_mesh_pipeline,
+                            2 => &self.ctx.screen_mesh_pipeline,
+                            _ => &self.ctx.mesh_pipeline,
+                        };
+                        pass.set_pipeline(pipeline);
                         pass.set_vertex_buffer(0, vb.slice(..));
                         pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
                         pass.draw_indexed(0..indices.len() as u32, 0, i as u32..i as u32 + 1);
@@ -2033,10 +2154,20 @@ impl WgpuBackend {
                     | DrawCommand::Lottie { .. }
                     | DrawCommand::Text { .. } => {
                         if matches!(commands[i], DrawCommand::Text { .. }) {
-                            pass.set_pipeline(&self.ctx.text_pipeline);
+                            let pipeline = match commands[i].instance().kind_data[2] {
+                                1 => &self.ctx.multiply_text_pipeline,
+                                2 => &self.ctx.screen_text_pipeline,
+                                _ => &self.ctx.text_pipeline,
+                            };
+                            pass.set_pipeline(pipeline);
                             pass.set_bind_group(2, &atlas_resource.bind_group, &[]);
                         } else {
-                            pass.set_pipeline(&self.ctx.image_pipeline);
+                            let pipeline = match commands[i].instance().kind_data[2] {
+                                1 => &self.ctx.multiply_image_pipeline,
+                                2 => &self.ctx.screen_image_pipeline,
+                                _ => &self.ctx.image_pipeline,
+                            };
+                            pass.set_pipeline(pipeline);
                             pass.set_bind_group(
                                 2,
                                 &image_resources[i]
@@ -3304,7 +3435,7 @@ fn compile_nodes(
             // the fallback path below so their compositing semantics remain exact.
             SceneNode::Layer {
                 opacity: layer_opacity,
-                blend_mode: crate::scene::BlendMode::Normal,
+                blend_mode,
                 clip,
                 mask,
                 mask_mode,
@@ -3313,6 +3444,12 @@ fn compile_nodes(
                 children,
                 ..
             } if gpu_layer_effects(filters, *layer_opacity).is_some()
+                && matches!(
+                    blend_mode,
+                    crate::scene::BlendMode::Normal
+                        | crate::scene::BlendMode::Multiply
+                        | crate::scene::BlendMode::Screen
+                )
                 && (*mask_mode == crate::scene::MaskMode::Alpha
                     || *mask_mode == crate::scene::MaskMode::Luminance)
                 && (clip.is_none()
@@ -3347,6 +3484,11 @@ fn compile_nodes(
                 )?;
                 for command in &mut output[start..] {
                     let instance = command.instance_mut();
+                    instance.kind_data[2] = match blend_mode {
+                        crate::scene::BlendMode::Multiply => 1,
+                        crate::scene::BlendMode::Screen => 2,
+                        _ => 0,
+                    };
                     instance.brightness[0] *= brightness;
                     instance.grayscale[0] = 1.0 - (1.0 - instance.grayscale[0]) * (1.0 - grayscale);
                     instance.contrast[0] *= contrast;
@@ -4848,6 +4990,74 @@ mod tests {
             attenuation_error < 0.03,
             "GPU/CPU vignette attenuation error was {attenuation_error}"
         );
+    }
+
+    #[test]
+    fn gpu_multiply_layer_uses_blend_pipeline_and_linear_cpu_reference() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping multiply GPU test");
+            return;
+        };
+        let mut scene = Scene {
+            nodes: vec![
+                SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 16.0,
+                    h: 16.0,
+                    fill: Color::rgb(128, 96, 64),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                },
+                SceneNode::Layer {
+                    opacity: 1.0,
+                    blend_mode: crate::scene::BlendMode::Multiply,
+                    clip: None,
+                    mask: None,
+                    mask_mode: crate::scene::MaskMode::Alpha,
+                    filters: vec![],
+                    shadow: None,
+                    children: vec![SceneNode::Rect {
+                        x: 0.0,
+                        y: 0.0,
+                        w: 16.0,
+                        h: 16.0,
+                        fill: Color::rgb(64, 160, 192),
+                        stroke: None,
+                        stroke_width: 0.0,
+                        corner_radius: 0.0,
+                    }],
+                },
+            ],
+        };
+        assert!(gpu_supports_scene(&scene));
+        let config = FrameConfig::new(16, 16, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        let gpu_pixel = gpu_image.get_pixel(8, 8);
+        let cpu_pixel = cpu_image.get_pixel(8, 8);
+        for channel in 0..3 {
+            let expected = srgb_to_linear(cpu_pixel[channel]) * 255.0;
+            assert!(
+                (f32::from(gpu_pixel[channel]) - expected).abs() < 4.0,
+                "channel {channel}: GPU {:?}, CPU {:?}, expected linear {expected}",
+                gpu_pixel,
+                cpu_pixel
+            );
+        }
+        assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
+
+        let SceneNode::Layer { blend_mode, .. } = &mut scene.nodes[1] else {
+            unreachable!("blend test scene lost its layer");
+        };
+        *blend_mode = crate::scene::BlendMode::Screen;
+        assert!(gpu_supports_scene(&scene));
+        let screen_image = gpu.render_frame(&scene, &config).unwrap();
+        assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
+        assert_ne!(screen_image.get_pixel(8, 8), gpu_pixel);
     }
 
     #[test]
