@@ -64,11 +64,13 @@ try {
       onDimensions: (value) => parseEvents.push(['dimensions', value?.width ?? null]),
       onDurationInSeconds: (value) => parseEvents.push(['duration', value]),
       onFps: (value) => parseEvents.push(['fps', Math.round(value)]),
+      onVideoTrack: (value) => parseEvents.push(['videoTrack', value.width]),
       onContainer: (value) => parseEvents.push(['container', value]),
       onTracks: (value) => parseEvents.push(['tracks', value.length]),
     });
     if (!partialMetadata.dimensions || partialMetadata.durationInSeconds !== 3 || 'container' in partialMetadata
-      || !parseEvents.some(([name, value]) => name === 'fps' && value === 60)) {
+      || !parseEvents.some(([name, value]) => name === 'fps' && value === 60)
+      || !parseEvents.some(([name, value]) => name === 'videoTrack' && value === 1920)) {
       throw new Error('parseMedia object fields selection failed');
     }
     const ranged = await window.dioxuscut.readMediaRange('/range.bin', 2, 6);
