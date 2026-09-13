@@ -10,15 +10,21 @@ const url = process.env.DIOXUSCUT_BROWSER_URL ?? 'http://127.0.0.1:1421';
 const executablePath = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const run = promisify(execFile);
 const audioFixturePath = `/tmp/dioxuscut-webcodecs-audio-${process.pid}.m4a`;
+const webmFixturePath = `/tmp/dioxuscut-webcodecs-video-${process.pid}.webm`;
 await run(process.env.FFMPEG_PATH ?? 'ffmpeg', [
   '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1',
   '-c:a', 'aac', '-b:a', '96k', '-ar', '48000', '-ac', '1', '-f', 'ipod', '-y', audioFixturePath,
+]);
+await run(process.env.FFMPEG_PATH ?? 'ffmpeg', [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=160x90:rate=24:duration=1',
+  '-c:v', 'libvpx-vp9', '-crf', '35', '-b:v', '0', '-an', '-y', webmFixturePath,
 ]);
 const browser = await chromium.launch({ executablePath, headless: true });
 try {
   const page = await browser.newPage();
   const fixture = await readFile(new URL('../../assets/showcase.mp4', import.meta.url));
   const audioFixture = await readFile(audioFixturePath);
+  const webmFixture = await readFile(webmFixturePath);
   const rangeFixture = Buffer.from([0, 1, 2, 3, 4, 5, 6, 7]);
   await page.route('**/range.bin', (route) => {
     const range = /^bytes=(\d+)-(\d+)$/.exec(route.request().headers().range ?? '');
@@ -35,6 +41,9 @@ try {
   }));
   await page.route('**/assets/audio-fixture.m4a', (route) => route.fulfill({
     status: 200, contentType: 'audio/mp4', body: audioFixture,
+  }));
+  await page.route('**/assets/webm-fixture.webm', (route) => route.fulfill({
+    status: 200, contentType: 'video/webm', body: webmFixture,
   }));
   await page.addInitScript(() => { window.__DIOXUSCUT_HEADLESS_RENDER__ = true; });
   await page.goto(url, { waitUntil: 'domcontentloaded' });
@@ -57,6 +66,8 @@ try {
     }, 'audio');
     const audioSupport = await AudioDecoder.isConfigSupported({ codec: 'mp4a.40.2', numberOfChannels: 2, sampleRate: 48000 });
     const parsed = await window.dioxuscut.parseIsoBmffMovieHeader('/assets/showcase.mp4');
+    const webmMetadata = await window.dioxuscut.parseMedia({ src: '/assets/webm-fixture.webm' });
+    const webmSamples = await window.dioxuscut.readWebmSamples('/assets/webm-fixture.webm', 1);
     const parseEvents = [];
     const partialMetadata = await window.dioxuscut.parseMedia({
       src: '/assets/showcase.mp4',
@@ -148,6 +159,17 @@ try {
       audioDecodeMs,
       streamedVideo: { count: streamedVideo.length, returnValue: streamedVideoResult },
       streamedAudio: { count: streamedAudio.length, returnValue: streamedAudioResult },
+      webm: {
+        container: webmMetadata.container,
+        track: webmMetadata.tracks?.[0]?.codec,
+        cues: webmMetadata.keyframes?.length ?? 0,
+        samples: webmSamples.length,
+        firstSample: webmSamples[0] ? {
+          keyframe: webmSamples[0].keyframe,
+          size: webmSamples[0].size,
+          timestamp: webmSamples[0].timestamp,
+        } : null,
+      },
     };
   });
   assert.equal(result.type, 'key');
@@ -182,9 +204,15 @@ try {
   assert.equal(result.streamedVideo.returnValue, null);
   assert.ok(result.streamedAudio.count > 0);
   assert.equal(result.streamedAudio.returnValue, null);
+  assert.equal(result.webm.container, 'webm');
+  assert.equal(result.webm.track, 'V_VP9');
+  assert.ok(result.webm.cues > 0);
+  assert.ok(result.webm.samples > 0);
+  assert.ok(result.webm.firstSample.size > 0);
   assert.ok(result.videoDecodeMs >= 0 && result.audioDecodeMs >= 0);
   console.log(JSON.stringify({ status: 'ok', ...result }));
 } finally {
   await browser.close();
   await rm(audioFixturePath, { force: true });
+  await rm(webmFixturePath, { force: true });
 }

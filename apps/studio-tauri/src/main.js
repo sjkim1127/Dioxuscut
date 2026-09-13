@@ -565,14 +565,16 @@ export async function readWebmSamples(source, trackNumber = 1, options = {}) {
     for (let index = 0; index < width; index += 1) value = value * 256 + bytes[offset + index];
     return { width, value };
   };
-  let offset = 0;
-  while (offset + 2 <= bytes.length) {
-    const id = readId(offset); if (!id) break;
-    const size = readVint(offset + id.width); if (!size) break;
-    const payload = offset + id.width + size.width;
-    const end = Math.min(bytes.length, payload + size.value);
-    if (end <= offset) break;
-    if (id.value === 0xa3 && end > payload + 4) {
+  const parseRange = (rangeStart, rangeEnd) => {
+    let offset = rangeStart;
+    while (offset + 2 <= rangeEnd) {
+      const id = readId(offset); if (!id) break;
+      const size = readVint(offset + id.width); if (!size) break;
+      const payload = offset + id.width + size.width;
+      const end = Math.min(rangeEnd, payload + size.value);
+      if (end <= offset) break;
+      if (id.value === 0x1f43b675) parseRange(payload, end);
+      if (id.value === 0xa3 && end > payload + 4) {
       const track = readVint(payload);
       if (track && track.value === trackNumber) {
         const timecode = (bytes[payload + track.width] << 8) | bytes[payload + track.width + 1];
@@ -590,8 +592,10 @@ export async function readWebmSamples(source, trackNumber = 1, options = {}) {
         }
       }
     }
-    offset = end;
-  }
+      offset = end;
+    }
+  };
+  parseRange(0, bytes.length);
   return samples;
 }
 
@@ -2032,6 +2036,8 @@ window.dioxuscut = {
   getImageDimensions,
   getVideoMetadata,
   parseMedia,
+  readWebmSamples,
+  createWebmEncodedVideoChunk,
   parseWavMetadata,
   probeIsoBmff,
   parseIsoBmffMovieHeader,
