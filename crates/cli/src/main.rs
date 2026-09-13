@@ -225,6 +225,7 @@ async fn main() -> anyhow::Result<()> {
             let previous_browser_jpeg_quality = std::env::var_os("DIOXUSCUT_BROWSER_JPEG_QUALITY");
             let previous_browser_frame_timeout =
                 std::env::var_os("DIOXUSCUT_BROWSER_FRAME_TIMEOUT_MS");
+            let previous_browser_transport = std::env::var_os("DIOXUSCUT_BROWSER_TRANSPORT");
             let previous_browser_transport_retries =
                 std::env::var_os("DIOXUSCUT_BROWSER_TRANSPORT_RETRIES");
             if request.backend == dioxuscut_cli::RenderBackend::Browser {
@@ -282,6 +283,16 @@ async fn main() -> anyhow::Result<()> {
                         .map(|value| value.to_string())
                         .as_deref(),
                 );
+                set_optional_browser_env(
+                    "DIOXUSCUT_BROWSER_TRANSPORT",
+                    project
+                        .settings
+                        .browser_transport
+                        .as_deref()
+                        .map(str::trim)
+                        .map(str::to_ascii_lowercase)
+                        .as_deref(),
+                );
             }
             let result = dioxuscut_cli::execute_project_render_command_with_control(
                 &request,
@@ -313,6 +324,7 @@ async fn main() -> anyhow::Result<()> {
                 "DIOXUSCUT_BROWSER_TRANSPORT_RETRIES",
                 previous_browser_transport_retries,
             );
+            restore_browser_env("DIOXUSCUT_BROWSER_TRANSPORT", previous_browser_transport);
             let _ = std::fs::remove_file(props_path);
             result?;
         }

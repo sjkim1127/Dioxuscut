@@ -26,6 +26,7 @@
         "browser_image_format": { "enum": ["png", "jpeg"] },
         "browser_jpeg_quality": { "type": "integer", "minimum": 1, "maximum": 100 },
         "browser_frame_timeout_ms": { "type": "integer", "minimum": 1 },
+        "browser_transport": { "enum": ["base64", "file"] },
         "browser_transport_retries": { "type": "integer", "minimum": 0 }
       },
       "additionalProperties": false

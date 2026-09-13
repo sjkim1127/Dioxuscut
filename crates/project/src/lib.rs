@@ -74,6 +74,9 @@ pub struct ProjectSettings {
     /// Browser worker response timeout in milliseconds.
     #[serde(default)]
     pub browser_frame_timeout_ms: Option<u64>,
+    /// Browser frame transport (`base64` by default or `file`).
+    #[serde(default)]
+    pub browser_transport: Option<String>,
     /// Number of transport retries for browser worker failures.
     #[serde(default)]
     pub browser_transport_retries: Option<usize>,
@@ -181,6 +184,8 @@ pub enum ProjectError {
     InvalidBrowserJpegQuality,
     #[error("browser frame timeout must be greater than zero")]
     InvalidBrowserFrameTimeout,
+    #[error("browser transport must be base64 or file")]
+    InvalidBrowserTransport,
     #[error("project asset id cannot be empty")]
     EmptyAssetId,
     #[error("project asset path cannot be empty for '{0}'")]
@@ -259,6 +264,19 @@ impl Project {
             .is_some_and(|timeout| timeout == 0)
         {
             return Err(ProjectError::InvalidBrowserFrameTimeout);
+        }
+        if self
+            .settings
+            .browser_transport
+            .as_deref()
+            .is_some_and(|transport| {
+                !matches!(
+                    transport.trim().to_ascii_lowercase().as_str(),
+                    "base64" | "file"
+                )
+            })
+        {
+            return Err(ProjectError::InvalidBrowserTransport);
         }
         if let Some(end) = self.settings.frame_end {
             let start = self.settings.frame_start.unwrap_or(0);
@@ -785,6 +803,7 @@ mod tests {
                 browser_image_format: None,
                 browser_jpeg_quality: None,
                 browser_frame_timeout_ms: None,
+                browser_transport: None,
                 browser_transport_retries: None,
             },
             props: serde_json::json!({"title":"hello"}),
@@ -1067,6 +1086,10 @@ mod tests {
         let mut p = project();
         p.settings.browser_frame_timeout_ms = Some(0);
         assert_eq!(p.validate(), Err(ProjectError::InvalidBrowserFrameTimeout));
+
+        let mut p = project();
+        p.settings.browser_transport = Some("shared-memory".into());
+        assert_eq!(p.validate(), Err(ProjectError::InvalidBrowserTransport));
     }
 
     #[test]
@@ -1075,6 +1098,8 @@ mod tests {
         p.settings.browser_image_format = Some(" JPEG ".into());
         p.settings.browser_jpeg_quality = Some(90);
         p.settings.browser_frame_timeout_ms = Some(5_000);
+        p.settings.browser_transport = Some(" FILE ".into());
+        assert!(p.validate().is_ok());
         p.settings.browser_transport_retries = Some(2);
         assert!(p.validate().is_ok());
     }
