@@ -535,8 +535,8 @@ function webmCodec(codecId) {
 }
 
 // Read VP8/VP9/AV1 SimpleBlock payloads from a WebM cluster. Ordinary blocks
-// and fixed-laced blocks are supported; variable lacing remains bounded until
-// its per-frame size and timestamp semantics are implemented.
+// and fixed/Xiph/EBML-laced blocks are supported. Laced frames share the
+// block timestamp because Matroska does not store per-frame timestamps there.
 export async function readWebmSamples(source, trackNumber = 1, options = {}) {
   const metadata = options.metadata?.cues ? options.metadata : await parseWebmHeader(source);
   if (!metadata?.cues?.length) return [];
@@ -599,6 +599,33 @@ export async function readWebmSamples(source, trackNumber = 1, options = {}) {
           if (frameCount > 0 && payloadBytes % frameCount === 0) {
             frameSizes = Array.from({ length: frameCount }, () => payloadBytes / frameCount);
           } else frameSizes = [];
+        } else if ((lacing === 0x02 || lacing === 0x06) && dataStart < end) {
+          const frameCount = bytes[dataStart] + 1;
+          dataStart += 1;
+          const sizes = [];
+          if (lacing === 0x02) {
+            for (let frameIndex = 0; frameIndex < frameCount - 1 && dataStart < end; frameIndex += 1) {
+              let size = 0; let part;
+              do { part = bytes[dataStart++]; size += part; } while (part === 255 && dataStart < end);
+              sizes.push(size);
+            }
+          } else {
+            const firstSize = readVint(dataStart);
+            if (firstSize) {
+              sizes.push(firstSize.value);
+              dataStart += firstSize.width;
+              for (let frameIndex = 1; frameIndex < frameCount - 1 && dataStart < end; frameIndex += 1) {
+                const encoded = readVint(dataStart);
+                if (!encoded) break;
+                const bias = (2 ** (7 * encoded.width - 1)) - 1;
+                sizes.push((sizes[sizes.length - 1] ?? 0) + encoded.value - bias);
+                dataStart += encoded.width;
+              }
+            }
+          }
+          const remaining = end - dataStart - sizes.reduce((sum, size) => sum + size, 0);
+          if (sizes.length === frameCount - 1 && remaining >= 0) frameSizes = [...sizes, remaining];
+          else frameSizes = [];
         } else if (lacing !== 0) frameSizes = [];
         let frameOffset = dataStart;
         for (let frameIndex = 0; frameIndex < frameSizes.length; frameIndex += 1) {
