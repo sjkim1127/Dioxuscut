@@ -33,6 +33,38 @@ jobs:
       - name: Check Dioxus Web core
         run: cargo check --locked -p dioxuscut-core --features web --target wasm32-unknown-unknown
 
+  platform_contracts:
+    name: Dioxus and Tauri platform contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install desktop and Tauri dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Check Dioxus Web host contract
+        run: cargo check --locked -p example --features web
+
+      - name: Check Dioxus Desktop host contract
+        run: cargo check --locked -p example --features desktop
+
+      - name: Check Tauri host contract
+        run: cargo check --locked -p dioxuscut-studio-tauri
+
   # ── 1. Code Formatting & Clippy Lints ─────────────────────────────────────
   fmt_clippy:
     name: Code Quality (Fmt & Clippy)
