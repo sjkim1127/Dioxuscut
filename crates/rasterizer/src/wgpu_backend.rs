@@ -1791,7 +1791,29 @@ impl WgpuBackend {
                 let shader_scene = Scene {
                     nodes: vec![node.clone()],
                 };
-                let rendered = self.render_shader_layers(&shader_scene, config)?;
+                let rendered = match node {
+                    SceneNode::Shader {
+                        x,
+                        y,
+                        w,
+                        h,
+                        source,
+                        opacity,
+                        ..
+                    } if *opacity >= 0.0
+                        && *opacity <= 1.0
+                        && *x >= 0.0
+                        && *y >= 0.0
+                        && *w > 0.0
+                        && *h > 0.0
+                        && *x + *w <= config.width as f32
+                        && *y + *h <= config.height as f32
+                        && shader_opacity_supported(source) =>
+                    {
+                        self.render_shader_layers_direct(&shader_scene, config)?
+                    }
+                    _ => self.render_shader_layers(&shader_scene, config)?,
+                };
                 image::imageops::overlay(&mut output, &rendered, 0, 0);
             } else {
                 regular_nodes.push(node.clone());
@@ -3297,6 +3319,7 @@ mod tests {
         assert_eq!(image.get_pixel(1, 1)[1], 255);
         assert_eq!(image.get_pixel(6, 4)[1], 255);
         assert_eq!(image.get_pixel(6, 4)[2], 0);
+        assert_eq!(gpu.render_stats().gpu_frames, 2);
     }
 
     #[test]
