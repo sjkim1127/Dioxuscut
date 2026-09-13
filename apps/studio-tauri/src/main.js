@@ -341,6 +341,41 @@ export async function getAudioData(source, { sampleRate = 48_000, requestInit } 
 // promise from a frame render and use delayRender around it when necessary.
 export const useAudioData = getAudioData;
 
+// Remotion-compatible AudioBuffer -> float32 WAV data URL. Keeping this in
+// the browser host lets generated compositions feed synthesized audio back
+// into Html5Audio or an export request without a server round-trip.
+export function audioBufferToDataUrl(buffer) {
+  if (!buffer || !Number.isInteger(buffer.numberOfChannels) || buffer.numberOfChannels < 1) {
+    throw new TypeError('audioBufferToDataUrl expects an AudioBuffer');
+  }
+  const channels = Array.from({ length: buffer.numberOfChannels }, (_, channel) => buffer.getChannelData(channel));
+  const frames = channels[0].length;
+  const interleaved = new Float32Array(frames * buffer.numberOfChannels);
+  for (let frame = 0; frame < frames; frame += 1) {
+    for (let channel = 0; channel < channels.length; channel += 1) {
+      interleaved[frame * channels.length + channel] = channels[channel][frame] ?? 0;
+    }
+  }
+  const bytesPerSample = 4;
+  const blockAlign = channels.length * bytesPerSample;
+  const output = new ArrayBuffer(44 + interleaved.length * bytesPerSample);
+  const view = new DataView(output);
+  const writeString = (offset, value) => [...value].forEach((character, index) => view.setUint8(offset + index, character.charCodeAt(0)));
+  writeString(0, 'RIFF'); view.setUint32(4, 36 + interleaved.length * bytesPerSample, true);
+  writeString(8, 'WAVE'); writeString(12, 'fmt '); view.setUint32(16, 16, true);
+  view.setUint16(20, 3, true); view.setUint16(22, channels.length, true);
+  view.setUint32(24, buffer.sampleRate, true); view.setUint32(28, buffer.sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true); view.setUint16(34, 32, true); writeString(36, 'data');
+  view.setUint32(40, interleaved.length * bytesPerSample, true);
+  for (let index = 0; index < interleaved.length; index += 1) view.setFloat32(44 + index * 4, interleaved[index], true);
+  const bytes = new Uint8Array(output);
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)));
+  }
+  return `data:audio/wav;base64,${window.btoa(binary)}`;
+}
+
 // Platform-neutral counterpart of Remotion's useWindowedAudioData. The host
 // does not require React: callers receive the window centered on the requested
 // frame plus its timeline offset, while getAudioData() keeps decoding cached.
@@ -922,6 +957,7 @@ window.dioxuscut = {
   getAudioDuration,
   getAudioData,
   useAudioData,
+  audioBufferToDataUrl,
   getWindowedAudioData,
   getWaveformPortion,
   visualizeAudioWaveform,
