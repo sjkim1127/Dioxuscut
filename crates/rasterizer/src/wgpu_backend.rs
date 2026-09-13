@@ -1545,6 +1545,8 @@ impl WgpuBackend {
         let mut resources = resource
             .lock()
             .map_err(|_| RasterError::Init("GPU frame resource mutex poisoned".into()))?;
+        let mut in_flight: std::collections::VecDeque<(u32, usize, wgpu::SubmissionIndex)> =
+            std::collections::VecDeque::with_capacity(RING_BUFFER_SIZE);
 
         for frame in 0..total {
             let scene = scene_fn(frame)?;
@@ -1569,6 +1571,20 @@ impl WgpuBackend {
                     "frame {frame} contains unsupported shader nodes"
                 )));
             }
+            if in_flight.len() == RING_BUFFER_SIZE {
+                let (queued_frame, queued_slot, submission_index) = in_flight
+                    .pop_front()
+                    .expect("GPU-native in-flight ring length was checked");
+                self.ctx
+                    .device
+                    .poll(wgpu::Maintain::wait_for(submission_index));
+                consume(
+                    queued_frame,
+                    &resources.slots[queued_slot].texture_view,
+                    first.width,
+                    first.height,
+                );
+            }
             let slot_idx = resources.active_index % RING_BUFFER_SIZE;
             resources.active_index = resources.active_index.wrapping_add(1);
             let (submission_index, rx) = self.submit_frame_to_slot(
@@ -1582,16 +1598,19 @@ impl WgpuBackend {
                 false,
             )?;
             debug_assert!(rx.is_none());
+            in_flight.push_back((frame, slot_idx, submission_index));
+            self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
+        }
+        while let Some((queued_frame, queued_slot, submission_index)) = in_flight.pop_front() {
             self.ctx
                 .device
                 .poll(wgpu::Maintain::wait_for(submission_index));
             consume(
-                frame,
-                &resources.slots[slot_idx].texture_view,
+                queued_frame,
+                &resources.slots[queued_slot].texture_view,
                 first.width,
                 first.height,
             );
-            self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
         }
         Ok(())
     }
