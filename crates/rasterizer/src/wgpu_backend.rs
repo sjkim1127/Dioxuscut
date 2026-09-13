@@ -197,6 +197,8 @@ struct InstanceData {
 @group(1) @binding(0) var<storage, read> instances: array<InstanceData>;
 @group(2) @binding(0) var image_texture: texture_2d<f32>;
 @group(2) @binding(1) var image_sampler: sampler;
+@group(3) @binding(0) var path_mask_texture: texture_2d<f32>;
+@group(3) @binding(1) var path_mask_sampler: sampler;
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -443,7 +445,16 @@ fn mask_coverage(position: vec2<f32>, instance: InstanceData) -> f32 {
     if has_mask {
         var effective_coverage = coverage;
         if !has_regular_mask { effective_coverage = 1.0; }
-        return effective_coverage * clip_coverage;
+        var result = effective_coverage * clip_coverage;
+        if instance.kind_data.w == 1u {
+            let uv = position / globals.resolution;
+            result *= textureSample(path_mask_texture, path_mask_sampler, uv).r;
+        }
+        return result;
+    }
+    if instance.kind_data.w == 1u {
+        let uv = position / globals.resolution;
+        return textureSample(path_mask_texture, path_mask_sampler, uv).r;
     }
     return 1.0;
 }
@@ -514,10 +525,12 @@ struct GpuContext {
     pipeline: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
     image_pipeline: wgpu::RenderPipeline,
+    path_mask_pipeline: wgpu::RenderPipeline,
     text_pipeline: wgpu::RenderPipeline,
     globals_layout: wgpu::BindGroupLayout,
     instance_layout: wgpu::BindGroupLayout,
     image_layout: wgpu::BindGroupLayout,
+    path_mask_layout: wgpu::BindGroupLayout,
     max_texture_dimension_2d: u32,
 }
 
@@ -617,9 +630,36 @@ impl GpuContext {
             ],
         });
 
+        let path_mask_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("path_mask_bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("pipeline_layout"),
-            bind_group_layouts: &[&globals_layout, &instance_layout, &image_layout],
+            bind_group_layouts: &[
+                &globals_layout,
+                &instance_layout,
+                &image_layout,
+                &path_mask_layout,
+            ],
             push_constant_ranges: &[],
         });
 
@@ -720,6 +760,39 @@ impl GpuContext {
             cache: None,
         });
 
+        let path_mask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("dioxuscut_path_mask_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_mesh",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<GpuVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &MESH_ATTRIBUTES,
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_solid",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::R8Unorm,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::RED,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
         let text_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("dioxuscut_text_pipeline"),
             layout: Some(&pipeline_layout),
@@ -755,10 +828,12 @@ impl GpuContext {
             pipeline,
             mesh_pipeline,
             image_pipeline,
+            path_mask_pipeline,
             text_pipeline,
             globals_layout,
             instance_layout,
             image_layout,
+            path_mask_layout,
             max_texture_dimension_2d,
         })
     }
@@ -1338,6 +1413,7 @@ impl WgpuBackend {
     fn submit_frame_to_slot(
         &self,
         commands: &[DrawCommand],
+        path_mask: Option<&GpuPathMask>,
         width: u32,
         height: u32,
         sampling_fps: f64,
@@ -1422,6 +1498,11 @@ impl WgpuBackend {
             image_resources.push(Some(source));
         }
 
+        let path_mask_instance_index = all_instances.len() as u32;
+        if let Some(path_mask) = path_mask {
+            all_instances.push(path_mask.instance);
+        }
+
         if !all_instances.is_empty() {
             let instance_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("instances_storage_buf"),
@@ -1485,6 +1566,119 @@ impl WgpuBackend {
                 ],
             });
 
+            let default_path_mask_texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("default_path_mask_texture"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            queue.write_texture(
+                default_path_mask_texture.as_image_copy(),
+                &[255],
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(1),
+                    rows_per_image: Some(1),
+                },
+                wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+            );
+            let default_path_mask_view =
+                default_path_mask_texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let default_path_mask_sampler =
+                device.create_sampler(&wgpu::SamplerDescriptor::default());
+            let default_path_mask_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("default_path_mask_bg"),
+                layout: &self.ctx.path_mask_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&default_path_mask_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&default_path_mask_sampler),
+                    },
+                ],
+            });
+
+            let (_path_mask_texture, path_mask_view) = if path_mask.is_some() {
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("path_mask_texture"),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::R8Unorm,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                });
+                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                (texture, view)
+            } else {
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("default_path_mask_texture"),
+                    size: wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::R8Unorm,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
+                queue.write_texture(
+                    texture.as_image_copy(),
+                    &[255],
+                    wgpu::ImageDataLayout {
+                        offset: 0,
+                        bytes_per_row: Some(1),
+                        rows_per_image: Some(1),
+                    },
+                    wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                );
+                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                (texture, view)
+            };
+            let path_mask_sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+            let path_mask_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("path_mask_bg"),
+                layout: &self.ctx.path_mask_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&path_mask_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&path_mask_sampler),
+                    },
+                ],
+            });
+
             let mesh_buffers: Vec<Option<(wgpu::Buffer, wgpu::Buffer)>> = commands
                 .iter()
                 .map(|cmd| match cmd {
@@ -1510,6 +1704,49 @@ impl WgpuBackend {
                 })
                 .collect();
 
+            let path_mask_buffers = path_mask.map(|mask| {
+                let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("path_mask_vertices"),
+                    contents: bytemuck_cast(&mask.vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("path_mask_indices"),
+                    contents: bytemuck_cast(&mask.indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+                (vertex_buffer, index_buffer)
+            });
+
+            if let (Some(mask), Some((vertex_buffer, index_buffer))) =
+                (path_mask, path_mask_buffers.as_ref())
+            {
+                let mut mask_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("path_mask_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &path_mask_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                });
+                mask_pass.set_pipeline(&self.ctx.path_mask_pipeline);
+                mask_pass.set_bind_group(0, &globals_bg, &[]);
+                mask_pass.set_bind_group(1, &instance_bg, &[]);
+                mask_pass.set_bind_group(2, &dummy_image_bg, &[]);
+                mask_pass.set_bind_group(3, &default_path_mask_bg, &[]);
+                mask_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                mask_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                mask_pass.draw_indexed(
+                    0..mask.indices.len() as u32,
+                    0,
+                    path_mask_instance_index..path_mask_instance_index + 1,
+                );
+            }
+
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("frame_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1526,6 +1763,7 @@ impl WgpuBackend {
             pass.set_bind_group(0, &globals_bg, &[]);
             pass.set_bind_group(1, &instance_bg, &[]);
             pass.set_bind_group(2, &dummy_image_bg, &[]);
+            pass.set_bind_group(3, &path_mask_bg, &[]);
 
             let mut i = 0;
             while i < commands.len() {
@@ -1799,7 +2037,8 @@ impl RasterizerBackend for WgpuBackend {
                 }
             });
         let gpu_scene = gpu_base_scene.as_ref().unwrap_or(scene);
-        let Some(commands) = compile_scene(gpu_scene, &self.fallback) else {
+        let Some((commands, path_mask)) = compile_scene_with_path_mask(gpu_scene, &self.fallback)
+        else {
             self.cpu_fallback_frame_count
                 .fetch_add(1, Ordering::Relaxed);
             return self.fallback.render_frame(scene, config);
@@ -1840,6 +2079,7 @@ impl RasterizerBackend for WgpuBackend {
 
         let (submission_index, rx) = self.submit_frame_to_slot(
             &commands,
+            path_mask.as_ref(),
             width,
             height,
             config.fps,
@@ -1937,7 +2177,8 @@ impl RasterizerBackend for WgpuBackend {
             let scene = scene_fn(frame)?;
             let cfg = config_fn(frame);
 
-            let Some(commands) = compile_scene(&scene, &self.fallback) else {
+            let Some((commands, path_mask)) = compile_scene_with_path_mask(&scene, &self.fallback)
+            else {
                 if let Some(prev) = in_flight.take() {
                     self.drain_slot(prev, &res, width, height, &mut scratch, consume_fn)?;
                 }
@@ -1962,6 +2203,7 @@ impl RasterizerBackend for WgpuBackend {
             // Submit this frame to GPU
             let (submission_index, rx) = self.submit_frame_to_slot(
                 &commands,
+                path_mask.as_ref(),
                 width,
                 height,
                 cfg.fps,
@@ -2372,6 +2614,12 @@ enum DrawCommand {
     },
 }
 
+struct GpuPathMask {
+    instance: GpuInstance,
+    vertices: Vec<GpuVertex>,
+    indices: Vec<u32>,
+}
+
 impl DrawCommand {
     fn instance(&self) -> &GpuInstance {
         match self {
@@ -2394,16 +2642,26 @@ impl DrawCommand {
     }
 }
 
+#[cfg(test)]
 fn compile_scene(scene: &Scene, font: &TinySkiaBackend) -> Option<Vec<DrawCommand>> {
+    compile_scene_with_path_mask(scene, font).map(|(commands, _)| commands)
+}
+
+fn compile_scene_with_path_mask(
+    scene: &Scene,
+    font: &TinySkiaBackend,
+) -> Option<(Vec<DrawCommand>, Option<GpuPathMask>)> {
     let mut commands = Vec::new();
+    let mut path_mask = None;
     compile_nodes(
         &scene.nodes,
         Transform::identity(),
         1.0,
         &mut commands,
         font,
+        &mut path_mask,
     )?;
-    Some(commands)
+    Some((commands, path_mask))
 }
 
 fn compile_nodes(
@@ -2412,6 +2670,7 @@ fn compile_nodes(
     opacity: f32,
     output: &mut Vec<DrawCommand>,
     font: &TinySkiaBackend,
+    path_mask: &mut Option<GpuPathMask>,
 ) -> Option<()> {
     for node in nodes {
         match node {
@@ -2638,7 +2897,86 @@ fn compile_nodes(
                     opacity * group_opacity,
                     output,
                     font,
+                    path_mask,
                 )?;
+            }
+
+            SceneNode::Layer {
+                opacity: layer_opacity,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: Some(crate::scene::ClipRegion::Path { d }),
+                mask: None,
+                mask_mode: crate::scene::MaskMode::Alpha,
+                filters,
+                shadow: None,
+                children,
+                ..
+            } if path_mask.is_none()
+                && gpu_layer_effects(filters, *layer_opacity).is_some()
+                && gpu_path_mask_from_svg(d, transform, Color::WHITE).is_some() =>
+            {
+                let (layer_opacity, brightness, grayscale, contrast, saturation) =
+                    gpu_layer_effects(filters, *layer_opacity).unwrap();
+                let start = output.len();
+                compile_nodes(
+                    children,
+                    transform,
+                    opacity * layer_opacity,
+                    output,
+                    font,
+                    path_mask,
+                )?;
+                *path_mask = gpu_path_mask_from_svg(d, transform, Color::WHITE);
+                for command in &mut output[start..] {
+                    let instance = command.instance_mut();
+                    instance.kind_data[3] = 1;
+                    instance.brightness[0] *= brightness;
+                    instance.grayscale[0] = 1.0 - (1.0 - instance.grayscale[0]) * (1.0 - grayscale);
+                    instance.contrast[0] *= contrast;
+                    instance.saturation[0] *= saturation;
+                }
+            }
+
+            SceneNode::Layer {
+                opacity: layer_opacity,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: None,
+                mask: Some(mask_nodes),
+                mask_mode,
+                filters,
+                shadow: None,
+                children,
+                ..
+            } if path_mask.is_none()
+                && mask_nodes.len() == 1
+                && matches!(mask_nodes.first(), Some(SceneNode::Path { .. }))
+                && (*mask_mode == crate::scene::MaskMode::Alpha
+                    || *mask_mode == crate::scene::MaskMode::Luminance)
+                && gpu_layer_effects(filters, *layer_opacity).is_some()
+                && gpu_path_mask_from_node(mask_nodes.first().unwrap(), transform, *mask_mode)
+                    .is_some() =>
+            {
+                let (layer_opacity, brightness, grayscale, contrast, saturation) =
+                    gpu_layer_effects(filters, *layer_opacity).unwrap();
+                let start = output.len();
+                compile_nodes(
+                    children,
+                    transform,
+                    opacity * layer_opacity,
+                    output,
+                    font,
+                    path_mask,
+                )?;
+                *path_mask =
+                    gpu_path_mask_from_node(mask_nodes.first().unwrap(), transform, *mask_mode);
+                for command in &mut output[start..] {
+                    let instance = command.instance_mut();
+                    instance.kind_data[3] = 1;
+                    instance.brightness[0] *= brightness;
+                    instance.grayscale[0] = 1.0 - (1.0 - instance.grayscale[0]) * (1.0 - grayscale);
+                    instance.contrast[0] *= contrast;
+                    instance.saturation[0] *= saturation;
+                }
             }
 
             // A layer with no offscreen-only effect is semantically just a
@@ -2680,7 +3018,14 @@ fn compile_nodes(
                     (None, None) => None,
                 };
                 let start = output.len();
-                compile_nodes(children, transform, opacity * layer_opacity, output, font)?;
+                compile_nodes(
+                    children,
+                    transform,
+                    opacity * layer_opacity,
+                    output,
+                    font,
+                    path_mask,
+                )?;
                 for command in &mut output[start..] {
                     let instance = command.instance_mut();
                     instance.brightness[0] *= brightness;
@@ -2710,7 +3055,14 @@ fn compile_nodes(
                     gpu_layer_effects(filters, *layer_opacity).unwrap();
                 let mask_info = gpu_clip_mask_info(clip, transform);
                 let start = output.len();
-                compile_nodes(children, transform, opacity * layer_opacity, output, font)?;
+                compile_nodes(
+                    children,
+                    transform,
+                    opacity * layer_opacity,
+                    output,
+                    font,
+                    path_mask,
+                )?;
                 for command in &mut output[start..] {
                     let instance = command.instance_mut();
                     instance.brightness[0] *= brightness;
@@ -3241,6 +3593,70 @@ fn mesh_command(
         .ok()?;
     Some(DrawCommand::Mesh {
         instance: GpuInstance::solid(color, opacity, transform),
+        vertices: geometry.vertices,
+        indices: geometry.indices,
+    })
+}
+
+fn gpu_path_mask_from_svg(d: &str, transform: Transform, color: Color) -> Option<GpuPathMask> {
+    let path = svgpath_to_tiny_skia(d)?;
+    gpu_path_mask_from_tiny_path(&path, transform, color)
+}
+
+fn gpu_path_mask_from_node(
+    node: &SceneNode,
+    transform: Transform,
+    mask_mode: crate::scene::MaskMode,
+) -> Option<GpuPathMask> {
+    let SceneNode::Path {
+        d,
+        fill: Some(fill),
+        stroke: None,
+        stroke_width,
+        opacity,
+    } = node
+    else {
+        return None;
+    };
+    if !stroke_width.is_finite() || *stroke_width != 0.0 || !opacity.is_finite() {
+        return None;
+    }
+    let color = match mask_mode {
+        crate::scene::MaskMode::Alpha => Color::rgba(255, 255, 255, fill.a),
+        crate::scene::MaskMode::Luminance => {
+            let luminance = (0.2126 * f32::from(fill.r)
+                + 0.7152 * f32::from(fill.g)
+                + 0.0722 * f32::from(fill.b))
+            .round()
+            .clamp(0.0, 255.0) as u8;
+            Color::rgba(luminance, luminance, luminance, fill.a)
+        }
+    };
+    gpu_path_mask_from_svg(d, transform, color).map(|mut mask| {
+        mask.instance.params[3] = *opacity;
+        mask
+    })
+}
+
+fn gpu_path_mask_from_tiny_path(
+    path: &TinyPath,
+    transform: Transform,
+    color: Color,
+) -> Option<GpuPathMask> {
+    let lyon_path = tiny_path_to_lyon(path)?;
+    let mut geometry: VertexBuffers<GpuVertex, u32> = VertexBuffers::new();
+    FillTessellator::new()
+        .tessellate_path(
+            &lyon_path,
+            &FillOptions::non_zero().with_tolerance(0.1),
+            &mut BuffersBuilder::new(&mut geometry, PositionConstructor),
+        )
+        .ok()?;
+    if geometry.vertices.is_empty() || geometry.indices.is_empty() || !transform.is_finite() {
+        return None;
+    }
+    Some(GpuPathMask {
+        instance: GpuInstance::solid(color, 1.0, transform),
         vertices: geometry.vertices,
         indices: geometry.indices,
     })
@@ -4452,6 +4868,90 @@ mod tests {
             .unwrap();
         assert_eq!(gpu_image.get_pixel(16, 16), cpu_image.get_pixel(16, 16));
         assert_eq!(gpu_image.get_pixel(1, 1), cpu_image.get_pixel(1, 1));
+    }
+
+    #[test]
+    fn gpu_path_clip_uses_intermediate_mask_texture() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping path clip GPU test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Layer {
+                opacity: 1.0,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: Some(crate::scene::ClipRegion::Path {
+                    d: "M 4 4 L 28 4 L 16 28 Z".into(),
+                }),
+                mask: None,
+                mask_mode: crate::scene::MaskMode::Alpha,
+                filters: Vec::new(),
+                shadow: None,
+                children: vec![SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 32.0,
+                    h: 32.0,
+                    fill: Color::rgb(255, 0, 0),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                }],
+            }],
+        };
+        assert!(gpu_supports_scene(&scene));
+        let config = FrameConfig::new(32, 32, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        for (x, y) in [(16, 10), (16, 20), (2, 2)] {
+            assert_eq!(gpu_image.get_pixel(x, y), cpu_image.get_pixel(x, y));
+        }
+    }
+
+    #[test]
+    fn gpu_path_alpha_mask_uses_intermediate_mask_texture() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping path alpha mask GPU test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Layer {
+                opacity: 1.0,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: None,
+                mask: Some(vec![SceneNode::Path {
+                    d: "M 4 4 L 28 4 L 16 28 Z".into(),
+                    fill: Some(Color::rgba(255, 255, 255, 128)),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    opacity: 1.0,
+                }]),
+                mask_mode: crate::scene::MaskMode::Alpha,
+                filters: Vec::new(),
+                shadow: None,
+                children: vec![SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 32.0,
+                    h: 32.0,
+                    fill: Color::rgb(255, 0, 0),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                }],
+            }],
+        };
+        assert!(gpu_supports_scene(&scene));
+        let config = FrameConfig::new(32, 32, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        for (x, y) in [(16, 10), (16, 20), (2, 2)] {
+            assert_eq!(gpu_image.get_pixel(x, y), cpu_image.get_pixel(x, y));
+        }
     }
 
     #[test]
