@@ -529,7 +529,20 @@ fn bench_gpu_streaming(c: &mut Criterion) {
                     frame_count,
                     &|_f| Ok(scene.clone()),
                     &|f| FrameConfig::new(1920, 1080, f, 30.0),
-                    &mut |_f, _rgba| Ok(()),
+                    &mut |_f, _rgba: &[u8]| Ok(()),
+                )
+                .unwrap();
+        })
+    });
+
+    group.bench_function("native_render_stream_gpu_10_frames_no_readback", |b| {
+        b.iter(|| {
+            backend
+                .render_stream_gpu(
+                    frame_count,
+                    &|_f| Ok(scene.clone()),
+                    &|f| FrameConfig::new(1920, 1080, f, 30.0),
+                    |_f, _view, _width, _height| {},
                 )
                 .unwrap();
         })
