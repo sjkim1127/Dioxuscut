@@ -9,6 +9,7 @@ use crate::web::{
 };
 use base64::Engine;
 use image::RgbaImage;
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -50,6 +51,7 @@ pub struct BrowserFrameBackend {
     transport_retries: usize,
     props: Mutex<serde_json::Value>,
     cache: FrameCacheManager,
+    timing_cache: Mutex<HashMap<FrameCacheKey, WebFrameTiming>>,
 }
 
 impl BrowserFrameBackend {
@@ -117,6 +119,7 @@ impl BrowserFrameBackend {
             transport_retries: browser_transport_retries_from_env(),
             props: Mutex::new(serde_json::json!({})),
             cache: FrameCacheManager::default(),
+            timing_cache: Mutex::new(HashMap::new()),
         })
     }
 }
@@ -331,7 +334,19 @@ impl BrowserFrameBackend {
     /// shares memory with a Tauri or Dioxus application.
     pub fn with_frame_cache_bytes(mut self, max_bytes: usize) -> Self {
         self.cache = FrameCacheManager::new(FrameCacheConfig::with_max_bytes(max_bytes));
+        self.clear_timing_cache();
         self
+    }
+
+    fn clear_timing_cache(&self) {
+        if let Ok(mut cache) = self.timing_cache.lock() {
+            cache.clear();
+        }
+    }
+
+    fn clear_frame_caches(&self) {
+        self.cache.clear();
+        self.clear_timing_cache();
     }
 
     /// Configure assets that browser compositions should preload before frames.
@@ -340,7 +355,7 @@ impl BrowserFrameBackend {
             .assets
             .lock()
             .map_err(|_| RasterError::Init("browser assets lock poisoned".into()))? = assets;
-        self.cache.clear();
+        self.clear_frame_caches();
         Ok(())
     }
 
@@ -350,7 +365,7 @@ impl BrowserFrameBackend {
             .timeline
             .lock()
             .map_err(|_| RasterError::Init("browser timeline lock poisoned".into()))? = timeline;
-        self.cache.clear();
+        self.clear_frame_caches();
         Ok(())
     }
 
@@ -366,7 +381,7 @@ impl BrowserFrameBackend {
             .lock()
             .map_err(|_| RasterError::Init("browser composition lock poisoned".into()))? =
             Some(composition.into());
-        self.cache.clear();
+        self.clear_frame_caches();
         Ok(())
     }
 
@@ -375,13 +390,13 @@ impl BrowserFrameBackend {
             .props
             .lock()
             .map_err(|_| RasterError::Init("browser worker props lock poisoned".into()))? = props;
-        self.cache.clear();
+        self.clear_frame_caches();
         Ok(())
     }
 
     /// Clear all decoded frames retained for interactive preview reuse.
     pub fn clear_frame_cache(&self) {
-        self.cache.clear();
+        self.clear_frame_caches();
     }
 
     /// Return cache counters for host UIs and performance telemetry.
@@ -422,7 +437,12 @@ impl BrowserFrameBackend {
             &cache_inputs,
         );
         if let Some(image) = self.cache.get(&cache_key) {
-            return Ok(((*image).clone(), None));
+            let timing = self
+                .timing_cache
+                .lock()
+                .ok()
+                .and_then(|cache| cache.get(&cache_key).copied());
+            return Ok(((*image).clone(), timing));
         }
         let encoded =
             serde_json::to_string(&WebWorkerMessage::Render(request.clone())).map_err(|e| {
@@ -637,14 +657,24 @@ impl BrowserFrameBackend {
                 reason: format!("invalid worker response: {error}"),
             }),
         };
+        let timing = video_timestamp_us
+            .and_then(|timestamp_us| WebFrameTiming::from_timestamp(timestamp_us, request.fps));
         if let Ok(ref image) = result {
-            self.cache.insert(cache_key, Arc::new(image.clone()));
+            self.cache
+                .insert(cache_key.clone(), Arc::new(image.clone()));
+            if let Some(timing) = timing {
+                if let Ok(mut cache) = self.timing_cache.lock() {
+                    // Keep metadata bounded even if the image cache evicts an
+                    // entry internally. A later image hit without metadata is
+                    // reported as `None`, never as stale timing.
+                    if cache.len() >= 4096 {
+                        cache.clear();
+                    }
+                    cache.insert(cache_key, timing);
+                }
+            }
         }
-        result.map(|image| {
-            let timing = video_timestamp_us
-                .and_then(|timestamp_us| WebFrameTiming::from_timestamp(timestamp_us, request.fps));
-            (image, timing)
-        })
+        result.map(|image| (image, timing))
     }
 }
 impl Drop for BrowserFrameBackend {
@@ -787,22 +817,21 @@ mod tests {
         )
         .unwrap();
         let backend = BrowserFrameBackend::new("/bin/sh", &script, "http://unused").unwrap();
-        let (image, timing) = backend
-            .render_web_frame_with_timing(&WebFrameRequest {
-                composition: None,
-                frame: 3,
-                fps: 30.0,
-                width: 1,
-                height: 1,
-                props: serde_json::json!({}),
-                assets: vec![],
-                timeline: vec![],
-                image_format: None,
-                jpeg_quality: None,
-                transparent: false,
-                transport: None,
-            })
-            .unwrap();
+        let request = WebFrameRequest {
+            composition: None,
+            frame: 3,
+            fps: 30.0,
+            width: 1,
+            height: 1,
+            props: serde_json::json!({}),
+            assets: vec![],
+            timeline: vec![],
+            image_format: None,
+            jpeg_quality: None,
+            transparent: false,
+            transport: None,
+        };
+        let (image, timing) = backend.render_web_frame_with_timing(&request).unwrap();
         assert_eq!(image.as_raw(), &[1, 2, 3, 4]);
         assert_eq!(
             timing,
@@ -811,6 +840,9 @@ mod tests {
                 timeline_frame: 37.5,
             })
         );
+        let (cached_image, cached_timing) = backend.render_web_frame_with_timing(&request).unwrap();
+        assert_eq!(cached_image.as_raw(), image.as_raw());
+        assert_eq!(cached_timing, timing);
         drop(backend);
         let _ = fs::remove_dir_all(root);
     }
