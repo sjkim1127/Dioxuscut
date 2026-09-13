@@ -170,6 +170,7 @@ struct InstanceData {
     color: vec4<f32>,
     color2: vec4<f32>,
     brightness: vec4<f32>,
+    grayscale: vec4<f32>,
     // corner radius, stroke width, angle, inherited opacity
     params: vec4<f32>,
     // x' = dot(transform_x.xyz, vec3(x, y, 1))
@@ -272,6 +273,31 @@ fn gradient_color(instance_idx: u32, t: f32) -> vec4<f32> {
     return previous_color;
 }
 
+fn linear_to_srgb(channel: f32) -> f32 {
+    if channel <= 0.0031308 {
+        return channel * 12.92;
+    }
+    return 1.055 * pow(channel, 1.0 / 2.4) - 0.055;
+}
+
+fn apply_color_filters(color: vec4<f32>, instance: InstanceData) -> vec4<f32> {
+    var rgb = color.rgb * instance.brightness.x;
+    if instance.grayscale.x > 0.0 {
+        var srgb = rgb;
+        if instance.kind_data.x != 5u {
+            srgb = vec3<f32>(
+                linear_to_srgb(clamp(rgb.r, 0.0, 1.0)),
+                linear_to_srgb(clamp(rgb.g, 0.0, 1.0)),
+                linear_to_srgb(clamp(rgb.b, 0.0, 1.0)),
+            );
+        }
+        let gray = dot(srgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+        srgb = mix(srgb, vec3<f32>(gray), instance.grayscale.x);
+        rgb = srgb;
+    }
+    return vec4<f32>(rgb, color.a);
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let instance = instances[in.instance_index];
@@ -330,14 +356,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         col = gradient_color(in.instance_index, t);
     }
 
-    col = vec4<f32>(col.rgb * instance.brightness.x, col.a);
+    col = apply_color_filters(col, instance);
     return vec4<f32>(col.rgb, col.a * instance.params.w * coverage);
 }
 
 @fragment
 fn fs_solid(in: VertexOutput) -> @location(0) vec4<f32> {
     let instance = instances[in.instance_index];
-    return vec4<f32>(instance.color.rgb * instance.brightness.x, instance.color.a * instance.params.w);
+    let color = apply_color_filters(instance.color, instance);
+    return vec4<f32>(color.rgb, color.a * instance.params.w);
 }
 
 @fragment
@@ -347,7 +374,8 @@ fn fs_image(in: VertexOutput) -> @location(0) vec4<f32> {
     let local = (in.local_position - bounds.xy) / max(bounds.zw, vec2<f32>(0.000001));
     let uv = mix(instance.params.xy, instance.params.zw, clamp(local, vec2<f32>(0.0), vec2<f32>(1.0)));
     let sampled = textureSample(image_texture, image_sampler, uv);
-    return vec4<f32>(sampled.rgb * instance.brightness.x, sampled.a * instance.color.a * instance.params.w);
+    let color = apply_color_filters(vec4<f32>(sampled.rgb, instance.color.a), instance);
+    return vec4<f32>(color.rgb, sampled.a * instance.color.a * instance.params.w);
 }
 
 @fragment
@@ -357,7 +385,8 @@ fn fs_text(in: VertexOutput) -> @location(0) vec4<f32> {
     let local = (in.local_position - bounds.xy) / max(bounds.zw, vec2<f32>(0.000001));
     let uv = mix(instance.params.xy, instance.params.zw, clamp(local, vec2<f32>(0.0), vec2<f32>(1.0)));
     let coverage = textureSample(image_texture, image_sampler, uv).r;
-    return vec4<f32>(instance.color.rgb * instance.brightness.x, coverage * instance.color.a * instance.params.w);
+    let color = apply_color_filters(instance.color, instance);
+    return vec4<f32>(color.rgb, coverage * color.a * instance.params.w);
 }
 "#;
 
@@ -2135,6 +2164,7 @@ struct GpuInstance {
     color: [f32; 4],
     color2: [f32; 4],
     brightness: [f32; 4],
+    grayscale: [f32; 4],
     params: [f32; 4],
     transform_x: [f32; 4],
     transform_y: [f32; 4],
@@ -2152,6 +2182,7 @@ impl GpuInstance {
             color: color_to_f32(color),
             color2: [0.0; 4],
             brightness: [1.0, 0.0, 0.0, 0.0],
+            grayscale: [0.0, 0.0, 0.0, 0.0],
             params: [0.0, 0.0, 0.0, opacity],
             transform_x,
             transform_y,
@@ -2442,7 +2473,7 @@ fn compile_nodes(
                 }
                 let rendered = font.rasterize_text(content, *font_size, font_sources)?;
                 let mut instance = GpuInstance::solid(*color, opacity, transform);
-                instance.kind_data[0] = 5;
+                instance.kind_data[0] = 6;
                 instance.bounds = [
                     *x,
                     *y - rendered.baseline as f32,
@@ -2487,12 +2518,14 @@ fn compile_nodes(
                 children,
                 ..
             } if gpu_layer_effects(filters, *layer_opacity).is_some() => {
-                let (layer_opacity, brightness) =
+                let (layer_opacity, brightness, grayscale) =
                     gpu_layer_effects(filters, *layer_opacity).unwrap();
                 let start = output.len();
                 compile_nodes(children, transform, opacity * layer_opacity, output, font)?;
                 for command in &mut output[start..] {
-                    command.instance_mut().brightness[0] *= brightness;
+                    let instance = command.instance_mut();
+                    instance.brightness[0] *= brightness;
+                    instance.grayscale[0] = 1.0 - (1.0 - instance.grayscale[0]) * (1.0 - grayscale);
                 }
             }
 
@@ -2511,22 +2544,27 @@ fn compile_nodes(
 fn gpu_layer_effects(
     filters: &[crate::scene::SceneFilter],
     layer_opacity: f32,
-) -> Option<(f32, f32)> {
+) -> Option<(f32, f32, f32)> {
     if !layer_opacity.is_finite() {
         return None;
     }
     filters.iter().try_fold(
-        (layer_opacity, 1.0),
-        |(opacity, brightness), filter| match filter {
+        (layer_opacity, 1.0, 0.0),
+        |(opacity, brightness, grayscale), filter| match filter {
             crate::scene::SceneFilter::Opacity { amount }
                 if amount.is_finite() && (0.0..=1.0).contains(amount) =>
             {
-                Some((opacity * amount, brightness))
+                Some((opacity * amount, brightness, grayscale))
             }
             crate::scene::SceneFilter::Brightness { amount }
                 if amount.is_finite() && (0.0..=10.0).contains(amount) =>
             {
-                Some((opacity, brightness * amount))
+                Some((opacity, brightness * amount, grayscale))
+            }
+            crate::scene::SceneFilter::Grayscale { amount }
+                if amount.is_finite() && (0.0..=1.0).contains(amount) =>
+            {
+                Some((opacity, brightness, grayscale + amount - grayscale * amount))
             }
             _ => None,
         },
@@ -3372,6 +3410,49 @@ mod tests {
         assert!(
             mean_error < 2.0,
             "GPU/CPU brightness mean error was {mean_error}"
+        );
+    }
+
+    #[test]
+    fn gpu_grayscale_filter_matches_cpu_for_normal_layer() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping grayscale GPU test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Layer {
+                opacity: 1.0,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: None,
+                mask: None,
+                mask_mode: crate::scene::MaskMode::Alpha,
+                filters: vec![crate::scene::SceneFilter::Grayscale { amount: 1.0 }],
+                shadow: None,
+                children: vec![SceneNode::Rect {
+                    x: 8.0,
+                    y: 8.0,
+                    w: 16.0,
+                    h: 16.0,
+                    fill: Color::rgb(220, 40, 80),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                }],
+            }],
+        };
+        assert!(gpu_supports_scene(&scene));
+        let config = FrameConfig::new(32, 32, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        let gpu_center = gpu_image.get_pixel(16, 16);
+        let cpu_center = cpu_image.get_pixel(16, 16);
+        assert_eq!(gpu_center[0], gpu_center[1]);
+        assert_eq!(gpu_center[1], gpu_center[2]);
+        assert!(
+            (i16::from(gpu_center[0]) - i16::from(cpu_center[0])).abs() <= 2,
+            "GPU/CPU grayscale center mismatch: {gpu_center:?} vs {cpu_center:?}"
         );
     }
 
