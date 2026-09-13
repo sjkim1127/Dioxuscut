@@ -339,8 +339,12 @@ export async function parseMedia({
   const videoTrack = container?.tracks?.find((track) => track.type === 'video');
   const audioTrack = container?.tracks?.find((track) => track.type === 'audio');
   const fps = videoTrack?.fps ?? null;
-  const videoCodec = videoTrack?.codecConfig?.type ?? null;
-  const audioCodec = audioTrack?.codecConfig?.type ?? null;
+  const videoCodec = videoTrack?.codecConfig
+    ? makeIsoBmffWebCodecsConfig(videoTrack).codec
+    : null;
+  const audioCodec = audioTrack?.codecConfig
+    ? makeIsoBmffWebCodecsConfig(audioTrack).codec
+    : null;
   await onDimensions?.(dimensions);
   await onDurationInSeconds?.(durationInSeconds);
   if (fps !== null) await onFps?.(fps);
