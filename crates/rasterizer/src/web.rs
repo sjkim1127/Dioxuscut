@@ -55,6 +55,21 @@ pub struct WebVideoFrame {
     pub rgba_base64: String,
 }
 
+impl WebVideoFrame {
+    /// Return the required tightly packed RGBA8 payload size, or `None` when
+    /// the dimensions overflow a host `usize`.
+    pub fn expected_rgba_bytes(&self) -> Option<usize> {
+        usize::try_from(self.width)
+            .ok()
+            .and_then(|width| {
+                usize::try_from(self.height)
+                    .ok()
+                    .and_then(|height| width.checked_mul(height))
+            })
+            .and_then(|pixels| pixels.checked_mul(4))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WebFrameResponse {
     pub frame: u32,
@@ -153,5 +168,23 @@ mod tests {
         let parsed: WebWorkerMessage = serde_json::from_str(message).unwrap();
         assert!(matches!(parsed, WebWorkerMessage::Frame(response)
             if response.video_frame.as_ref().is_some_and(|frame| frame.timestamp_us == 1_250_000)));
+    }
+
+    #[test]
+    fn webcodecs_rgba_size_is_checked_with_overflow_safety() {
+        let frame = WebVideoFrame {
+            width: 16,
+            height: 8,
+            timestamp_us: 0,
+            rgba_base64: String::new(),
+        };
+        assert_eq!(frame.expected_rgba_bytes(), Some(512));
+        let overflowing = WebVideoFrame {
+            width: u32::MAX,
+            height: u32::MAX,
+            timestamp_us: 0,
+            rgba_base64: String::new(),
+        };
+        assert_eq!(overflowing.expected_rgba_bytes(), None);
     }
 }

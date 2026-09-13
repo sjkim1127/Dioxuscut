@@ -529,23 +529,18 @@ impl BrowserFrameBackend {
                     }
                     Ok(image.into_rgba8())
                 } else if let Some(video_frame) = video_frame {
+                    let expected =
+                        video_frame
+                            .expected_rgba_bytes()
+                            .ok_or_else(|| RasterError::Frame {
+                                frame,
+                                reason: "video frame dimensions overflow RGBA size".into(),
+                            })?;
                     let bytes = base64::engine::general_purpose::STANDARD
                         .decode(video_frame.rgba_base64)
                         .map_err(|e| RasterError::Frame {
                             frame,
                             reason: e.to_string(),
-                        })?;
-                    let expected = usize::try_from(video_frame.width)
-                        .ok()
-                        .and_then(|width| {
-                            usize::try_from(video_frame.height)
-                                .ok()
-                                .and_then(|height| width.checked_mul(height))
-                        })
-                        .and_then(|pixels| pixels.checked_mul(4))
-                        .ok_or_else(|| RasterError::Frame {
-                            frame,
-                            reason: "video frame dimensions overflow RGBA size".into(),
                         })?;
                     if video_frame.width != width
                         || video_frame.height != height
