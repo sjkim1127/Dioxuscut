@@ -1621,6 +1621,50 @@ mod tests {
     }
 
     #[test]
+    fn gpu_opacity_layer_preserves_alpha_within_tolerance() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping layer parity test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Layer {
+                opacity: 0.5,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: None,
+                mask: None,
+                mask_mode: crate::scene::MaskMode::Alpha,
+                filters: vec![crate::scene::SceneFilter::Opacity { amount: 0.5 }],
+                shadow: None,
+                children: vec![SceneNode::Rect {
+                    x: 8.0,
+                    y: 8.0,
+                    w: 32.0,
+                    h: 24.0,
+                    fill: Color::rgb(240, 120, 40),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                }],
+            }],
+        };
+        let config = FrameConfig::new(64, 64, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::headless()
+            .render_frame(&scene, &config)
+            .unwrap();
+        let alpha_error = gpu_image
+            .pixels()
+            .zip(cpu_image.pixels())
+            .map(|(gpu, cpu)| (i16::from(gpu[3]) - i16::from(cpu[3])).unsigned_abs() as u64)
+            .sum::<u64>();
+        let mean_alpha_error = alpha_error as f64 / (config.width * config.height) as f64;
+        assert!(
+            mean_alpha_error < 8.0,
+            "CPU/GPU layer mean alpha error was {mean_alpha_error}"
+        );
+    }
+
+    #[test]
     fn gpu_render_stream_pipelined_matches_render_frame() {
         let Ok(gpu) = WgpuBackend::new() else {
             println!("GPU backend unavailable; skipping render_stream test");
