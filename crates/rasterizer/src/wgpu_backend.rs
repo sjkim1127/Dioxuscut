@@ -2430,6 +2430,44 @@ mod tests {
     }
 
     #[test]
+    fn gpu_image_transform_and_opacity_match_cpu() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping transformed image parity test");
+            return;
+        };
+        let path = std::env::temp_dir().join(format!("dioxuscut-image-transform-{}.png", std::process::id()));
+        let mut source = image::RgbaImage::new(2, 2);
+        for pixel in source.pixels_mut() {
+            *pixel = image::Rgba([255, 32, 64, 255]);
+        }
+        source.save(&path).unwrap();
+        let scene = Scene {
+            nodes: vec![
+                SceneNode::Rect {
+                    x: 0.0, y: 0.0, w: 64.0, h: 64.0,
+                    fill: Color::rgb(10, 20, 30), stroke: None, stroke_width: 0.0, corner_radius: 0.0,
+                },
+                SceneNode::Group {
+                    transform: crate::scene::Transform2D::rotate(17.0).with_translate(12.0, 8.0),
+                    opacity: 0.55,
+                    children: vec![SceneNode::Image {
+                        src: path.to_string_lossy().into_owned(), x: 12.0, y: 12.0, w: 32.0, h: 24.0,
+                        fit: ImageFit::Contain, opacity: 0.8,
+                    }],
+                },
+            ],
+        };
+        let config = FrameConfig::new(64, 64, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new().render_frame(&scene, &config).unwrap();
+        let mean_error: f64 = gpu_image.pixels().zip(cpu_image.pixels())
+            .map(|(a, b)| (0..4).map(|channel| (i16::from(a[channel]) - i16::from(b[channel])).unsigned_abs() as u64).sum::<u64>())
+            .sum::<u64>() as f64 / (64 * 64 * 4) as f64;
+        assert!(mean_error < 18.0, "GPU/CPU transformed image mean error was {mean_error}");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn gpu_text_uses_gpu_texture_path() {
         let Ok(gpu) = WgpuBackend::new() else {
             println!("GPU backend unavailable; skipping text GPU test");
