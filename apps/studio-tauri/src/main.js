@@ -335,10 +335,7 @@ export async function parseMedia({
   const durationInSeconds = video?.durationInSeconds ?? audioDuration ?? container?.durationInSeconds ?? 0;
   const videoTrack = container?.tracks?.find((track) => track.type === 'video');
   const audioTrack = container?.tracks?.find((track) => track.type === 'audio');
-  const videoSamples = videoTrack?.sampleTables?.sampleTimestamps ?? [];
-  const fps = videoSamples.length > 1 && videoSamples[1].timestamp > videoSamples[0].timestamp
-    ? 1 / (videoSamples[1].timestamp - videoSamples[0].timestamp)
-    : null;
+  const fps = videoTrack?.fps ?? null;
   const videoCodec = videoTrack?.codecConfig?.type ?? null;
   const audioCodec = audioTrack?.codecConfig?.type ?? null;
   await onDimensions?.(dimensions);
@@ -697,6 +694,9 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
       }
       const compositionMap = new Map(compositionTimestamps.map((sample) => [sample.sampleIndex, sample.offset]));
       const timedSampleMap = new Map(sampleTimestamps.map((sample) => [sample.sampleIndex, sample]));
+      const firstDelta = sampleTimestamps.length > 1
+        ? sampleTimestamps[1].timestamp - sampleTimestamps[0].timestamp
+        : 0;
       const timedRanges = sampleRanges.map((sample) => ({
         ...sample,
         timestamp: timedSampleMap.get(sample.sampleIndex)?.timestamp ?? null,
@@ -711,6 +711,7 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
         handler,
         timescale: trackTimescale,
         durationInSeconds: trackTimescale ? Number(trackDuration) / trackTimescale : null,
+        fps: firstDelta > 0 ? 1 / firstDelta : null,
         sampleTables: {
           timeToSample,
           compositionOffsets,
