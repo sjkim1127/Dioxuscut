@@ -66,7 +66,7 @@ try {
       onFps: (value) => parseEvents.push(['fps', Math.round(value)]),
       onVideoTrack: (value) => parseEvents.push(['videoTrack', value.width]),
       onVideoCodec: (value) => parseEvents.push(['videoCodec', value]),
-      onKeyframes: (value) => parseEvents.push(['keyframes', value[0]]),
+      onKeyframes: (value) => parseEvents.push(['keyframes', value[0]?.positionInBytes, value[0]?.trackId]),
       onContainer: (value) => parseEvents.push(['container', value]),
       onTracks: (value) => parseEvents.push(['tracks', value.length]),
     });
@@ -74,7 +74,7 @@ try {
       || !parseEvents.some(([name, value]) => name === 'fps' && value === 60)
       || !parseEvents.some(([name, value]) => name === 'videoTrack' && value === 1920)
       || !parseEvents.some(([name, value]) => name === 'videoCodec' && value.startsWith('avc1.'))
-      || !parseEvents.some(([name, value]) => name === 'keyframes' && value === 1)) {
+      || !parseEvents.some(([name, value, trackId]) => name === 'keyframes' && value === 3012 && trackId === 1)) {
       throw new Error(`parseMedia object fields selection failed: ${JSON.stringify({ partialMetadata, parseEvents })}`);
     }
     const ranged = await window.dioxuscut.readMediaRange('/range.bin', 2, 6);

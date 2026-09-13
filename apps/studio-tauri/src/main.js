@@ -364,8 +364,24 @@ export async function parseMedia({
     });
   }
   if (audioTrack) await onAudioTrack?.({ ...audioTrack, codec: audioCodec });
-  if (videoTrack?.sampleTables?.keyframes) {
-    await onKeyframes?.(videoTrack.sampleTables.keyframes);
+  if (videoTrack?.sampleTables) {
+    const tables = videoTrack.sampleTables;
+    const keyframeNumbers = tables.keyframes?.length
+      ? tables.keyframes
+      : (tables.sampleRanges ?? [])
+        .filter((sample) => sample.keyframe)
+        .map((sample) => sample.sampleIndex + 1);
+    const keyframes = keyframeNumbers
+      .map((sampleNumber) => tables.sampleRanges?.[sampleNumber - 1])
+      .filter(Boolean)
+      .map((sample) => ({
+        positionInBytes: sample.offset,
+        sizeInBytes: sample.size,
+        presentationTimeInSeconds: sample.presentationTimestamp ?? sample.timestamp ?? 0,
+        decodingTimeInSeconds: sample.timestamp ?? 0,
+        trackId: (container?.tracks?.indexOf(videoTrack) ?? 0) + 1,
+      }));
+    await onKeyframes?.(keyframes);
   }
   await onTracks?.(container?.tracks ?? []);
   await onParseProgress?.({ bytes: 0, percentage: 1, totalBytes: null });
