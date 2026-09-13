@@ -1239,7 +1239,15 @@ impl WgpuBackend {
 
     fn gpu_image(&self, src: &str) -> Result<Arc<GpuImageResource>, RasterError> {
         let decoded = self.image_cache.load(src)?;
-        self.gpu_pixels(src, &decoded)
+        // ImageCache canonicalizes local paths before indexing them. Keep the
+        // GPU cache on the same identity so alternate spellings of one asset
+        // (relative, absolute, or file://) do not trigger duplicate uploads.
+        let key = if src.trim_start().starts_with("data:") {
+            src.trim().to_string()
+        } else {
+            canonical_local_path(src)?.display().to_string()
+        };
+        self.gpu_pixels(&key, &decoded)
     }
 
     fn gpu_text_atlas(
@@ -4135,6 +4143,11 @@ mod tests {
         let config = FrameConfig::new(32, 32, 0, 30.0);
         let gpu_image = gpu.render_frame(&scene, &config).unwrap();
         let _second_gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let mut equivalent_source_scene = scene.clone();
+        if let SceneNode::Image { src, .. } = &mut equivalent_source_scene.nodes[1] {
+            *src = format!("  {src}  ");
+        }
+        let _third_gpu_image = gpu.render_frame(&equivalent_source_scene, &config).unwrap();
         let cpu_image = TinySkiaBackend::headless()
             .render_frame(&scene, &config)
             .unwrap();
