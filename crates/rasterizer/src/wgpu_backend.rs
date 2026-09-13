@@ -519,6 +519,8 @@ struct InFlight {
     rx: std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
 }
 
+type GpuResourcePool = Mutex<HashMap<(u32, u32), std::sync::Arc<Mutex<GpuFrameResources>>>>;
+
 // ────────────────────────────────────────────────────────────────────────────
 // Backend
 // ────────────────────────────────────────────────────────────────────────────
@@ -534,7 +536,7 @@ struct InFlight {
 pub struct WgpuBackend {
     ctx: GpuContext,
     /// Per-resolution GPU resource pool.  Key = `(width, height)`.
-    frame_resources: Mutex<HashMap<(u32, u32), std::sync::Arc<Mutex<GpuFrameResources>>>>,
+    frame_resources: GpuResourcePool,
     fallback: TinySkiaBackend,
 }
 
