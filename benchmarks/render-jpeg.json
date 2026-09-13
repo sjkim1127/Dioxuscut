@@ -14,7 +14,7 @@
   "arch": "arm64",
   "cpu": "Apple M4 Pro",
   "node": "v24.11.1",
-  "chrome": "Google Chrome 152.0.7977.83",
+  "chrome": "Google Chrome 152.0.7977.84",
   "validation": {
     "pixel_checks": [
       {
@@ -84,97 +84,97 @@
     "decoded_ssim": {
       "normalized_to": "limited-range yuv420p",
       "frames": 180,
-      "min": 0.997984,
-      "mean": 0.9981656666666663
+      "min": 0.997749,
+      "mean": 0.9981287722222215
     }
   },
   "ffmpeg_shared": "ffmpeg version 8.1.1 Copyright (c) 2000-2026 the FFmpeg developers",
-  "bundle_ms": 445.77033400000005,
-  "browser_ms": 617.999084,
+  "bundle_ms": 461.1002920000001,
+  "browser_ms": 367.75275,
   "warmup": {
     "dioxuscut": {
-      "process_ms": 528.44875,
-      "render_ms": 524.903334
+      "process_ms": 562.202708,
+      "render_ms": 558.797666
     },
-    "remotion_ms": 10132.815958
+    "remotion_ms": 10182.36225
   },
   "samples_ms": {
     "dioxuscut": [
-      247.96408299999894,
-      267.4004169999971,
-      231.36670800000138
+      549.7752500000006,
+      554.7067499999976,
+      561.0472919999957
     ],
     "remotion": [
-      10328.633791999999,
-      10100.421792000001,
-      10147.893749999996
+      10122.507292000002,
+      10413.086125000002,
+      10199.770875000002
     ]
   },
   "native_render_ms": [
-    244.097125,
-    263.8165,
-    228.16883299999998
+    546.291333,
+    551.369209,
+    557.775625
   ],
   "host_load_before_samples": [
     {
       "engine": "dioxuscut",
       "run": 0,
       "load": [
-        5.92724609375,
-        11.16455078125,
-        11.369140625
+        8.4921875,
+        7.693359375,
+        6.81689453125
       ]
     },
     {
       "engine": "remotion",
       "run": 0,
       "load": [
-        5.92724609375,
-        11.16455078125,
-        11.369140625
+        8.4921875,
+        7.693359375,
+        6.81689453125
       ]
     },
     {
       "engine": "remotion",
       "run": 1,
       "load": [
-        7.673828125,
-        11.26171875,
-        11.39794921875
+        7.955078125,
+        7.60400390625,
+        6.79541015625
       ]
     },
     {
       "engine": "dioxuscut",
       "run": 1,
       "load": [
-        7.42236328125,
-        11.08837890625,
-        11.33447265625
+        7.3466796875,
+        7.48486328125,
+        6.76220703125
       ]
     },
     {
       "engine": "dioxuscut",
       "run": 2,
       "load": [
-        7.42236328125,
-        11.08837890625,
-        11.33447265625
+        7.3466796875,
+        7.48486328125,
+        6.76220703125
       ]
     },
     {
       "engine": "remotion",
       "run": 2,
       "load": [
-        7.42236328125,
-        11.08837890625,
-        11.33447265625
+        7.3466796875,
+        7.48486328125,
+        6.76220703125
       ]
     }
   ],
   "median_ms": {
-    "dioxuscut": 247.96408299999894,
-    "remotion": 10147.893749999996
+    "dioxuscut": 554.7067499999976,
+    "remotion": 10199.770875000002
   },
-  "speedup": 40.92485341919474,
+  "speedup": 18.3876811937119,
   "scope": "warm render plus encoding; reused Chrome; native includes process startup; bundling/browser startup excluded; PNG pixels and all decoded MP4 frames verified"
 }
