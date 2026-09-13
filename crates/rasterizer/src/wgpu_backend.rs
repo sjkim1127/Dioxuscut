@@ -1882,7 +1882,7 @@ fn gpu_layer_opacity(filters: &[crate::scene::SceneFilter], layer_opacity: f32) 
 
 #[cfg(test)]
 fn gpu_supports_scene(scene: &Scene) -> bool {
-    compile_scene(scene, &TinySkiaBackend::headless()).is_some()
+    compile_scene(scene, &TinySkiaBackend::new()).is_some()
 }
 
 fn gradient_instance(
@@ -2140,7 +2140,6 @@ mod support_tests {
                 ],
             }],
         };
-
         assert!(gpu_supports_scene(&scene));
         let commands = compile_scene(&scene, &TinySkiaBackend::headless()).unwrap();
         assert_eq!(
@@ -2379,13 +2378,24 @@ mod tests {
                 font_sources: Vec::new(),
             }],
         };
+        assert!(gpu_supports_scene(&scene));
         let image = gpu.render_frame(&scene, &FrameConfig::new(96, 32, 0, 30.0)).unwrap();
+        let cpu = TinySkiaBackend::new()
+            .render_frame(&scene, &FrameConfig::new(96, 32, 0, 30.0))
+            .unwrap();
         let generation = gpu.text_atlas_cache_generation();
         let second = gpu.render_frame(&scene, &FrameConfig::new(96, 32, 1, 30.0)).unwrap();
         assert_eq!(gpu.render_stats().gpu_frames, 2);
         assert!(image.pixels().any(|pixel| pixel[3] > 0));
         assert!(second.pixels().any(|pixel| pixel[3] > 0));
         assert_eq!(generation, gpu.text_atlas_cache_generation());
+        let alpha_error: u64 = image
+            .pixels()
+            .zip(cpu.pixels())
+            .map(|(gpu, cpu)| (i16::from(gpu[3]) - i16::from(cpu[3])).unsigned_abs() as u64)
+            .sum();
+        let mean_alpha_error = alpha_error as f64 / (96 * 32) as f64;
+        assert!(mean_alpha_error < 12.0, "GPU/CPU text alpha mean error was {mean_alpha_error}");
     }
 
     #[test]
