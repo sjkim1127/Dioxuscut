@@ -1637,15 +1637,18 @@ mod tests {
                 corner_radius: 0.0,
             }],
         };
+        // Images are intentionally used here instead of text: this is the
+        // dominant media fallback boundary that the upcoming GPU texture
+        // path must eliminate. Keep the asset inline so the test is hermetic.
         let fallback_scene = Scene {
-            nodes: vec![SceneNode::Text {
-                x: 2.0,
-                y: 16.0,
-                content: "fallback".into(),
-                font_size: 12.0,
-                color: Color::WHITE,
-                font_weight: 400,
-                font_sources: Vec::new(),
+            nodes: vec![SceneNode::Image {
+                src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=".into(),
+                x: 0.0,
+                y: 0.0,
+                w: 64.0,
+                h: 64.0,
+                fit: crate::scene::ImageFit::Fill,
+                opacity: 1.0,
             }],
         };
         backend.render_frame(&gpu_scene, &config).unwrap();
