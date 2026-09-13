@@ -707,6 +707,25 @@ export function createIsoBmffEncodedChunk(sample, type = 'video') {
   });
 }
 
+export function makeIsoBmffWebCodecsConfig(track) {
+  const config = track?.codecConfig;
+  if (!config?.data || !(config.data instanceof Uint8Array)) {
+    throw new TypeError('makeIsoBmffWebCodecsConfig expects a parsed track codecConfig');
+  }
+  if (config.type === 'avcC' && config.data.length >= 4) {
+    const hex = (value) => value.toString(16).padStart(2, '0');
+    return {
+      codec: `avc1.${hex(config.data[1])}${hex(config.data[2])}${hex(config.data[3])}`,
+      description: config.data,
+      format: 'avc',
+    };
+  }
+  if (config.type === 'hvcC') return { codec: 'hvc1.1.6.L93.B0', description: config.data, format: 'hevc' };
+  if (config.type === 'av1C') return { codec: 'av01.0.08M.08', description: config.data, format: 'av1' };
+  if (config.type === 'esds') return { codec: 'mp4a.40.2', description: config.data, format: 'aac' };
+  throw new Error(`unsupported ISO-BMFF codec configuration: ${config.type}`);
+}
+
 // Decode a bounded sequence of ISO-BMFF samples with Chromium WebCodecs.
 // `codecConfig` is caller-supplied because avcC/hvcC normalization and codec
 // string selection depend on the sample entry; returned VideoFrames belong to
@@ -1562,6 +1581,7 @@ window.dioxuscut = {
   parseIsoBmffMovieHeader,
   readIsoBmffSample,
   createIsoBmffEncodedChunk,
+  makeIsoBmffWebCodecsConfig,
   decodeIsoBmffVideo,
   decodeIsoBmffAudio,
   readMediaRange,

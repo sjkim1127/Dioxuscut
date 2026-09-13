@@ -305,6 +305,9 @@ decoder can share the same sample scheduler.
 `createIsoBmffEncodedChunk(sample, 'video'|'audio')` provides the final
 WebCodecs `EncodedVideoChunk`/`EncodedAudioChunk` bridge when those globals are
 available.
+`makeIsoBmffWebCodecsConfig(track)` derives a WebCodecs codec string and
+description from the parsed configuration (including H.264 `avc1` profile
+bytes).
 `decodeIsoBmffVideo()` supplies a bounded `VideoDecoder` lifecycle over those
 samples; codec string and optional description remain explicit at the call
 site so the same parser can serve different WebCodecs implementations.
