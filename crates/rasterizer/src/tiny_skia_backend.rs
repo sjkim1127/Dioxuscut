@@ -104,6 +104,16 @@ impl TinySkiaBackend {
     ) -> Option<crate::font::RenderedText> {
         self.font.rasterize(content, font_size, font_sources).ok().flatten()
     }
+
+    #[cfg(feature = "gpu")]
+    pub(crate) fn text_atlas_entry(&self, key: &str) -> Option<crate::text_atlas::AtlasEntry> {
+        self.font.text_atlas_entry(key)
+    }
+
+    #[cfg(feature = "gpu")]
+    pub(crate) fn text_atlas_snapshot(&self) -> crate::text_atlas::TextAtlasSnapshot {
+        self.font.text_atlas_snapshot()
+    }
 }
 
 impl Default for TinySkiaBackend {

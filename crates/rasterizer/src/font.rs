@@ -18,7 +18,7 @@
 const BUNDLED_FONT: &[u8] = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
 
 use crate::backend::RasterError;
-use crate::text_atlas::{TextAtlas, TextAtlasSnapshot};
+use crate::text_atlas::{AtlasEntry, TextAtlas, TextAtlasSnapshot};
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -435,6 +435,14 @@ impl FontCache {
             .lock()
             .expect("text atlas lock poisoned")
             .snapshot()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn text_atlas_entry(&self, key: &str) -> Option<AtlasEntry> {
+        self.atlas
+            .lock()
+            .expect("text atlas lock poisoned")
+            .entry(key)
     }
 
     /// Rasterize text with ordered explicit local fonts followed by the system fallback.

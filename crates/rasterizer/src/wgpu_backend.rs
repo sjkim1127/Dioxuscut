@@ -332,6 +332,16 @@ fn fs_image(in: VertexOutput) -> @location(0) vec4<f32> {
     let sampled = textureSample(image_texture, image_sampler, uv);
     return vec4<f32>(sampled.rgb, sampled.a * instance.color.a * instance.params.w);
 }
+
+@fragment
+fn fs_text(in: VertexOutput) -> @location(0) vec4<f32> {
+    let instance = instances[in.instance_index];
+    let bounds = instance.shape_bounds;
+    let local = (in.local_position - bounds.xy) / max(bounds.zw, vec2<f32>(0.000001));
+    let uv = mix(instance.params.xy, instance.params.zw, clamp(local, vec2<f32>(0.0), vec2<f32>(1.0)));
+    let coverage = textureSample(image_texture, image_sampler, uv).r;
+    return vec4<f32>(instance.color.rgb, coverage * instance.color.a * instance.params.w);
+}
 "#;
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -345,6 +355,7 @@ struct GpuContext {
     pipeline: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
     image_pipeline: wgpu::RenderPipeline,
+    text_pipeline: wgpu::RenderPipeline,
     globals_layout: wgpu::BindGroupLayout,
     instance_layout: wgpu::BindGroupLayout,
     image_layout: wgpu::BindGroupLayout,
@@ -550,12 +561,39 @@ impl GpuContext {
             cache: None,
         });
 
+        let text_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("dioxuscut_text_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_text",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: RENDER_FORMAT,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState { count: SAMPLE_COUNT, ..Default::default() },
+            multiview: None,
+            cache: None,
+        });
+
         Ok(Self {
             device,
             queue,
             pipeline,
             mesh_pipeline,
             image_pipeline,
+            text_pipeline,
             globals_layout,
             instance_layout,
             image_layout,
@@ -884,10 +922,6 @@ impl WgpuBackend {
         self.gpu_pixels(&key, &frame)
     }
 
-    fn gpu_text(&self, key: &str, pixels: &image::RgbaImage) -> Result<Arc<GpuImageResource>, RasterError> {
-        self.gpu_pixels(key, pixels)
-    }
-
     #[cfg(test)]
     fn gpu_image_cache_len(&self) -> usize {
         self.gpu_images
@@ -936,6 +970,7 @@ impl WgpuBackend {
 
         let mut all_instances: Vec<GpuInstance> = commands.iter().map(|c| *c.instance()).collect();
         let mut image_resources = Vec::with_capacity(commands.len());
+        let atlas_snapshot = self.fallback.text_atlas_snapshot();
         for (index, command) in commands.iter().enumerate() {
             let (source, fit) = match command {
                 DrawCommand::Image { src, fit, .. } => (self.gpu_image(src)?, *fit),
@@ -946,8 +981,14 @@ impl WgpuBackend {
                     fit,
                     ..
                 } => (self.gpu_video(src, *time, sampling_fps, *looped)?, *fit),
-                DrawCommand::Text { key, pixels, .. } =>
-                    (self.gpu_text(key, pixels)?, ImageFit::Fill),
+                DrawCommand::Text { entry, .. } => {
+                    all_instances[index].params[0] = entry.x as f32 / atlas_snapshot.width as f32;
+                    all_instances[index].params[1] = entry.y as f32 / atlas_snapshot.height as f32;
+                    all_instances[index].params[2] = (entry.x + entry.width) as f32 / atlas_snapshot.width as f32;
+                    all_instances[index].params[3] = (entry.y + entry.height) as f32 / atlas_snapshot.height as f32;
+                    image_resources.push(None);
+                    continue;
+                }
                 _ => {
                     image_resources.push(None);
                     continue;
@@ -1036,6 +1077,33 @@ impl WgpuBackend {
                 ],
             });
 
+            let atlas_texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("text_atlas_texture"),
+                size: wgpu::Extent3d { width: atlas_snapshot.width, height: atlas_snapshot.height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            queue.write_texture(
+                atlas_texture.as_image_copy(),
+                &atlas_snapshot.pixels,
+                wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(atlas_snapshot.width), rows_per_image: Some(atlas_snapshot.height) },
+                wgpu::Extent3d { width: atlas_snapshot.width, height: atlas_snapshot.height, depth_or_array_layers: 1 },
+            );
+            let atlas_view = atlas_texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let atlas_sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+            let atlas_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("text_atlas_bg"),
+                layout: &self.ctx.image_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&atlas_view) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&atlas_sampler) },
+                ],
+            });
+
             let mesh_buffers: Vec<Option<(wgpu::Buffer, wgpu::Buffer)>> = commands
                 .iter()
                 .map(|cmd| match cmd {
@@ -1102,15 +1170,13 @@ impl WgpuBackend {
                     DrawCommand::Image { .. }
                     | DrawCommand::Video { .. }
                     | DrawCommand::Text { .. } => {
-                        pass.set_pipeline(&self.ctx.image_pipeline);
-                        pass.set_bind_group(
-                            2,
-                            &image_resources[i]
-                                .as_ref()
-                                .expect("image resource")
-                                .bind_group,
-                            &[],
-                        );
+                        if matches!(commands[i], DrawCommand::Text { .. }) {
+                            pass.set_pipeline(&self.ctx.text_pipeline);
+                            pass.set_bind_group(2, &atlas_bg, &[]);
+                        } else {
+                            pass.set_pipeline(&self.ctx.image_pipeline);
+                            pass.set_bind_group(2, &image_resources[i].as_ref().expect("image resource").bind_group, &[]);
+                        }
                         pass.draw(0..6, i as u32..i as u32 + 1);
                         i += 1;
                     }
@@ -1481,8 +1547,7 @@ enum DrawCommand {
     },
     Text {
         instance: GpuInstance,
-        key: String,
-        pixels: image::RgbaImage,
+        entry: crate::text_atlas::AtlasEntry,
     },
 }
 
@@ -1697,23 +1762,13 @@ fn compile_nodes(
                     return None;
                 }
                 let rendered = font.rasterize_text(content, *font_size, font_sources)?;
-                let mut pixels = Vec::with_capacity((rendered.width * rendered.height * 4) as usize);
-                for coverage in rendered.pixels {
-                    let alpha = ((coverage as f32 / 255.0) * (color.a as f32 / 255.0) * opacity * 255.0)
-                        .round().clamp(0.0, 255.0) as u8;
-                    pixels.extend_from_slice(&[
-                        color.r,
-                        color.g,
-                        color.b,
-                        alpha,
-                    ]);
-                }
-                let image = image::RgbaImage::from_raw(rendered.width, rendered.height, pixels)?;
-                let mut instance = GpuInstance::solid(Color::WHITE, 1.0, transform);
+                let mut instance = GpuInstance::solid(*color, opacity, transform);
                 instance.kind_data[0] = 5;
                 instance.bounds = [*x, *y - rendered.baseline as f32, rendered.width as f32, rendered.height as f32];
                 instance.shape_bounds = instance.bounds;
-                output.push(DrawCommand::Text { instance, key: format!("text:{content}:{font_size:?}:{font_sources:?}:{color:?}"), pixels: image });
+                let key = format!("{}:{}:{:?}", content, font_size.to_bits(), font_sources);
+                let entry = font.text_atlas_entry(&key)?;
+                output.push(DrawCommand::Text { instance, entry });
             }
 
             SceneNode::Group {
