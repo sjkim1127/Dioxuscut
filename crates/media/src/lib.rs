@@ -13,6 +13,7 @@ pub mod gif;
 pub mod img;
 pub mod metadata;
 pub mod scene;
+pub mod sample;
 pub mod video;
 
 pub use audio::{Audio, AudioProps, Html5Audio};
@@ -33,4 +34,5 @@ pub use metadata::{
     VideoMetadata, MAX_MEDIA_RANGE_BYTES,
 };
 pub use scene::{SceneAudio, SceneGif, SceneImage, SceneVideo};
+pub use sample::EncodedSample;
 pub use video::{Html5Video, OffthreadVideo, Video, VideoProps};
