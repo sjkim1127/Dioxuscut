@@ -51,7 +51,7 @@ use crate::image_cache::ImageCache;
 use crate::scene::ImageFit;
 use crate::scene::{Color, GradientStop, Scene, SceneNode};
 use crate::tiny_skia_backend::{svgpath_to_tiny_skia, TinySkiaBackend};
-use crate::video_cache::VideoFrameCache;
+use crate::video_cache::{canonical_local_path, VideoFrameCache};
 use image::RgbaImage;
 use lyon_tessellation::geometry_builder::{BuffersBuilder, FillVertexConstructor, VertexBuffers};
 use lyon_tessellation::math::point;
@@ -1100,7 +1100,14 @@ impl WgpuBackend {
         let frame_index = self
             .video_cache
             .frame_index_for(src, time, sampling_fps, looped)?;
-        let key = format!("video:{src}:{sampling_fps:.6}:{frame_index}");
+        // VideoFrameCache canonicalizes local paths, so the GPU cache must use
+        // the same identity. Otherwise `clip.mkv` and `file:///.../clip.mkv`
+        // decode to the same frame but upload duplicate GPU textures.
+        let canonical = canonical_local_path(src)?;
+        let key = format!(
+            "video:{}:{sampling_fps:.6}:{frame_index}",
+            canonical.display()
+        );
         self.gpu_pixels(&key, &frame)
     }
 
@@ -3467,9 +3474,10 @@ mod tests {
         let pixel = image.get_pixel(8, 8);
         assert!(pixel[0] > 200 && pixel[1] < 40 && pixel[2] < 40);
         let mut same_frame = scene.clone();
-        let SceneNode::Video { time, .. } = &mut same_frame.nodes[0] else {
+        let SceneNode::Video { src, time, .. } = &mut same_frame.nodes[0] else {
             unreachable!();
         };
+        *src = format!("file://{}", source.display());
         *time = 0.1;
         gpu.render_frame(&same_frame, &FrameConfig::new(16, 16, 0, 2.0))
             .unwrap();
