@@ -92,6 +92,23 @@ Native compositions share one `Scene` contract between preview and export. `Vdom
 - FFmpeg available on `PATH` for video and GIF output. Direct still rendering does not require FFmpeg.
 - A supported native GPU only when using `--backend gpu`.
 
+### Backend selection
+
+The renderer uses one shared timeline, props, frame scheduling, audio, and
+encoding contract across hosts. Choose the backend according to the scene:
+
+| Backend | Best for | Current trade-off |
+| --- | --- | --- |
+| `native` | Fast, low-memory Rust rendering and AI-generated short scenes | Complex media, text, and browser APIs use the CPU renderer |
+| `gpu` | Native shapes, gradients, and SVG paths | Images, video, text, Lottie, shaders, and complex compositing still fall back to CPU |
+| `browser` | Tauri/Chromium, Three.js, WebGL, Canvas, and Remotion-compatible web APIs | Requires a browser worker and has process/transport overhead |
+
+This split is intentional: Dioxus can remain the lightweight composition and
+short-form path, while Tauri/Chromium provides ecosystem compatibility for
+Three.js and browser-native media. Native GPU texture and text paths are being
+added only when their output can be kept equivalent to the CPU and browser
+backends.
+
 Install FFmpeg on common platforms:
 
 ```bash
