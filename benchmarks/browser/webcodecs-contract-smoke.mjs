@@ -75,7 +75,12 @@ try {
     }, 'audio');
     const audioSupport = await AudioDecoder.isConfigSupported({ codec: 'mp4a.40.2', numberOfChannels: 2, sampleRate: 48000 });
     const parsed = await window.dioxuscut.parseIsoBmffMovieHeader('/assets/showcase.mp4');
-    const webmMetadata = await window.dioxuscut.parseMedia({ src: '/assets/webm-fixture.webm' });
+    const webmEvents = [];
+    const webmMetadata = await window.dioxuscut.parseMedia({
+      src: '/assets/webm-fixture.webm',
+      onVideoCodec: (value) => webmEvents.push(['videoCodec', value]),
+      onKeyframes: (value) => webmEvents.push(['keyframes', value[0]?.positionInBytes]),
+    });
     const webmSamples = await window.dioxuscut.readWebmSamples('/assets/webm-fixture.webm', 1);
     const webmChunks = webmSamples.slice(0, 2).map((sample) =>
       window.dioxuscut.createWebmEncodedVideoChunk(sample, 1 / 24));
@@ -191,6 +196,7 @@ try {
         container: webmMetadata.container,
         track: webmMetadata.tracks?.[0]?.codec,
         videoCodec: webmMetadata.videoCodec,
+        keyframeCallback: webmEvents,
         cues: webmMetadata.keyframes?.length ?? 0,
         samples: webmSamples.length,
         decoded: webmFrames.length,
@@ -244,6 +250,7 @@ try {
   assert.equal(result.webm.container, 'webm');
   assert.equal(result.webm.track, 'vp09.00.10.08');
   assert.equal(result.webm.videoCodec, 'vp09.00.10.08');
+  assert.ok(result.webm.keyframeCallback.some(([name, position]) => name === 'keyframes' && position > 0));
   assert.ok(result.webm.cues > 0);
   assert.ok(result.webm.samples > 0);
   assert.equal(result.webm.decoded, 3);
