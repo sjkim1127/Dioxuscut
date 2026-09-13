@@ -295,6 +295,25 @@ export async function parseMedia({ src, fields } = {}) {
   return Object.fromEntries(fields.filter((field) => field in result).map((field) => [field, result[field]]));
 }
 
+// Browser counterpart of the native bounded range reader used by the
+// parseMedia foundation. `endExclusive` follows the same half-open contract.
+export async function readMediaRange(source, start, endExclusive, { requestInit } = {}) {
+  if (typeof source !== 'string' || !source) throw new TypeError('readMediaRange expects a source URL');
+  if (!Number.isInteger(start) || !Number.isInteger(endExclusive) || start < 0 || endExclusive < start) {
+    throw new RangeError('readMediaRange expects a non-negative half-open range');
+  }
+  if (endExclusive - start > 16 * 1024 * 1024) throw new RangeError('media range exceeds 16 MiB');
+  const headers = new Headers(requestInit?.headers);
+  headers.set('Range', `bytes=${start}-${Math.max(start, endExclusive - 1)}`);
+  const response = await fetch(source, { ...requestInit, headers });
+  if (!response.ok) throw new Error(`media range request failed: ${response.status}`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.length > endExclusive - start && response.status !== 206) {
+    throw new Error('media range response exceeded requested length');
+  }
+  return bytes;
+}
+
 // Browser equivalent of @remotion/media-utils/getAudioDurationInSeconds.
 export async function getAudioDurationInSeconds(source) {
   if (typeof source !== 'string' || !source) throw new TypeError('getAudioDurationInSeconds expects a source URL');
@@ -1067,6 +1086,7 @@ window.dioxuscut = {
   getImageDimensions,
   getVideoMetadata,
   parseMedia,
+  readMediaRange,
   getAudioDurationInSeconds,
   getAudioDuration,
   getAudioData,
