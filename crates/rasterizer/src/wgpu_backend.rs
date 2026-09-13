@@ -51,6 +51,7 @@ use crate::scene::{Color, GradientStop, Scene, SceneNode};
 use crate::scene::ImageFit;
 use crate::tiny_skia_backend::{svgpath_to_tiny_skia, TinySkiaBackend};
 use crate::image_cache::ImageCache;
+use crate::video_cache::VideoFrameCache;
 use image::RgbaImage;
 use std::sync::atomic::{AtomicU64, Ordering};
 use lyon_tessellation::geometry_builder::{BuffersBuilder, FillVertexConstructor, VertexBuffers};
@@ -710,6 +711,7 @@ pub struct WgpuBackend {
     /// fallback implementation details while allowing both paths to share
     /// decoded pixels during the transition.
     image_cache: ImageCache,
+    video_cache: VideoFrameCache,
     /// Persistent GPU texture and bind-group cache keyed by the same source
     /// identity as `ImageCache`. Texture uploads therefore happen once per
     /// source, rather than once per rendered frame.
@@ -748,6 +750,7 @@ impl WgpuBackend {
             frame_resources: Mutex::new(HashMap::new()),
             fallback: TinySkiaBackend::new(),
             image_cache: ImageCache::default(),
+            video_cache: VideoFrameCache::default(),
             gpu_images: Mutex::new(GpuImageCacheState::new(256 * 1024 * 1024)),
             gpu_frame_count: AtomicU64::new(0),
             cpu_fallback_frame_count: AtomicU64::new(0),
@@ -773,16 +776,19 @@ impl WgpuBackend {
         self
     }
 
-    fn gpu_image(&self, src: &str) -> Result<Arc<GpuImageResource>, RasterError> {
+    fn gpu_pixels(
+        &self,
+        key: &str,
+        decoded: &image::RgbaImage,
+    ) -> Result<Arc<GpuImageResource>, RasterError> {
         let mut cache = self.gpu_images.lock().expect("GPU image cache lock poisoned");
-        if let Some(image) = cache.images.get(src).cloned() {
-            cache.lru.retain(|entry| entry != src);
-            cache.lru.push_back(src.to_string());
+        if let Some(image) = cache.images.get(key).cloned() {
+            cache.lru.retain(|entry| entry != key);
+            cache.lru.push_back(key.to_string());
             return Ok(image);
         }
         drop(cache);
 
-        let decoded = self.image_cache.load(src)?;
         let device = &self.ctx.device;
         let queue = &self.ctx.queue;
         let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -838,14 +844,14 @@ impl WgpuBackend {
             height: decoded.height(),
         });
         let mut cache = self.gpu_images.lock().expect("GPU image cache lock poisoned");
-        if let Some(existing) = cache.images.get(src).cloned() {
-            cache.lru.retain(|entry| entry != src);
-            cache.lru.push_back(src.to_string());
+        if let Some(existing) = cache.images.get(key).cloned() {
+            cache.lru.retain(|entry| entry != key);
+            cache.lru.push_back(key.to_string());
             return Ok(existing);
         }
         let bytes = resource.width as usize * resource.height as usize * 4;
-        cache.images.insert(src.to_string(), Arc::clone(&resource));
-        cache.lru.push_back(src.to_string());
+        cache.images.insert(key.to_string(), Arc::clone(&resource));
+        cache.lru.push_back(key.to_string());
         cache.bytes = cache.bytes.saturating_add(bytes);
         while cache.bytes > cache.max_bytes {
             let Some(oldest) = cache.lru.pop_front() else { break };
@@ -856,6 +862,23 @@ impl WgpuBackend {
             }
         }
         Ok(resource)
+    }
+
+    fn gpu_image(&self, src: &str) -> Result<Arc<GpuImageResource>, RasterError> {
+        let decoded = self.image_cache.load(src)?;
+        self.gpu_pixels(src, &decoded)
+    }
+
+    fn gpu_video(
+        &self,
+        src: &str,
+        time: f64,
+        sampling_fps: f64,
+        looped: bool,
+    ) -> Result<Arc<GpuImageResource>, RasterError> {
+        let frame = self.video_cache.load(src, time, sampling_fps, looped)?;
+        let key = format!("video:{src}:{time:.6}:{sampling_fps:.6}:{looped}");
+        self.gpu_pixels(&key, &frame)
     }
 
     #[cfg(test)]
@@ -872,6 +895,7 @@ impl WgpuBackend {
         commands: &[DrawCommand],
         width: u32,
         height: u32,
+        sampling_fps: f64,
         slot: &GpuFrameSlot,
     ) -> Result<
         (
@@ -906,29 +930,38 @@ impl WgpuBackend {
         let mut all_instances: Vec<GpuInstance> = commands.iter().map(|c| *c.instance()).collect();
         let mut image_resources = Vec::with_capacity(commands.len());
         for (index, command) in commands.iter().enumerate() {
-            let DrawCommand::Image { src, fit, .. } = command else {
-                image_resources.push(None);
-                continue;
+            let (source, fit) = match command {
+                DrawCommand::Image { src, fit, .. } => (self.gpu_image(src)?, *fit),
+                DrawCommand::Video {
+                    src,
+                    time,
+                    looped,
+                    fit,
+                    ..
+                } => (self.gpu_video(src, *time, sampling_fps, *looped)?, *fit),
+                _ => {
+                    image_resources.push(None);
+                    continue;
+                }
             };
-            let image = self.gpu_image(src)?;
             let placement = image_placement(
-                *fit,
-                image.width as f32,
-                image.height as f32,
+                fit,
+                source.width as f32,
+                source.height as f32,
                 all_instances[index].shape_bounds[0],
                 all_instances[index].shape_bounds[1],
                 all_instances[index].shape_bounds[2],
                 all_instances[index].shape_bounds[3],
             )
             .ok_or_else(|| RasterError::ImageAsset {
-                path: src.clone(),
+                path: "video/image".into(),
                 reason: "invalid image placement dimensions".into(),
             })?;
             all_instances[index].bounds = placement.destination;
             all_instances[index].shape_bounds = placement.destination;
             all_instances[index].params[0..4].copy_from_slice(&placement.source_uv);
 
-            image_resources.push(Some(image));
+            image_resources.push(Some(source));
         }
 
         if !all_instances.is_empty() {
@@ -1012,7 +1045,9 @@ impl WgpuBackend {
                         });
                         Some((vb, ib))
                     }
-                    DrawCommand::Analytic { .. } | DrawCommand::Image { .. } => None,
+                    DrawCommand::Analytic { .. }
+                    | DrawCommand::Image { .. }
+                    | DrawCommand::Video { .. } => None,
                 })
                 .collect();
 
@@ -1054,7 +1089,7 @@ impl WgpuBackend {
                         pass.draw_indexed(0..indices.len() as u32, 0, i as u32..i as u32 + 1);
                         i += 1;
                     }
-                    DrawCommand::Image { .. } => {
+                    DrawCommand::Image { .. } | DrawCommand::Video { .. } => {
                         pass.set_pipeline(&self.ctx.image_pipeline);
                         pass.set_bind_group(
                             2,
@@ -1213,7 +1248,13 @@ impl RasterizerBackend for WgpuBackend {
         res.active_index = res.active_index.wrapping_add(1);
 
         let (submission_index, rx) =
-            self.submit_frame_to_slot(&commands, width, height, &res.slots[slot_idx])?;
+            self.submit_frame_to_slot(
+                &commands,
+                width,
+                height,
+                config.fps,
+                &res.slots[slot_idx],
+            )?;
 
         let mut out_pixels = None;
         let mut scratch = Vec::new();
@@ -1320,7 +1361,13 @@ impl RasterizerBackend for WgpuBackend {
 
             // Submit this frame to GPU
             let (submission_index, rx) =
-                self.submit_frame_to_slot(&commands, width, height, &res.slots[slot_idx])?;
+                self.submit_frame_to_slot(
+                    &commands,
+                    width,
+                    height,
+                    cfg.fps,
+                    &res.slots[slot_idx],
+                )?;
             self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
 
             // Overlap: drain the previous frame while the newly submitted frame is being rendered on GPU
@@ -1413,6 +1460,13 @@ enum DrawCommand {
         src: String,
         fit: ImageFit,
     },
+    Video {
+        instance: GpuInstance,
+        src: String,
+        time: f64,
+        looped: bool,
+        fit: ImageFit,
+    },
 }
 
 impl DrawCommand {
@@ -1420,7 +1474,8 @@ impl DrawCommand {
         match self {
             Self::Analytic { instance }
             | Self::Mesh { instance, .. }
-            | Self::Image { instance, .. } => instance,
+            | Self::Image { instance, .. }
+            | Self::Video { instance, .. } => instance,
         }
     }
 }
@@ -1582,6 +1637,42 @@ fn compile_nodes(
                 });
             }
 
+            SceneNode::Video {
+                src,
+                time,
+                looped,
+                x,
+                y,
+                w,
+                h,
+                fit,
+                opacity: node_opacity,
+            } => {
+                if ![*x, *y, *w, *h, *node_opacity]
+                    .iter()
+                    .all(|value| value.is_finite())
+                    || *w <= 0.0
+                    || *h <= 0.0
+                    || !time.is_finite()
+                    || *time < 0.0
+                    || *node_opacity < 0.0
+                {
+                    return None;
+                }
+                let mut instance = GpuInstance::solid(Color::WHITE, opacity * *node_opacity, transform);
+                instance.kind_data[0] = 5;
+                instance.bounds = [*x, *y, *w, *h];
+                instance.shape_bounds = instance.bounds;
+                instance.params = [0.0, 0.0, 1.0, 1.0];
+                output.push(DrawCommand::Video {
+                    instance,
+                    src: src.clone(),
+                    time: *time,
+                    looped: *looped,
+                    fit: *fit,
+                });
+            }
+
             SceneNode::Group {
                 transform: group_transform,
                 opacity: group_opacity,
@@ -1618,7 +1709,6 @@ fn compile_nodes(
 
             SceneNode::Audio { .. } => {}
             SceneNode::Text { .. }
-            | SceneNode::Video { .. }
             | SceneNode::Gif { .. }
             | SceneNode::Layer { .. }
             | SceneNode::Emoji { .. }
@@ -1826,7 +1916,7 @@ mod support_tests {
                 opacity: 1.0,
             }],
         };
-        assert!(!gpu_supports_scene(&image_scene));
+        assert!(gpu_supports_scene(&image_scene));
 
         let invalid_path_scene = Scene {
             nodes: vec![SceneNode::Path {
@@ -2146,6 +2236,39 @@ mod tests {
         };
         gpu.render_frame(&scene, &FrameConfig::new(16, 8, 0, 30.0)).unwrap();
         assert_eq!(gpu.gpu_image_cache_len(), 1);
+    }
+
+    #[test]
+    fn gpu_video_frame_uses_decoded_texture_path() {
+        if std::process::Command::new("ffmpeg").arg("-version").output().is_err() {
+            println!("FFmpeg unavailable; skipping GPU video test");
+            return;
+        }
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping GPU video test");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("dioxuscut-wgpu-video-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("red.mkv");
+        let generated = std::process::Command::new("ffmpeg")
+            .args(["-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=16x16:r=2:d=1", "-c:v", "ffv1"])
+            .arg(&source)
+            .status()
+            .unwrap();
+        assert!(generated.success());
+        let scene = Scene {
+            nodes: vec![SceneNode::Video {
+                src: source.display().to_string(), time: 0.0, looped: false,
+                x: 0.0, y: 0.0, w: 16.0, h: 16.0, fit: ImageFit::Fill, opacity: 1.0,
+            }],
+        };
+        let image = gpu.render_frame(&scene, &FrameConfig::new(16, 16, 0, 2.0)).unwrap();
+        let pixel = image.get_pixel(8, 8);
+        assert!(pixel[0] > 200 && pixel[1] < 40 && pixel[2] < 40);
+        assert_eq!(gpu.gpu_frame_count.load(Ordering::Relaxed), 1);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
