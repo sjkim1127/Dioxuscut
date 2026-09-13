@@ -87,6 +87,18 @@ export function useDelayRender() {
   return { delayRender, continueRender, cancelRender };
 }
 
+// Minimal browser equivalent of Remotion's useBufferState. Media adapters can
+// pause frame capture while a seek or decoder warm-up is pending, then release
+// exactly the handle they acquired.
+export function useBufferState() {
+  return {
+    delayPlayback() {
+      const handle = delayRender('media buffering');
+      return { unblock: () => continueRender(handle) };
+    },
+  };
+}
+
 // Browser pixel density for canvas/WebGL adapters. Headless workers use their
 // configured device scale factor, keeping captures deterministic.
 export function usePixelDensity() {
@@ -608,6 +620,7 @@ window.dioxuscut = {
   continueRender,
   cancelRender,
   useDelayRender,
+  useBufferState,
   usePixelDensity,
   registerLottieAdapter,
   getVideoTexture,
