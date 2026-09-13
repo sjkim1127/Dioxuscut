@@ -3555,7 +3555,7 @@ fn compile_nodes(
                         | crate::scene::BlendMode::Lighten
                 )
                 && (matches!(blend_mode, crate::scene::BlendMode::Normal)
-                    || filters.is_empty())
+                    || (filters.is_empty() && gpu_blend_children_supported(children)))
                 && (*mask_mode == crate::scene::MaskMode::Alpha
                     || *mask_mode == crate::scene::MaskMode::Luminance)
                 && (clip.is_none()
@@ -3765,6 +3765,27 @@ fn gpu_layer_effects(
             _ => None,
         },
     )
+}
+
+fn gpu_blend_children_supported(nodes: &[SceneNode]) -> bool {
+    nodes.iter().all(|node| match node {
+        SceneNode::Rect { .. }
+        | SceneNode::Circle { .. }
+        | SceneNode::Path { .. }
+        | SceneNode::LinearGradient { .. }
+        | SceneNode::RadialGradient { .. }
+        | SceneNode::Text { .. } => true,
+        SceneNode::Group { children, .. } => gpu_blend_children_supported(children),
+        SceneNode::Layer { .. }
+        | SceneNode::Image { .. }
+        | SceneNode::Video { .. }
+        | SceneNode::Lottie { .. }
+        | SceneNode::Gif { .. }
+        | SceneNode::Emoji { .. }
+        | SceneNode::Audio { .. }
+        | SceneNode::AudioVisualizer { .. }
+        | SceneNode::Shader { .. } => false,
+    })
 }
 
 fn gpu_vignette(filters: &[crate::scene::SceneFilter]) -> Option<[f32; 4]> {
@@ -5223,6 +5244,57 @@ mod tests {
         ];
         let (_, _, _, _, _, amount) = gpu_layer_effects(&filters, 1.0).unwrap();
         assert!((amount - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn gpu_image_multiply_layer_matches_cpu_for_srgb_texture_and_alpha() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping image blend test");
+            return;
+        };
+        let image_src = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+        let scene = Scene {
+            nodes: vec![
+                SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 16.0,
+                    h: 16.0,
+                    fill: Color::rgb(180, 120, 80),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                },
+                SceneNode::Layer {
+                    opacity: 0.5,
+                    blend_mode: crate::scene::BlendMode::Multiply,
+                    clip: None,
+                    mask: None,
+                    mask_mode: crate::scene::MaskMode::Alpha,
+                    filters: vec![],
+                    shadow: None,
+                    children: vec![SceneNode::Image {
+                        src: image_src.into(),
+                        x: 0.0,
+                        y: 0.0,
+                        w: 16.0,
+                        h: 16.0,
+                        fit: crate::scene::ImageFit::Fill,
+                        opacity: 1.0,
+                    }],
+                },
+            ],
+        };
+        assert!(!gpu_supports_scene(&scene));
+        let config = FrameConfig::new(16, 16, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        let gpu_pixel = gpu_image.get_pixel(8, 8);
+        let cpu_pixel = cpu_image.get_pixel(8, 8);
+        assert_eq!(gpu_pixel, cpu_pixel);
+        assert_eq!(gpu.render_stats().cpu_fallback_frames, 1);
     }
 
     #[test]
