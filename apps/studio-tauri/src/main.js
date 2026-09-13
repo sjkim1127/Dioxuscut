@@ -746,7 +746,15 @@ export async function decodeIsoBmffVideo(source, {
     output: (frame) => frames.push(frame),
     error: (error) => { failure = error; },
   });
-  decoder.configure({ codec, ...(description ? { description } : {}) });
+  const decoderConfig = { codec, ...(description ? { description } : {}) };
+  if (typeof VideoDecoder.isConfigSupported === 'function') {
+    const support = await VideoDecoder.isConfigSupported(decoderConfig);
+    if (!support.supported) {
+      decoder.close();
+      throw new Error(`WebCodecs does not support video codec: ${codec}`);
+    }
+  }
+  decoder.configure(decoderConfig);
   try {
     for (const sample of samples) {
       decoder.decode(createIsoBmffEncodedChunk({
@@ -781,7 +789,15 @@ export async function decodeIsoBmffAudio(source, {
     output: (audio) => chunks.push(audio),
     error: (error) => { failure = error; },
   });
-  decoder.configure({ codec, ...(description ? { description } : {}) });
+  const decoderConfig = { codec, ...(description ? { description } : {}) };
+  if (typeof AudioDecoder.isConfigSupported === 'function') {
+    const support = await AudioDecoder.isConfigSupported(decoderConfig);
+    if (!support.supported) {
+      decoder.close();
+      throw new Error(`WebCodecs does not support audio codec: ${codec}`);
+    }
+  }
+  decoder.configure(decoderConfig);
   try {
     for (const sample of samples) {
       decoder.decode(createIsoBmffEncodedChunk({
