@@ -347,11 +347,23 @@ fn vignette_factor(position: vec2<f32>, bounds: vec4<f32>, settings: vec4<f32>) 
 }
 
 fn composited_color(rgb: vec3<f32>, alpha: f32, instance: InstanceData) -> vec4<f32> {
-    // Multiply/Screen blend factors require premultiplied source RGB.
-    if instance.kind_data.z != 0u {
-        return vec4<f32>(rgb * alpha, alpha);
+    var output_rgb = rgb;
+    // A frame containing fixed-function blend operations must keep every
+    // source and destination in the same sRGB domain. The regular renderer
+    // remains linear-light for compatibility with its existing path.
+    if (instance.kind_data.w & 2u) != 0u {
+        output_rgb = vec3<f32>(
+            linear_to_srgb(clamp(rgb.r, 0.0, 1.0)),
+            linear_to_srgb(clamp(rgb.g, 0.0, 1.0)),
+            linear_to_srgb(clamp(rgb.b, 0.0, 1.0)),
+        );
     }
-    return vec4<f32>(rgb, alpha);
+    // Multiply/Screen/Darken/Lighten blend factors require premultiplied
+    // source RGB.
+    if instance.kind_data.z != 0u {
+        return vec4<f32>(output_rgb * alpha, alpha);
+    }
+    return vec4<f32>(output_rgb, alpha);
 }
 
 @fragment
@@ -490,13 +502,13 @@ fn mask_coverage(position: vec2<f32>, instance: InstanceData) -> f32 {
         var effective_coverage = coverage;
         if !has_regular_mask { effective_coverage = 1.0; }
         var result = effective_coverage * clip_coverage;
-        if instance.kind_data.w == 1u {
+        if (instance.kind_data.w & 1u) == 1u {
             let uv = position / globals.resolution;
             result *= textureSample(path_mask_texture, path_mask_sampler, uv).r;
         }
         return result;
     }
-    if instance.kind_data.w == 1u {
+    if (instance.kind_data.w & 1u) == 1u {
         let uv = position / globals.resolution;
         return textureSample(path_mask_texture, path_mask_sampler, uv).r;
     }
@@ -3126,6 +3138,22 @@ fn compile_scene_with_path_mask(
         font,
         &mut path_mask,
     )?;
+    if scene.nodes.iter().any(|node| {
+        matches!(
+            node,
+            SceneNode::Layer {
+                blend_mode: crate::scene::BlendMode::Multiply
+                    | crate::scene::BlendMode::Screen
+                    | crate::scene::BlendMode::Darken
+                    | crate::scene::BlendMode::Lighten,
+                ..
+            }
+        )
+    }) {
+        for command in &mut commands {
+            command.instance_mut().kind_data[3] |= 2;
+        }
+    }
     Some((commands, path_mask))
 }
 
@@ -3525,10 +3553,7 @@ fn compile_nodes(
                         | crate::scene::BlendMode::Lighten
                 )
                 && (matches!(blend_mode, crate::scene::BlendMode::Normal)
-                    || ((*layer_opacity - 1.0).abs() <= f32::EPSILON
-                        && gpu_layer_effects(filters, *layer_opacity)
-                            .map(|effects| (effects.0 - 1.0).abs() <= f32::EPSILON)
-                            .unwrap_or(false)))
+                    || filters.is_empty())
                 && (*mask_mode == crate::scene::MaskMode::Alpha
                     || *mask_mode == crate::scene::MaskMode::Luminance)
                 && (clip.is_none()
@@ -4735,7 +4760,7 @@ mod tests {
                     w: 16.0,
                     h: 16.0,
                     fit: ImageFit::Fill,
-                    opacity: 1.0,
+                    opacity: 0.5,
                 },
             ],
         };
@@ -5092,7 +5117,7 @@ mod tests {
                     corner_radius: 0.0,
                 },
                 SceneNode::Layer {
-                    opacity: 1.0,
+                    opacity: 0.5,
                     blend_mode: crate::scene::BlendMode::Multiply,
                     clip: None,
                     mask: None,
@@ -5121,7 +5146,7 @@ mod tests {
         let gpu_pixel = gpu_image.get_pixel(8, 8);
         let cpu_pixel = cpu_image.get_pixel(8, 8);
         for channel in 0..3 {
-            let expected = srgb_to_linear(cpu_pixel[channel]) * 255.0;
+            let expected = f32::from(cpu_pixel[channel]);
             assert!(
                 (f32::from(gpu_pixel[channel]) - expected).abs() < 4.0,
                 "channel {channel}: GPU {:?}, CPU {:?}, expected linear {expected}",
