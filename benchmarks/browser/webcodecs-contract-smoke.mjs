@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { readFile } from 'node:fs/promises';
 
 const require = createRequire(new URL('../../apps/studio-tauri/package.json', import.meta.url));
 const { chromium } = require('playwright-core');
@@ -8,6 +9,10 @@ const executablePath = process.env.CHROME_PATH ?? '/Applications/Google Chrome.a
 const browser = await chromium.launch({ executablePath, headless: true });
 try {
   const page = await browser.newPage();
+  const fixture = await readFile(new URL('../../assets/showcase.mp4', import.meta.url));
+  await page.route('**/assets/showcase.mp4', (route) => route.fulfill({
+    status: 200, contentType: 'video/mp4', body: fixture,
+  }));
   await page.addInitScript(() => { window.__DIOXUSCUT_HEADLESS_RENDER__ = true; });
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => typeof window.dioxuscut?.createIsoBmffEncodedChunk === 'function');
@@ -25,10 +30,16 @@ try {
       data: new Uint8Array([0xff, 0xf1, 0x50, 0x80]), timestamp: 2, duration: 0.02,
     }, 'audio');
     const audioSupport = await AudioDecoder.isConfigSupported({ codec: 'mp4a.40.2', numberOfChannels: 2, sampleRate: 48000 });
+    const parsed = await window.dioxuscut.parseIsoBmffMovieHeader('/assets/showcase.mp4');
     return {
       type: chunk.type, timestamp: chunk.timestamp, duration: chunk.duration, supported: support.supported,
       annexB: [...annexB],
       audioTimestamp: audio.timestamp, audioDuration: audio.duration, audioSupported: audioSupport.supported,
+      container: parsed.container,
+      boxes: parsed.boxes.map(({ type }) => type),
+      mediaDuration: parsed.durationInSeconds,
+      sampleCount: parsed.tracks[0].sampleTables.sampleRanges.length,
+      codecConfig: parsed.tracks[0].codecConfig.type,
     };
   });
   assert.equal(result.type, 'key');
@@ -39,6 +50,11 @@ try {
   assert.equal(result.audioTimestamp, 2_000_000);
   assert.equal(result.audioDuration, 20_000);
   assert.equal(result.audioSupported, true);
+  assert.equal(result.container, 'iso-base-media');
+  assert.deepEqual(result.boxes, ['ftyp', 'moov', 'free', 'mdat']);
+  assert.equal(result.mediaDuration, 3);
+  assert.equal(result.sampleCount, 180);
+  assert.equal(result.codecConfig, 'avcC');
   console.log(JSON.stringify({ status: 'ok', ...result }));
 } finally {
   await browser.close();

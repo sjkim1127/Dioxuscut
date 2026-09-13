@@ -341,11 +341,12 @@ export async function readMediaRange(source, start, endExclusive, { requestInit 
   const response = await fetch(source, { ...requestInit, headers });
   if (!response.ok) throw new Error(`media range request failed: ${response.status}`);
   const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.length > length && response.status !== 206) {
-    throw new Error('media range response exceeded requested length');
-  }
   if (response.status === 206 && bytes.length !== length) {
     throw new Error(`media range response length ${bytes.length} did not match requested length ${length}`);
+  }
+  if (response.status === 200) {
+    if (start >= bytes.length) return new Uint8Array();
+    return bytes.slice(start, Math.min(endExclusive, bytes.length));
   }
   return bytes;
 }
