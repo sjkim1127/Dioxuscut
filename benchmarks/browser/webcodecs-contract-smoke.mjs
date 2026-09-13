@@ -49,6 +49,13 @@ try {
     const samples = await window.dioxuscut.readIsoBmffSamples('/assets/showcase.mp4', 0, [0, 1, 2], {
       parsed, concurrency: 2,
     });
+    const codecConfig = window.dioxuscut.makeIsoBmffWebCodecsConfig(parsed.tracks[0]);
+    const frames = await window.dioxuscut.decodeIsoBmffVideo('/assets/showcase.mp4', {
+      trackIndex: 0, startSample: 0, endSample: 3, maxSamples: 3,
+      codec: codecConfig.codec, description: codecConfig.description, options: { parsed },
+    });
+    const decoded = frames.map((frame) => ({ width: frame.displayWidth, height: frame.displayHeight, timestamp: frame.timestamp }));
+    for (const frame of frames) frame.close();
     return {
       type: chunk.type, timestamp: chunk.timestamp, duration: chunk.duration, supported: support.supported,
       annexB: [...annexB],
@@ -66,6 +73,7 @@ try {
         sampleDescriptionIndex: parsed.tracks[0].sampleTables.sampleRanges[sampleIndex].sampleDescriptionIndex,
       })),
       ranged: [...ranged],
+      decoded,
     };
   });
   assert.equal(result.type, 'key');
@@ -91,6 +99,9 @@ try {
   assert.equal(result.batchSamples[0].sampleDescriptionIndex, 1);
   assert.ok(result.batchSamples.every(({ size, bytes }) => size === bytes && size > 0));
   assert.deepEqual(result.ranged, [2, 3, 4, 5]);
+  assert.equal(result.decoded.length, 3);
+  assert.ok(result.decoded.every(({ width, height }) => width > 0 && height > 0));
+  assert.ok(result.decoded.every(({ timestamp }, index, frames) => index === 0 || timestamp > frames[index - 1].timestamp));
   console.log(JSON.stringify({ status: 'ok', ...result }));
 } finally {
   await browser.close();
