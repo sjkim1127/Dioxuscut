@@ -251,6 +251,9 @@ async fn main() -> anyhow::Result<()> {
             };
             let mut runs = Vec::with_capacity(*repetitions);
             for _ in 0..*repetitions {
+                // Repetitions are intended to measure the same uncached
+                // workload, not cache-hit latency from the previous run.
+                backend.clear_frame_cache();
                 runs.push(render_sequence()?);
             }
             let report = runs[0].0;
