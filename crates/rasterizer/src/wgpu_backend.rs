@@ -1145,8 +1145,13 @@ fn compile_nodes(
                 shadow: None,
                 children,
                 ..
-            } if filters.is_empty() && layer_opacity.is_finite() => {
-                compile_nodes(children, transform, opacity * layer_opacity, output)?;
+            } if gpu_layer_opacity(filters, *layer_opacity).is_some() => {
+                compile_nodes(
+                    children,
+                    transform,
+                    opacity * gpu_layer_opacity(filters, *layer_opacity).unwrap(),
+                    output,
+                )?;
             }
 
             SceneNode::Audio { .. } => {}
@@ -1162,6 +1167,18 @@ fn compile_nodes(
         }
     }
     Some(())
+}
+
+fn gpu_layer_opacity(filters: &[crate::scene::SceneFilter], layer_opacity: f32) -> Option<f32> {
+    if !layer_opacity.is_finite() {
+        return None;
+    }
+    filters.iter().try_fold(layer_opacity, |opacity, filter| {
+        let crate::scene::SceneFilter::Opacity { amount } = filter else {
+            return None;
+        };
+        amount.is_finite().then(|| opacity * amount)
+    })
 }
 
 #[cfg(test)]
@@ -1449,7 +1466,7 @@ mod support_tests {
                 clip: None,
                 mask: None,
                 mask_mode: crate::scene::MaskMode::Alpha,
-                filters: vec![],
+                filters: vec![crate::scene::SceneFilter::Opacity { amount: 0.5 }],
                 shadow: None,
                 children: vec![SceneNode::Rect {
                     x: 0.0,
@@ -1465,7 +1482,7 @@ mod support_tests {
         };
         assert!(gpu_supports_scene(&scene));
         assert!(
-            (compile_scene(&scene).unwrap()[0].instance().params[3] - 0.5).abs() < f32::EPSILON
+            (compile_scene(&scene).unwrap()[0].instance().params[3] - 0.25).abs() < f32::EPSILON
         );
     }
 }
