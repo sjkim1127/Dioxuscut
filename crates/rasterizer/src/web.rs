@@ -38,6 +38,10 @@ pub struct WebFrameRequest {
     /// Preserve alpha for PNG screenshots instead of compositing a page background.
     #[serde(default)]
     pub transparent: bool,
+    /// Optional binary file transport. The worker writes the encoded image to
+    /// a temporary file and returns only its path in the JSON response.
+    #[serde(default)]
+    pub transport: Option<String>,
 }
 
 /// Result returned by a browser-backed renderer.
@@ -54,6 +58,8 @@ pub struct WebFrameResponse {
     /// Legacy transport retained for older workers.
     #[serde(default)]
     pub rgba_base64: Option<String>,
+    #[serde(default)]
+    pub file_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -93,6 +99,7 @@ mod tests {
             image_format: None,
             jpeg_quality: None,
             transparent: true,
+            transport: None,
         });
         let json = serde_json::to_string(&message).unwrap();
         assert_eq!(

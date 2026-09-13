@@ -110,6 +110,12 @@ optionally `DIOXUSCUT_BROWSER_JPEG_QUALITY=90`. On the reference M4 Pro
 Three.js scene, JPEG quality 90 measured about 2x the PNG throughput (roughly
 60 FPS versus 30 FPS), but remains opt-in because it is lossy.
 
+To keep encoded frame bytes out of the JSON/base64 channel, set
+`DIOXUSCUT_BROWSER_TRANSPORT=file`. The worker writes a process-scoped
+temporary PNG/JPEG and the Rust backend removes it after decoding. This mode is
+useful for local Tauri/CLI jobs; the default remains JSON/base64 for maximum
+portability.
+
 For browser compositions that intentionally render transparency, set
 `DIOXUSCUT_BROWSER_TRANSPARENT=1`. This forwards Remotion's `omitBackground`
 behavior to Playwright for PNG frames; JPEG transport remains opaque by

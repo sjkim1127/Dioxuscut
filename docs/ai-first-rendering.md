@@ -144,6 +144,8 @@ export DIOXUSCUT_BROWSER_TRANSPORT_RETRIES=1
 # Optional: lower-latency lossy browser capture for opaque video workloads.
 export DIOXUSCUT_BROWSER_IMAGE_FORMAT=jpeg
 export DIOXUSCUT_BROWSER_JPEG_QUALITY=90
+# Optional: keep encoded frame bytes out of JSON/base64 transport.
+export DIOXUSCUT_BROWSER_TRANSPORT=file
 ```
 
 Rust embedders such as Tauri can configure the same capture policy on an
@@ -155,11 +157,15 @@ let backend = BrowserFrameBackend::with_concurrency(node, worker, url, 4)?
     .with_jpeg_quality(90)
     .with_transparent(false)
     .with_frame_timeout(std::time::Duration::from_secs(30))
-    .with_transport_retries(2);
+    .with_transport_retries(2)
+    .with_file_transport(true);
 ```
 
 This keeps browser transport policy local to a Tauri render job while the
 wire protocol remains identical for Dioxus desktop, CLI, and other hosts.
+The `file` transport writes each encoded PNG/JPEG frame to a process-scoped
+temporary file and deletes it after Rust decodes it; omit the option to retain
+the JSON/base64 compatibility path.
 
 When the packaged Tauri app runs without `DIOXUSCUT_BROWSER_URL`, the host
 serves its bundled `dist` directory from a dynamic loopback port and points the

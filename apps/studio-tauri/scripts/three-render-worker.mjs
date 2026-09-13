@@ -1,6 +1,8 @@
 import { createInterface } from 'node:readline';
 import { Buffer } from 'node:buffer';
 import { existsSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { chromium } from 'playwright-core';
 
 const args = new Map(process.argv.slice(2).flatMap((arg) => {
@@ -95,13 +97,20 @@ rl.on('line', (line) => { queue = queue.then(async () => {
     }
     if (lastError) throw lastError;
     const imageType = request.image_format === 'jpeg' ? 'jpeg' : 'png';
-    const screenshot = await page.screenshot({ type: imageType, encoding: 'base64',
+    const fileTransport = request.transport === 'file';
+    const screenshot = await page.screenshot({ type: imageType, ...(fileTransport ? {} : { encoding: 'base64' }),
       omitBackground: imageType === 'png' && request.transparent === true,
       quality: imageType === 'jpeg' ? (request.jpeg_quality ?? 90) : undefined });
+    if (fileTransport) {
+      const path = `${tmpdir()}/dioxuscut-frame-${process.pid}-${request.frame}-${Date.now()}.${imageType}`;
+      writeFileSync(path, screenshot);
+      write({ type: 'frame', frame: request.frame, width: request.width, height: request.height, file_path: path });
+    } else {
     write({ type: 'frame', frame: request.frame, width: request.width, height: request.height,
       ...(imageType === 'png'
         ? { png_base64: screenshot }
         : { jpeg_base64: screenshot }) });
+    }
   } catch (error) {
     write({ type: 'error', frame: message.frame ?? null, message: String(error) });
   }

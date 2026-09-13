@@ -18,6 +18,7 @@ const jpegQuality = Number(process.env.DIOXUSCUT_BROWSER_JPEG_QUALITY ?? 90);
 const transparent = ['1', 'true', 'yes'].includes(
   (process.env.DIOXUSCUT_BROWSER_TRANSPARENT ?? '').trim().toLowerCase(),
 );
+const transport = process.env.DIOXUSCUT_BROWSER_TRANSPORT;
 
 function spawnWorker() {
   return new Promise((resolve, reject) => {
@@ -51,6 +52,7 @@ function spawnWorker() {
         width: 1280, height: 720, props: {},
         ...(imageFormat === 'jpeg' ? {image_format: 'jpeg', jpeg_quality: jpegQuality} : {}),
         ...(transparent ? {transparent: true} : {}),
+        ...(transport === 'file' ? {transport: 'file'} : {}),
       }) + '\n');
     });
     (async () => {

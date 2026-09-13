@@ -46,6 +46,7 @@ pub struct BrowserFrameBackend {
     image_format: Option<String>,
     jpeg_quality: Option<u8>,
     transparent: bool,
+    transport: Option<String>,
     transport_retries: usize,
     props: Mutex<serde_json::Value>,
     cache: FrameCacheManager,
@@ -110,6 +111,9 @@ impl BrowserFrameBackend {
                         "1" | "true" | "yes"
                     )
                 }),
+            transport: std::env::var("DIOXUSCUT_BROWSER_TRANSPORT")
+                .ok()
+                .filter(|value| value == "file"),
             transport_retries: browser_transport_retries_from_env(),
             props: Mutex::new(serde_json::json!({})),
             cache: FrameCacheManager::default(),
@@ -273,6 +277,13 @@ impl BrowserFrameBackend {
     /// preferable for embedders that do not use process-wide environment state.
     pub fn with_transparent(mut self, transparent: bool) -> Self {
         self.transparent = transparent;
+        self
+    }
+
+    /// Configure binary file transport for encoded browser frames. The
+    /// default JSON/base64 path remains available for embedded hosts.
+    pub fn with_file_transport(mut self, enabled: bool) -> Self {
+        self.transport = enabled.then(|| "file".to_string());
         self
     }
 
@@ -462,6 +473,7 @@ impl BrowserFrameBackend {
                 png_base64,
                 jpeg_base64,
                 rgba_base64,
+                file_path,
             })) if frame == request.frame => {
                 if let Some(encoded) = png_base64 {
                     let bytes = base64::engine::general_purpose::STANDARD
@@ -526,6 +538,30 @@ impl BrowserFrameBackend {
                         frame,
                         reason: "RGBA payload length does not match dimensions".into(),
                     })
+                } else if let Some(path) = file_path {
+                    let bytes = std::fs::read(&path).map_err(|e| RasterError::Frame {
+                        frame,
+                        reason: format!("unable to read browser frame file {path}: {e}"),
+                    })?;
+                    let _ = std::fs::remove_file(&path);
+                    let image =
+                        image::load_from_memory(&bytes).map_err(|e| RasterError::Frame {
+                            frame,
+                            reason: e.to_string(),
+                        })?;
+                    if image.width() != width || image.height() != height {
+                        return Err(RasterError::Frame {
+                            frame,
+                            reason: format!(
+                                "image payload dimensions {}x{} do not match response {}x{}",
+                                image.width(),
+                                image.height(),
+                                width,
+                                height
+                            ),
+                        });
+                    }
+                    Ok(image.into_rgba8())
                 } else {
                     Err(RasterError::Frame {
                         frame,
@@ -605,6 +641,7 @@ impl RasterizerBackend for BrowserFrameBackend {
             image_format: self.image_format.clone(),
             jpeg_quality: self.jpeg_quality,
             transparent: self.transparent,
+            transport: self.transport.clone(),
             props,
         })
     }
@@ -660,6 +697,7 @@ mod tests {
                 image_format: None,
                 jpeg_quality: None,
                 transparent: false,
+                transport: None,
             })
             .unwrap();
         assert_eq!(image.as_raw(), &[1, 2, 3, 4]);
