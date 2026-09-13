@@ -707,6 +707,45 @@ export function createIsoBmffEncodedChunk(sample, type = 'video') {
   });
 }
 
+// Decode a bounded sequence of ISO-BMFF samples with Chromium WebCodecs.
+// `codecConfig` is caller-supplied because avcC/hvcC normalization and codec
+// string selection depend on the sample entry; returned VideoFrames belong to
+// the caller and must be closed when no longer needed.
+export async function decodeIsoBmffVideo(source, {
+  trackIndex = 0, startSample = 0, endSample = Infinity, codec, description, options = {},
+} = {}) {
+  if (typeof VideoDecoder === 'undefined') throw new Error('VideoDecoder is not available in this runtime');
+  if (typeof codec !== 'string' || !codec) throw new TypeError('decodeIsoBmffVideo requires a codec string');
+  const parsed = await parseIsoBmffMovieHeader(source, options);
+  const track = parsed?.tracks?.[trackIndex];
+  const ranges = track?.sampleTables?.sampleRanges ?? [];
+  const samples = ranges.filter(({ sampleIndex }) => sampleIndex >= startSample && sampleIndex < endSample);
+  if (!samples.length) throw new RangeError('decodeIsoBmffVideo found no samples in the requested range');
+  const frames = [];
+  let failure;
+  const decoder = new VideoDecoder({
+    output: (frame) => frames.push(frame),
+    error: (error) => { failure = error; },
+  });
+  decoder.configure({ codec, ...(description ? { description } : {}) });
+  try {
+    for (const sample of samples) {
+      decoder.decode(createIsoBmffEncodedChunk({
+        ...sample,
+        data: await readMediaRange(source, sample.offset, sample.offset + sample.size, options),
+      }));
+    }
+    await decoder.flush();
+    if (failure) throw failure;
+    return frames;
+  } catch (error) {
+    for (const frame of frames) frame.close();
+    throw error;
+  } finally {
+    decoder.close();
+  }
+}
+
 function uint32be(bytes, offset) {
   return ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0;
 }
@@ -1488,6 +1527,7 @@ window.dioxuscut = {
   parseIsoBmffMovieHeader,
   readIsoBmffSample,
   createIsoBmffEncodedChunk,
+  decodeIsoBmffVideo,
   readMediaRange,
   getAudioDurationInSeconds,
   getAudioDuration,
