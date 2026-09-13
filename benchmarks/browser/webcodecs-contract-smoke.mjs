@@ -126,6 +126,11 @@ try {
       trackNumber: 1, maxSamples: 3, codec: 'vp09.00.10.08',
     });
     const webmDecodedDimensions = webmFrames.map(({ displayWidth, displayHeight }) => [displayWidth, displayHeight]);
+    const webmRgba = await window.dioxuscut.videoFrameToRgba(webmFrames[0]);
+    if (webmRgba.rgba.byteLength !== webmRgba.width * webmRgba.height * 4
+      || webmRgba.width !== 160 || webmRgba.height !== 90) {
+      throw new Error(`VideoFrame RGBA transport contract failed: ${webmRgba.width}x${webmRgba.height}/${webmRgba.rgba.byteLength}`);
+    }
     for (const frame of webmFrames) frame.close();
     const webmAudioSamples = await window.dioxuscut.readWebmSamples('/assets/webm-audio-fixture.webm', 1);
     const webmVp8Metadata = await window.dioxuscut.parseMedia({ src: '/assets/webm-vp8-fixture.webm' });
@@ -253,6 +258,7 @@ try {
         samples: webmSamples.length,
         rangeFallbackSamples: webm416Samples.length,
         decoded: webmFrames.length,
+        rgbaTransport: { width: webmRgba.width, height: webmRgba.height, bytes: webmRgba.rgba.byteLength },
         streamed: { count: streamedWebmFrames, returnValue: streamedWebmResult },
         audioSamples: webmAudioSamples.length,
         vp8: { codec: webmVp8Metadata.videoCodec, decoded: webmVp8Dimensions },

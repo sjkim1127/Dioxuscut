@@ -1455,6 +1455,26 @@ export async function decodeIsoBmffVideo(source, {
   }
 }
 
+// Convert one WebCodecs VideoFrame to the native transport contract. The
+// returned bytes are tightly packed, top-to-bottom RGBA8 pixels; callers own
+// the Uint8Array and must still close the input VideoFrame.
+export async function videoFrameToRgba(frame) {
+  if (!frame || typeof frame.copyTo !== 'function') {
+    throw new TypeError('videoFrameToRgba expects a VideoFrame');
+  }
+  const width = frame.displayWidth ?? frame.codedWidth;
+  const height = frame.displayHeight ?? frame.codedHeight;
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+    throw new RangeError('VideoFrame has invalid display dimensions');
+  }
+  const rgba = new Uint8Array(width * height * 4);
+  await frame.copyTo(rgba, {
+    format: 'RGBA',
+    layout: [{ offset: 0, stride: width * 4 }],
+  });
+  return { width, height, rgba };
+}
+
 export async function decodeIsoBmffAudio(source, {
   trackIndex = 0, startSample = 0, endSample = Infinity, maxSamples = 256, codec, description,
   numberOfChannels, sampleRate, options = {}, onAudioData,
@@ -2383,6 +2403,7 @@ window.dioxuscut = {
   makeIsoBmffWebCodecsConfig,
   avccToAnnexB,
   decodeIsoBmffVideo,
+  videoFrameToRgba,
   decodeIsoBmffAudio,
   readMediaRange,
   getAudioDurationInSeconds,
