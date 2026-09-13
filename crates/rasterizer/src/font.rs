@@ -464,7 +464,19 @@ impl FontCache {
             .get(&key)
             .cloned()
         {
-            return Ok(Some((*cached).clone()));
+            let rendered = (*cached).clone();
+            let atlas_key = format!("{}:{}:{:?}", key.text, key.font_size_bits, key.sources);
+            let mut atlas = self.atlas.lock().expect("text atlas lock poisoned");
+            if atlas.entry(&atlas_key).is_none() {
+                let _ = atlas.insert(
+                    atlas_key,
+                    &rendered.pixels,
+                    rendered.width,
+                    rendered.height,
+                    rendered.baseline,
+                );
+            }
+            return Ok(Some(rendered));
         }
         let rendered = self.rasterize_uncached(text, font_size, sources)?;
         if let Some(rendered) = rendered.as_ref() {

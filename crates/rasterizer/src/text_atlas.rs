@@ -40,11 +40,17 @@ pub(crate) struct TextAtlas {
     entries: HashMap<String, AtlasEntry>,
     generation: u64,
     dirty: Option<AtlasRect>,
+    max_entries: usize,
 }
 
 impl TextAtlas {
     pub(crate) fn new(width: u32, height: u32) -> Self {
+        Self::with_max_entries(width, height, 4096)
+    }
+
+    pub(crate) fn with_max_entries(width: u32, height: u32, max_entries: usize) -> Self {
         assert!(width > 0 && height > 0);
+        assert!(max_entries > 0);
         Self {
             width,
             height,
@@ -55,6 +61,7 @@ impl TextAtlas {
             entries: HashMap::new(),
             generation: 0,
             dirty: None,
+            max_entries,
         }
     }
 
@@ -68,6 +75,9 @@ impl TextAtlas {
     ) -> Option<AtlasEntry> {
         if let Some(entry) = self.entries.get(&key).copied() {
             return Some(entry);
+        }
+        if self.entries.len() >= self.max_entries {
+            self.clear();
         }
         if glyph_width == 0 || glyph_height == 0 || coverage.len() != (glyph_width * glyph_height) as usize
             || glyph_width > self.width || glyph_height > self.height
@@ -186,5 +196,18 @@ mod tests {
         assert!(atlas.entry("text").is_none());
         assert!(atlas.snapshot().pixels.iter().all(|pixel| *pixel == 0));
         assert_eq!(&snapshot.pixels[..2], &[9, 8]);
+    }
+
+    #[test]
+    fn capacity_reset_evicts_old_entries_and_marks_full_atlas_dirty() {
+        let mut atlas = TextAtlas::with_max_entries(4, 2, 1);
+        atlas.insert("old".into(), &[1], 1, 1, 0).unwrap();
+        let before = atlas.snapshot().generation;
+        atlas.insert("new".into(), &[2], 1, 1, 0).unwrap();
+        let snapshot = atlas.snapshot();
+        assert!(snapshot.generation > before);
+        assert!(atlas.entry("old").is_none());
+        assert!(atlas.entry("new").is_some());
+        assert_eq!(snapshot.dirty, Some(AtlasRect { x: 0, y: 0, width: 4, height: 2 }));
     }
 }
