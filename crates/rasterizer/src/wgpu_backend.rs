@@ -173,7 +173,8 @@ struct InstanceData {
     grayscale: vec4<f32>,
     contrast: vec4<f32>,
     saturation: vec4<f32>,
-    clip_rect: vec4<f32>,
+    clip_rects: array<vec4<f32>, 4>,
+    mask_opacity: vec4<f32>,
     // corner radius, stroke width, angle, inherited opacity
     params: vec4<f32>,
     // x' = dot(transform_x.xyz, vec3(x, y, 1))
@@ -310,11 +311,8 @@ fn apply_color_filters(color: vec4<f32>, instance: InstanceData) -> vec4<f32> {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let instance = instances[in.instance_index];
-    if instance.clip_rect.z >= 0.0 &&
-        (in.transformed_position.x < instance.clip_rect.x ||
-         in.transformed_position.y < instance.clip_rect.y ||
-         in.transformed_position.x >= instance.clip_rect.x + instance.clip_rect.z ||
-         in.transformed_position.y >= instance.clip_rect.y + instance.clip_rect.w) {
+    let mask_coverage_value = mask_coverage(in.transformed_position, instance);
+    if mask_coverage_value <= 0.0 {
         discard;
     }
     let shape_type = instance.kind_data.x;
@@ -373,31 +371,25 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     col = apply_color_filters(col, instance);
-    return vec4<f32>(col.rgb, col.a * instance.params.w * coverage);
+    return vec4<f32>(col.rgb, col.a * instance.params.w * coverage * mask_coverage_value);
 }
 
 @fragment
 fn fs_solid(in: VertexOutput) -> @location(0) vec4<f32> {
     let instance = instances[in.instance_index];
-    if instance.clip_rect.z >= 0.0 &&
-        (in.transformed_position.x < instance.clip_rect.x ||
-         in.transformed_position.y < instance.clip_rect.y ||
-         in.transformed_position.x >= instance.clip_rect.x + instance.clip_rect.z ||
-         in.transformed_position.y >= instance.clip_rect.y + instance.clip_rect.w) {
+    let mask_coverage_value = mask_coverage(in.transformed_position, instance);
+    if mask_coverage_value <= 0.0 {
         discard;
     }
     let color = apply_color_filters(instance.color, instance);
-    return vec4<f32>(color.rgb, color.a * instance.params.w);
+    return vec4<f32>(color.rgb, color.a * instance.params.w * mask_coverage_value);
 }
 
 @fragment
 fn fs_image(in: VertexOutput) -> @location(0) vec4<f32> {
     let instance = instances[in.instance_index];
-    if instance.clip_rect.z >= 0.0 &&
-        (in.transformed_position.x < instance.clip_rect.x ||
-         in.transformed_position.y < instance.clip_rect.y ||
-         in.transformed_position.x >= instance.clip_rect.x + instance.clip_rect.z ||
-         in.transformed_position.y >= instance.clip_rect.y + instance.clip_rect.w) {
+    let mask_coverage_value = mask_coverage(in.transformed_position, instance);
+    if mask_coverage_value <= 0.0 {
         discard;
     }
     let bounds = instance.shape_bounds;
@@ -405,17 +397,14 @@ fn fs_image(in: VertexOutput) -> @location(0) vec4<f32> {
     let uv = mix(instance.params.xy, instance.params.zw, clamp(local, vec2<f32>(0.0), vec2<f32>(1.0)));
     let sampled = textureSample(image_texture, image_sampler, uv);
     let color = apply_color_filters(vec4<f32>(sampled.rgb, instance.color.a), instance);
-    return vec4<f32>(color.rgb, sampled.a * instance.color.a * instance.params.w);
+    return vec4<f32>(color.rgb, sampled.a * instance.color.a * instance.params.w * mask_coverage_value);
 }
 
 @fragment
 fn fs_text(in: VertexOutput) -> @location(0) vec4<f32> {
     let instance = instances[in.instance_index];
-    if instance.clip_rect.z >= 0.0 &&
-        (in.transformed_position.x < instance.clip_rect.x ||
-         in.transformed_position.y < instance.clip_rect.y ||
-         in.transformed_position.x >= instance.clip_rect.x + instance.clip_rect.z ||
-         in.transformed_position.y >= instance.clip_rect.y + instance.clip_rect.w) {
+    let mask_coverage_value = mask_coverage(in.transformed_position, instance);
+    if mask_coverage_value <= 0.0 {
         discard;
     }
     let bounds = instance.shape_bounds;
@@ -423,7 +412,34 @@ fn fs_text(in: VertexOutput) -> @location(0) vec4<f32> {
     let uv = mix(instance.params.xy, instance.params.zw, clamp(local, vec2<f32>(0.0), vec2<f32>(1.0)));
     let coverage = textureSample(image_texture, image_sampler, uv).r;
     let color = apply_color_filters(instance.color, instance);
-    return vec4<f32>(color.rgb, coverage * color.a * instance.params.w);
+    return vec4<f32>(color.rgb, coverage * color.a * instance.params.w * mask_coverage_value);
+}
+
+fn mask_coverage(position: vec2<f32>, instance: InstanceData) -> f32 {
+    var coverage = 0.0;
+    var has_mask = false;
+    let rect0 = instance.clip_rects[0];
+    let rect1 = instance.clip_rects[1];
+    let rect2 = instance.clip_rects[2];
+    let rect3 = instance.clip_rects[3];
+    let opacity0 = instance.mask_opacity[0];
+    let opacity1 = instance.mask_opacity[1];
+    let opacity2 = instance.mask_opacity[2];
+    let opacity3 = instance.mask_opacity[3];
+    if opacity0 >= 0.0 { has_mask = true; coverage = mask_rect_coverage(position, rect0, opacity0, coverage); }
+    if opacity1 >= 0.0 { has_mask = true; coverage = mask_rect_coverage(position, rect1, opacity1, coverage); }
+    if opacity2 >= 0.0 { has_mask = true; coverage = mask_rect_coverage(position, rect2, opacity2, coverage); }
+    if opacity3 >= 0.0 { has_mask = true; coverage = mask_rect_coverage(position, rect3, opacity3, coverage); }
+    if has_mask { return coverage; }
+    return 1.0;
+}
+
+fn mask_rect_coverage(position: vec2<f32>, rect: vec4<f32>, opacity: f32, current: f32) -> f32 {
+    if position.x >= rect.x && position.y >= rect.y &&
+        position.x < rect.x + rect.z && position.y < rect.y + rect.w {
+        return 1.0 - (1.0 - current) * (1.0 - clamp(opacity, 0.0, 1.0));
+    }
+    return current;
 }
 "#;
 
@@ -2204,7 +2220,8 @@ struct GpuInstance {
     grayscale: [f32; 4],
     contrast: [f32; 4],
     saturation: [f32; 4],
-    clip_rect: [f32; 4],
+    clip_rects: [[f32; 4]; 4],
+    mask_opacity: [f32; 4],
     params: [f32; 4],
     transform_x: [f32; 4],
     transform_y: [f32; 4],
@@ -2225,7 +2242,8 @@ impl GpuInstance {
             grayscale: [0.0, 0.0, 0.0, 0.0],
             contrast: [1.0, 0.0, 0.0, 0.0],
             saturation: [1.0, 0.0, 0.0, 0.0],
-            clip_rect: [-1.0, -1.0, -1.0, -1.0],
+            clip_rects: [[-1.0; 4]; 4],
+            mask_opacity: [-1.0; 4],
             params: [0.0, 0.0, 0.0, opacity],
             transform_x,
             transform_y,
@@ -2565,14 +2583,14 @@ fn compile_nodes(
                 && (*mask_mode == crate::scene::MaskMode::Alpha
                     || *mask_mode == crate::scene::MaskMode::Luminance)
                 && (mask.is_none()
-                    || gpu_rect_mask(mask.as_deref().unwrap_or(&[]), transform, *mask_mode)
+                    || gpu_rect_masks(mask.as_deref().unwrap_or(&[]), transform, *mask_mode)
                         .is_some()) =>
             {
                 let (layer_opacity, brightness, grayscale, contrast, saturation) =
                     gpu_layer_effects(filters, *layer_opacity).unwrap();
                 let mask_info = mask
                     .as_deref()
-                    .and_then(|nodes| gpu_rect_mask(nodes, transform, *mask_mode));
+                    .and_then(|nodes| gpu_rect_masks(nodes, transform, *mask_mode));
                 let start = output.len();
                 compile_nodes(children, transform, opacity * layer_opacity, output, font)?;
                 for command in &mut output[start..] {
@@ -2581,9 +2599,9 @@ fn compile_nodes(
                     instance.grayscale[0] = 1.0 - (1.0 - instance.grayscale[0]) * (1.0 - grayscale);
                     instance.contrast[0] *= contrast;
                     instance.saturation[0] *= saturation;
-                    if let Some((clip_rect, mask_opacity)) = mask_info {
-                        instance.clip_rect = clip_rect;
-                        instance.params[3] *= mask_opacity;
+                    if let Some((clip_rects, mask_opacity)) = mask_info {
+                        instance.clip_rects = clip_rects;
+                        instance.mask_opacity = mask_opacity;
                     }
                 }
             }
@@ -2670,62 +2688,71 @@ fn gpu_layer_effects(
     )
 }
 
-fn gpu_rect_mask(
+fn gpu_rect_masks(
     mask: &[SceneNode],
     transform: Transform,
     mask_mode: crate::scene::MaskMode,
-) -> Option<([f32; 4], f32)> {
-    let [SceneNode::Rect {
-        x,
-        y,
-        w,
-        h,
-        fill,
-        stroke: None,
-        stroke_width,
-        corner_radius,
-    }] = mask
-    else {
-        return None;
-    };
-    if ![*x, *y, *w, *h, *stroke_width, *corner_radius]
-        .iter()
-        .all(|value| value.is_finite())
-        || *w <= 0.0
-        || *h <= 0.0
-        || *stroke_width != 0.0
-        || *corner_radius != 0.0
-    {
+) -> Option<([[f32; 4]; 4], [f32; 4])> {
+    if mask.is_empty() || mask.len() > 4 {
         return None;
     }
-    let mask_opacity = match mask_mode {
-        crate::scene::MaskMode::Alpha => f32::from(fill.a) / 255.0,
-        crate::scene::MaskMode::Luminance if fill.r == fill.g && fill.g == fill.b => {
-            f32::from(fill.r) * f32::from(fill.a) / (255.0 * 255.0)
+    let mut rects = [[-1.0; 4]; 4];
+    let mut opacities = [-1.0; 4];
+    for (index, node) in mask.iter().enumerate() {
+        let SceneNode::Rect {
+            x,
+            y,
+            w,
+            h,
+            fill,
+            stroke: None,
+            stroke_width,
+            corner_radius,
+        } = node
+        else {
+            return None;
+        };
+        if ![*x, *y, *w, *h, *stroke_width, *corner_radius]
+            .iter()
+            .all(|value| value.is_finite())
+            || *w <= 0.0
+            || *h <= 0.0
+            || *stroke_width != 0.0
+            || *corner_radius != 0.0
+        {
+            return None;
         }
-        crate::scene::MaskMode::Luminance => return None,
-    };
-    // Translation and axis-aligned scale remain exact rectangular clips in
-    // screen space. Rotation/shear falls back: a bounding box would overdraw.
-    if !transform.sx.is_finite()
-        || !transform.sy.is_finite()
-        || !transform.tx.is_finite()
-        || !transform.ty.is_finite()
-        || transform.kx != 0.0
-        || transform.ky != 0.0
-    {
-        return None;
+        let mask_opacity = match mask_mode {
+            crate::scene::MaskMode::Alpha => f32::from(fill.a) / 255.0,
+            crate::scene::MaskMode::Luminance if fill.r == fill.g && fill.g == fill.b => {
+                f32::from(fill.r) * f32::from(fill.a) / (255.0 * 255.0)
+            }
+            crate::scene::MaskMode::Luminance => return None,
+        };
+        // Translation and axis-aligned scale remain exact rectangular clips in
+        // screen space. Rotation/shear falls back: a bounding box would overdraw.
+        if !transform.sx.is_finite()
+            || !transform.sy.is_finite()
+            || !transform.tx.is_finite()
+            || !transform.ty.is_finite()
+            || transform.kx != 0.0
+            || transform.ky != 0.0
+        {
+            return None;
+        }
+        let x0 = *x * transform.sx + transform.tx;
+        let x1 = (*x + *w) * transform.sx + transform.tx;
+        let y0 = *y * transform.sy + transform.ty;
+        let y1 = (*y + *h) * transform.sy + transform.ty;
+        let width = (x1 - x0).abs();
+        let height = (y1 - y0).abs();
+        if width <= 0.0 || height <= 0.0 {
+            return None;
+        }
+        rects[index] = [x0.min(x1), y0.min(y1), width, height];
+        opacities[index] = mask_opacity;
     }
-    let x0 = *x * transform.sx + transform.tx;
-    let x1 = (*x + *w) * transform.sx + transform.tx;
-    let y0 = *y * transform.sy + transform.ty;
-    let y1 = (*y + *h) * transform.sy + transform.ty;
-    let width = (x1 - x0).abs();
-    let height = (y1 - y0).abs();
-    if width <= 0.0 || height <= 0.0 {
-        return None;
-    }
-    Some(([x0.min(x1), y0.min(y1), width, height], mask_opacity))
+    Some((rects, opacities))
 }
 
 #[cfg(test)]
@@ -3685,16 +3712,28 @@ mod tests {
                     opacity: 1.0,
                     blend_mode: crate::scene::BlendMode::Normal,
                     clip: None,
-                    mask: Some(vec![SceneNode::Rect {
-                        x: 8.0,
-                        y: 0.0,
-                        w: 16.0,
-                        h: 32.0,
-                        fill: Color::WHITE,
-                        stroke: None,
-                        stroke_width: 0.0,
-                        corner_radius: 0.0,
-                    }]),
+                    mask: Some(vec![
+                        SceneNode::Rect {
+                            x: 4.0,
+                            y: 0.0,
+                            w: 6.0,
+                            h: 32.0,
+                            fill: Color::WHITE,
+                            stroke: None,
+                            stroke_width: 0.0,
+                            corner_radius: 0.0,
+                        },
+                        SceneNode::Rect {
+                            x: 22.0,
+                            y: 0.0,
+                            w: 6.0,
+                            h: 32.0,
+                            fill: Color::WHITE,
+                            stroke: None,
+                            stroke_width: 0.0,
+                            corner_radius: 0.0,
+                        },
+                    ]),
                     mask_mode: crate::scene::MaskMode::Alpha,
                     filters: Vec::new(),
                     shadow: None,
@@ -3733,7 +3772,7 @@ mod tests {
             mean_error < 2.0,
             "GPU/CPU alpha mask mean error was {mean_error}"
         );
-        assert_eq!(gpu_image.get_pixel(4, 16), cpu_image.get_pixel(4, 16));
+        assert_eq!(gpu_image.get_pixel(7, 16), cpu_image.get_pixel(7, 16));
         assert_eq!(gpu_image.get_pixel(16, 16), cpu_image.get_pixel(16, 16));
     }
 
