@@ -714,6 +714,16 @@ struct GpuImageCacheState {
     max_bytes: usize,
 }
 
+struct GpuTextAtlasResource {
+    _texture: wgpu::Texture,
+    _view: wgpu::TextureView,
+    _sampler: wgpu::Sampler,
+    bind_group: wgpu::BindGroup,
+    width: u32,
+    height: u32,
+    generation: u64,
+}
+
 impl GpuImageCacheState {
     fn new(max_bytes: usize) -> Self {
         Self {
@@ -754,6 +764,7 @@ pub struct WgpuBackend {
     /// identity as `ImageCache`. Texture uploads therefore happen once per
     /// source, rather than once per rendered frame.
     gpu_images: GpuImageCache,
+    text_atlas: Mutex<Option<Arc<GpuTextAtlasResource>>>,
     gpu_frame_count: AtomicU64,
     cpu_fallback_frame_count: AtomicU64,
 }
@@ -790,6 +801,7 @@ impl WgpuBackend {
             image_cache: ImageCache::default(),
             video_cache: VideoFrameCache::default(),
             gpu_images: Mutex::new(GpuImageCacheState::new(256 * 1024 * 1024)),
+            text_atlas: Mutex::new(None),
             gpu_frame_count: AtomicU64::new(0),
             cpu_fallback_frame_count: AtomicU64::new(0),
         })
@@ -907,6 +919,60 @@ impl WgpuBackend {
         self.gpu_pixels(src, &decoded)
     }
 
+    fn gpu_text_atlas(
+        &self,
+        snapshot: &crate::text_atlas::TextAtlasSnapshot,
+    ) -> Arc<GpuTextAtlasResource> {
+        let mut cache = self.text_atlas.lock().expect("text atlas GPU lock poisoned");
+        if let Some(resource) = cache.as_ref() {
+            if resource.width == snapshot.width
+                && resource.height == snapshot.height
+                && resource.generation == snapshot.generation
+            {
+                return resource.clone();
+            }
+        }
+        let device = &self.ctx.device;
+        let queue = &self.ctx.queue;
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("text_atlas_texture"),
+            size: wgpu::Extent3d { width: snapshot.width, height: snapshot.height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            texture.as_image_copy(),
+            &snapshot.pixels,
+            wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(snapshot.width), rows_per_image: Some(snapshot.height) },
+            wgpu::Extent3d { width: snapshot.width, height: snapshot.height, depth_or_array_layers: 1 },
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("text_atlas_bg"),
+            layout: &self.ctx.image_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&sampler) },
+            ],
+        });
+        let resource = Arc::new(GpuTextAtlasResource {
+            _texture: texture,
+            _view: view,
+            _sampler: sampler,
+            bind_group,
+            width: snapshot.width,
+            height: snapshot.height,
+            generation: snapshot.generation,
+        });
+        *cache = Some(resource.clone());
+        resource
+    }
+
     fn gpu_video(
         &self,
         src: &str,
@@ -929,6 +995,15 @@ impl WgpuBackend {
             .expect("GPU image cache lock poisoned")
             .images
             .len()
+    }
+
+    #[cfg(test)]
+    fn text_atlas_cache_generation(&self) -> Option<u64> {
+        self.text_atlas
+            .lock()
+            .expect("text atlas GPU lock poisoned")
+            .as_ref()
+            .map(|resource| resource.generation)
     }
 
     fn submit_frame_to_slot(
@@ -971,6 +1046,7 @@ impl WgpuBackend {
         let mut all_instances: Vec<GpuInstance> = commands.iter().map(|c| *c.instance()).collect();
         let mut image_resources = Vec::with_capacity(commands.len());
         let atlas_snapshot = self.fallback.text_atlas_snapshot();
+        let atlas_resource = self.gpu_text_atlas(&atlas_snapshot);
         for (index, command) in commands.iter().enumerate() {
             let (source, fit) = match command {
                 DrawCommand::Image { src, fit, .. } => (self.gpu_image(src)?, *fit),
@@ -1077,32 +1153,6 @@ impl WgpuBackend {
                 ],
             });
 
-            let atlas_texture = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("text_atlas_texture"),
-                size: wgpu::Extent3d { width: atlas_snapshot.width, height: atlas_snapshot.height, depth_or_array_layers: 1 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R8Unorm,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
-            queue.write_texture(
-                atlas_texture.as_image_copy(),
-                &atlas_snapshot.pixels,
-                wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(atlas_snapshot.width), rows_per_image: Some(atlas_snapshot.height) },
-                wgpu::Extent3d { width: atlas_snapshot.width, height: atlas_snapshot.height, depth_or_array_layers: 1 },
-            );
-            let atlas_view = atlas_texture.create_view(&wgpu::TextureViewDescriptor::default());
-            let atlas_sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
-            let atlas_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("text_atlas_bg"),
-                layout: &self.ctx.image_layout,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&atlas_view) },
-                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&atlas_sampler) },
-                ],
-            });
 
             let mesh_buffers: Vec<Option<(wgpu::Buffer, wgpu::Buffer)>> = commands
                 .iter()
@@ -1172,7 +1222,7 @@ impl WgpuBackend {
                     | DrawCommand::Text { .. } => {
                         if matches!(commands[i], DrawCommand::Text { .. }) {
                             pass.set_pipeline(&self.ctx.text_pipeline);
-                            pass.set_bind_group(2, &atlas_bg, &[]);
+                            pass.set_bind_group(2, &atlas_resource.bind_group, &[]);
                         } else {
                             pass.set_pipeline(&self.ctx.image_pipeline);
                             pass.set_bind_group(2, &image_resources[i].as_ref().expect("image resource").bind_group, &[]);
@@ -2330,8 +2380,12 @@ mod tests {
             }],
         };
         let image = gpu.render_frame(&scene, &FrameConfig::new(96, 32, 0, 30.0)).unwrap();
-        assert_eq!(gpu.render_stats().gpu_frames, 1);
+        let generation = gpu.text_atlas_cache_generation();
+        let second = gpu.render_frame(&scene, &FrameConfig::new(96, 32, 1, 30.0)).unwrap();
+        assert_eq!(gpu.render_stats().gpu_frames, 2);
         assert!(image.pixels().any(|pixel| pixel[3] > 0));
+        assert!(second.pixels().any(|pixel| pixel[3] > 0));
+        assert_eq!(generation, gpu.text_atlas_cache_generation());
     }
 
     #[test]

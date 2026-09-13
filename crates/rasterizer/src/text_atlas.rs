@@ -16,6 +16,7 @@ pub(crate) struct AtlasEntry {
 pub(crate) struct TextAtlasSnapshot {
     pub width: u32,
     pub height: u32,
+    pub generation: u64,
     pub pixels: Vec<u8>,
 }
 
@@ -28,6 +29,7 @@ pub(crate) struct TextAtlas {
     cursor_y: u32,
     row_height: u32,
     entries: HashMap<String, AtlasEntry>,
+    generation: u64,
 }
 
 impl TextAtlas {
@@ -41,6 +43,7 @@ impl TextAtlas {
             cursor_y: 0,
             row_height: 0,
             entries: HashMap::new(),
+            generation: 0,
         }
     }
 
@@ -83,6 +86,7 @@ impl TextAtlas {
         self.cursor_x = self.cursor_x.saturating_add(glyph_width);
         self.row_height = self.row_height.max(glyph_height);
         self.entries.insert(key, entry);
+        self.generation = self.generation.wrapping_add(1);
         Some(entry)
     }
 
@@ -97,6 +101,7 @@ impl TextAtlas {
         self.cursor_y = 0;
         self.row_height = 0;
         self.entries.clear();
+        self.generation = self.generation.wrapping_add(1);
     }
 
     #[allow(dead_code)]
@@ -104,6 +109,7 @@ impl TextAtlas {
         TextAtlasSnapshot {
             width: self.width,
             height: self.height,
+            generation: self.generation,
             pixels: self.pixels.clone(),
         }
     }
