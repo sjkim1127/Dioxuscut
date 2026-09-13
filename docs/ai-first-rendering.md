@@ -174,6 +174,10 @@ Tauri/CLI rendering, and use JPEG only when the composition is opaque and a
 small lossy transport trade-off is acceptable. The base64 path remains the
 portable default for hosts that cannot share a process-scoped file.
 
+The packaged Tauri renderer automatically selects PNG/file transport when a
+project does not specify `browser_transport`; set it to `base64` to force the
+portable JSON transport.
+
 When the packaged Tauri app runs without `DIOXUSCUT_BROWSER_URL`, the host
 serves its bundled `dist` directory from a dynamic loopback port and points the
 Chromium workers at that server. Production browser rendering therefore does

@@ -334,12 +334,13 @@ fn start_render_job(
             if let Some(retries) = project.settings.browser_transport_retries {
                 backend = backend.with_transport_retries(retries);
             }
-            if project
-                .settings
-                .browser_transport
-                .as_deref()
-                .is_some_and(|transport| transport.trim().eq_ignore_ascii_case("file"))
-            {
+            let use_file_transport = project.settings.browser_transport.as_deref()
+                .map(|transport| transport.trim().eq_ignore_ascii_case("file"))
+                // Tauri owns a local process-scoped filesystem, so prefer the
+                // faster lossless path unless a project explicitly requests
+                // the portable JSON/base64 compatibility transport.
+                .unwrap_or(true);
+            if use_file_transport {
                 backend = backend.with_file_transport(true);
             }
             backend
