@@ -633,6 +633,18 @@ fn bench_gpu_text_atlas(c: &mut Criterion) {
     group.bench_function("80_text_nodes_atlas_reuse", |b| {
         b.iter(|| backend.render_frame(&scene, &config).unwrap())
     });
+    group.bench_function("native_stream_no_readback_80_text_nodes", |b| {
+        b.iter(|| {
+            backend
+                .render_stream_gpu(
+                    10,
+                    &|_frame| Ok(scene.clone()),
+                    &|frame| FrameConfig::new(1920, 1080, frame, 30.0),
+                    |_frame, _view, _width, _height| {},
+                )
+                .unwrap();
+        })
+    });
     eprintln!(
         "text atlas upload bytes after bench: {}",
         backend.text_atlas_upload_bytes()

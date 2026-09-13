@@ -4624,6 +4624,45 @@ mod tests {
     }
 
     #[test]
+    fn gpu_native_text_stream_reuses_atlas_without_readback() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping native text stream test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Text {
+                x: 8.0,
+                y: 32.0,
+                content: "native atlas stream".into(),
+                font_size: 24.0,
+                color: Color::WHITE,
+                font_weight: 400,
+                font_sources: Vec::new(),
+            }],
+        };
+        let mut delivered = Vec::new();
+        gpu.render_stream_gpu(
+            3,
+            &|_frame| Ok(scene.clone()),
+            &|frame| FrameConfig::new(128, 48, frame, 30.0),
+            |frame, _view, width, height| delivered.push((frame, width, height)),
+        )
+        .unwrap();
+        assert_eq!(delivered, vec![(0, 128, 48), (1, 128, 48), (2, 128, 48)]);
+        assert_eq!(gpu.render_stats().gpu_frames, 3);
+        assert!(gpu.text_atlas_upload_bytes() > 0);
+        let upload_bytes = gpu.text_atlas_upload_bytes();
+        gpu.render_stream_gpu(
+            3,
+            &|_frame| Ok(scene.clone()),
+            &|frame| FrameConfig::new(128, 48, frame, 30.0),
+            |_frame, _view, _width, _height| {},
+        )
+        .unwrap();
+        assert_eq!(gpu.text_atlas_upload_bytes(), upload_bytes);
+    }
+
+    #[test]
     fn gpu_brightness_filter_matches_cpu_for_normal_layer() {
         let Ok(gpu) = WgpuBackend::new() else {
             println!("GPU backend unavailable; skipping brightness GPU test");
