@@ -311,6 +311,44 @@ fn bench_gpu_streaming(c: &mut Criterion) {
     group.finish();
 }
 
+#[cfg(feature = "gpu")]
+fn bench_gpu_concurrent_resolutions(c: &mut Criterion) {
+    use dioxuscut_rasterizer::wgpu_backend::WgpuBackend;
+    use std::sync::Arc;
+
+    let backend = match WgpuBackend::new() {
+        Ok(b) => Arc::new(b),
+        Err(e) => {
+            eprintln!("GPU backend unavailable, skipping concurrent resolution bench: {e}");
+            return;
+        }
+    };
+    let scene = Arc::new(scene_hello_world());
+    let mut group = c.benchmark_group("gpu_concurrent_resolutions");
+    group.sample_size(15);
+    group.bench_function("720p_plus_1080p", |b| {
+        b.iter(|| {
+            let left_backend = Arc::clone(&backend);
+            let right_backend = Arc::clone(&backend);
+            let left_scene = Arc::clone(&scene);
+            let right_scene = Arc::clone(&scene);
+            let left = std::thread::spawn(move || {
+                left_backend
+                    .render_frame(&left_scene, &FrameConfig::new(1280, 720, 0, 30.0))
+                    .unwrap()
+            });
+            let right = std::thread::spawn(move || {
+                right_backend
+                    .render_frame(&right_scene, &FrameConfig::new(1920, 1080, 0, 30.0))
+                    .unwrap()
+            });
+            left.join().unwrap();
+            right.join().unwrap();
+        })
+    });
+    group.finish();
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Entry points
 // ─────────────────────────────────────────────────────────────────
@@ -325,7 +363,8 @@ criterion_group!(
     bench_cpu_resolutions,
     bench_gpu_scenes,
     bench_gpu_resolutions,
-    bench_gpu_streaming
+    bench_gpu_streaming,
+    bench_gpu_concurrent_resolutions
 );
 
 criterion_main!(benches);
