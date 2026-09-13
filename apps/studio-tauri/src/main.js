@@ -299,7 +299,7 @@ export async function parseMedia({
     await onDimensions?.(null);
     await onDurationInSeconds?.(wav.durationInSeconds);
     await onParseProgress?.({ bytes: 0, percentage: 1, totalBytes: null });
-    return selectFields({ ...wav, container: 'wav' });
+    return selectFields({ ...wav, container: 'wav', tracks: [] });
   }
   const [video, image, audioDuration] = await Promise.all([
     getVideoMetadata(src).catch(() => null),
@@ -320,6 +320,7 @@ export async function parseMedia({
     videoTracks: video ? [{ width: video.width, height: video.height, aspectRatio: video.aspectRatio }] : [],
     audioTracks: audioDuration !== null ? [{ durationInSeconds: audioDuration }] : [],
     container: container?.container ?? null,
+    tracks: container?.tracks ?? [],
     isRemote: /^https?:\/\//i.test(src),
   };
   return selectFields(result);
@@ -451,6 +452,35 @@ function findIsoBox(bytes, wanted, start = 0, end = bytes.length) {
   return null;
 }
 
+function isoChildren(bytes, start, end) {
+  const children = [];
+  let offset = start;
+  while (offset + 8 <= end) {
+    const size32 = uint32be(bytes, offset);
+    const headerSize = size32 === 1 ? 16 : 8;
+    const size = size32 === 1 && offset + 16 <= end
+      ? Number((BigInt(uint32be(bytes, offset + 8)) << 32n) | BigInt(uint32be(bytes, offset + 12)))
+      : size32;
+    if (!Number.isSafeInteger(size) || size < headerSize || offset + size > end) break;
+    children.push({ type: ascii(bytes, offset + 4, 4), offset, size, headerSize });
+    offset += size;
+  }
+  return children;
+}
+
+function isoPath(bytes, root, path) {
+  let scope = [root];
+  for (const type of path) {
+    const next = [];
+    for (const box of scope) {
+      next.push(...isoChildren(bytes, box.offset + box.headerSize, box.offset + box.size)
+        .filter((child) => child.type === type));
+    }
+    scope = next;
+  }
+  return scope[0] ?? null;
+}
+
 // Read and decode only the movie header from an ISO-BMFF moov box. The box is
 // bounded by the same 16 MiB cap as all other media range reads.
 export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 16 * 1024 * 1024 } = {}) {
@@ -476,7 +506,29 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
   const durationInSeconds = timescale > 0 && duration !== undefined
     ? Number(duration) / timescale
     : null;
-  return { ...structure, durationInSeconds: Number.isFinite(durationInSeconds) ? durationInSeconds : null };
+  const tracks = isoChildren(bytes, moov.headerSize, bytes.length)
+    .filter((box) => box.type === 'trak')
+    .map((trak) => {
+      const mdia = isoPath(bytes, trak, ['mdia']);
+      const mdhd = mdia && isoPath(bytes, mdia, ['mdhd']);
+      const hdlr = mdia && isoPath(bytes, mdia, ['hdlr']);
+      if (!mdhd || !hdlr) return null;
+      const mdhdPayload = mdhd.offset + mdhd.headerSize;
+      const version = bytes[mdhdPayload];
+      const trackTimescale = uint32be(bytes, mdhdPayload + (version === 1 ? 20 : 12));
+      const trackDuration = version === 1
+        ? (BigInt(uint32be(bytes, mdhdPayload + 24)) << 32n) | BigInt(uint32be(bytes, mdhdPayload + 28))
+        : BigInt(uint32be(bytes, mdhdPayload + 16));
+      const handlerPayload = hdlr.offset + hdlr.headerSize;
+      const handler = ascii(bytes, handlerPayload + 8, 4);
+      return {
+        type: handler === 'vide' ? 'video' : handler === 'soun' ? 'audio' : 'unknown',
+        handler,
+        timescale: trackTimescale,
+        durationInSeconds: trackTimescale ? Number(trackDuration) / trackTimescale : null,
+      };
+    }).filter(Boolean);
+  return { ...structure, durationInSeconds: Number.isFinite(durationInSeconds) ? durationInSeconds : null, tracks };
 }
 
 function uint32be(bytes, offset) {

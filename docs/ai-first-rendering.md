@@ -262,8 +262,10 @@ bytes. `parseMedia()` also accepts Remotion-shaped `onDimensions`,
 metadata-level (the byte total remains unknown) until the incremental container
 parser lands. WAV metadata is already parsed incrementally, and
 `probeIsoBmff()` discovers MP4/MOV top-level boxes (`ftyp`, `moov`, `mdat`)
-without reading payloads. These APIs are the foundation for adding sample
-parsers without forcing a whole asset into memory.
+without reading payloads, while `parseIsoBmffMovieHeader()` also reads
+`mvhd` and `trak/mdia/mdhd/hdlr` to report movie and track timing. These APIs
+are the foundation for adding sample parsers without forcing a whole asset
+into memory.
 
 Studio integrations may use `watchStaticFile(fileName, callback)` and dispatch
 `remotion_staticFilesChanged` with `{files: [{name, lastModified}]}`. The
