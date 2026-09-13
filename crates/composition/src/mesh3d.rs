@@ -3,6 +3,7 @@
 use crate::{CompositionError, SceneEmitter, SceneFrameContext};
 use dioxuscut_rasterizer::{Color, Mesh3D, Scene, Vec3};
 use serde_json::Value;
+use std::sync::Arc;
 
 /// Procedural mesh families that can be rendered without a browser runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +26,9 @@ pub struct SceneMesh3D {
     pub rotation_per_frame: Vec3,
     pub light_direction: Vec3,
     pub wireframe: bool,
+    /// Cached procedural topology. Per-frame work only clones and rotates
+    /// vertices; expensive sphere/torus construction happens once.
+    mesh: Arc<Mesh3D>,
 }
 
 impl SceneMesh3D {
@@ -47,6 +51,11 @@ impl SceneMesh3D {
         size: f32,
         color: Color,
     ) -> Self {
+        let mesh = match primitive {
+            Mesh3DPrimitive::Cube => Mesh3D::cube(size.max(0.0)),
+            Mesh3DPrimitive::Sphere => Mesh3D::sphere(size.max(0.0), 12, 16),
+            Mesh3DPrimitive::Torus => Mesh3D::torus(size.max(0.0), (size * 0.3).max(0.0), 16, 12),
+        };
         Self {
             primitive,
             center_x,
@@ -58,6 +67,7 @@ impl SceneMesh3D {
             rotation_per_frame: Vec3::default(),
             light_direction: Vec3::new(0.6, 1.0, 0.8),
             wireframe: false,
+            mesh: Arc::new(mesh),
         }
     }
 
@@ -94,13 +104,7 @@ impl SceneEmitter for SceneMesh3D {
         _props: &Value,
         scene: &mut Scene,
     ) -> Result<(), CompositionError> {
-        let mut mesh = match self.primitive {
-            Mesh3DPrimitive::Cube => Mesh3D::cube(self.size.max(0.0)),
-            Mesh3DPrimitive::Sphere => Mesh3D::sphere(self.size.max(0.0), 12, 16),
-            Mesh3DPrimitive::Torus => {
-                Mesh3D::torus(self.size.max(0.0), (self.size * 0.3).max(0.0), 16, 12)
-            }
-        };
+        let mut mesh = (*self.mesh).clone();
         let frame = context.frame as f32;
         let rotation = Vec3::new(
             self.rotation.x + self.rotation_per_frame.x * frame,
