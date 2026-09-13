@@ -14,7 +14,8 @@ pub use composition::{
     PodcastWaveformComposition, PreparedComposition, ShapesAndFiltersComposition,
 };
 pub use dioxuscut_media::{
-    get_audio_metadata, get_video_metadata, static_file, AudioMetadata, VideoMetadata,
+    get_audio_metadata, get_video_metadata, parse_media, static_file, AudioMetadata,
+    ParsedMediaMetadata, VideoMetadata,
 };
 use dioxuscut_project::{Clip, Project};
 pub use migrate::{transpile_remotion, MigrationStats, MigrationTarget};
@@ -676,6 +677,9 @@ pub enum Commands {
     Probe {
         /// Media file path to inspect.
         path: PathBuf,
+        /// Return unified image/video/audio metadata instead of legacy track output.
+        #[arg(long, default_value_t = false)]
+        full: bool,
     },
 
     /// Start a hot-reloading web studio with a live WebSocket frame preview.

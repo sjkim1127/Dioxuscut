@@ -288,7 +288,8 @@ fn test_cli_probe_subcommand() {
     let args = vec!["dioxuscut", "probe", "sample.mp4"];
     let cli = Cli::try_parse_from(args).expect("Failed to parse probe command");
     match cli.command {
-        Commands::Probe { path } => {
+        Commands::Probe { path, full } => {
+            assert!(!full);
             assert_eq!(path, PathBuf::from("sample.mp4"));
         }
         _ => panic!("Expected Commands::Probe"),

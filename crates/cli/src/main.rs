@@ -328,7 +328,12 @@ async fn main() -> anyhow::Result<()> {
             let _ = std::fs::remove_file(props_path);
             result?;
         }
-        Commands::Probe { path } => {
+        Commands::Probe { path, full } => {
+            if *full {
+                let metadata = dioxuscut_cli::parse_media(path, 30.0)?;
+                println!("{}", serde_json::to_string_pretty(&metadata)?);
+                return Ok(());
+            }
             match dioxuscut_cli::get_video_metadata(path) {
                 Ok(meta) => {
                     println!("{}", serde_json::to_string_pretty(&meta)?);
