@@ -195,6 +195,6 @@ jobs:
 
       - name: Verify Linux bundle and browser worker
         run: |
-          test -n "$(find target/debug/bundle/deb -name '*.deb' -type f -print -quit)"
-          worker_count=$(find target/debug/bundle -path '*/data/resources/_up_/scripts/three-render-worker.mjs' -type f | wc -l)
-          test "$worker_count" -ge 1
+          deb=$(find target/debug/bundle/deb -name '*.deb' -type f -print -quit)
+          test -n "$deb"
+          dpkg-deb -c "$deb" | grep -q 'three-render-worker.mjs'
