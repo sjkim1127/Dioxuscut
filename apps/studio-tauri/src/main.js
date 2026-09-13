@@ -448,6 +448,11 @@ export async function getWindowedAudioData(source, {
   };
 }
 
+// In the framework-free host this hook-shaped name is an async adapter rather
+// than a React hook; it preserves the vendor import name without requiring a
+// React runtime in Three.js compositions.
+export const useWindowedAudioData = getWindowedAudioData;
+
 // Lightweight browser equivalent of getWaveformPortion(). It preserves the
 // frame/time contract while reducing decoded PCM into visualization bars.
 export function getWaveformPortion({
@@ -994,6 +999,7 @@ window.dioxuscut = {
   audioBufferToDataUrl,
   prefetch,
   getWindowedAudioData,
+  useWindowedAudioData,
   getWaveformPortion,
   visualizeAudioWaveform,
   visualizeAudio,
