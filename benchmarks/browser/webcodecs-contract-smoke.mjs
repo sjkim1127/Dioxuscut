@@ -169,6 +169,7 @@ try {
       webm: {
         container: webmMetadata.container,
         track: webmMetadata.tracks?.[0]?.codec,
+        videoCodec: webmMetadata.videoCodec,
         cues: webmMetadata.keyframes?.length ?? 0,
         samples: webmSamples.length,
         decoded: webmFrames.length,
@@ -214,7 +215,8 @@ try {
   assert.ok(result.streamedAudio.count > 0);
   assert.equal(result.streamedAudio.returnValue, null);
   assert.equal(result.webm.container, 'webm');
-  assert.equal(result.webm.track, 'V_VP9');
+  assert.equal(result.webm.track, 'vp09.00.10.08');
+  assert.equal(result.webm.videoCodec, 'vp09.00.10.08');
   assert.ok(result.webm.cues > 0);
   assert.ok(result.webm.samples > 0);
   assert.equal(result.webm.decoded, 3);

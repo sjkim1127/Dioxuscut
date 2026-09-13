@@ -347,7 +347,7 @@ export async function parseMedia({
     height: video.height,
     fps: video.fps,
     durationInSeconds: video.durationInSeconds,
-    codec: webmMetadata.videoCodec,
+    codec: webmCodec(webmMetadata.videoCodec),
     trackNumber: webmMetadata.videoTrackNumber,
   } : null;
   const durationInSeconds = video?.durationInSeconds ?? audioDuration ?? container?.durationInSeconds
@@ -357,7 +357,7 @@ export async function parseMedia({
   const fps = videoTrack?.fps ?? null;
   const videoCodec = videoTrack?.codecConfig
     ? makeIsoBmffWebCodecsConfig(videoTrack).codec
-    : null;
+    : videoTrack?.codec ?? null;
   const audioCodec = audioTrack?.codecConfig
     ? makeIsoBmffWebCodecsConfig(audioTrack).codec
     : null;
@@ -413,6 +413,7 @@ export async function parseMedia({
     durationInSeconds,
     dimensions,
     videoTracks: video ? [{ width: video.width, height: video.height, aspectRatio: video.aspectRatio }] : [],
+    videoCodec,
     audioTracks: audioDuration !== null ? [{ durationInSeconds: audioDuration }] : [],
     container: container?.container ?? (webm ? 'webm' : null),
     tracks,
@@ -526,6 +527,13 @@ async function parseWebmHeader(source) {
   };
 }
 
+function webmCodec(codecId) {
+  if (codecId === 'V_VP8') return 'vp8';
+  if (codecId === 'V_VP9') return 'vp09.00.10.08';
+  if (codecId === 'V_AV1') return 'av01.0.08M.08';
+  return null;
+}
+
 // Read VP8/VP9/AV1 SimpleBlock payloads from a WebM cluster. Laced blocks are
 // deliberately rejected until their per-codec frame duration semantics are
 // implemented; ordinary browser-recorded WebM uses one frame per block.
@@ -613,13 +621,14 @@ export function createWebmEncodedVideoChunk(sample, duration = 0) {
 // used by the ISO-BMFF backend. The codec string is supplied by the caller
 // because Matroska CodecID does not contain the WebCodecs profile fields.
 export async function decodeWebmVideo(source, {
-  trackNumber = 1, cueIndex = 0, maxSamples = 256, codec = 'vp09.00.10.08', options = {}, onFrame,
+  trackNumber = 1, cueIndex = 0, maxSamples = 256, codec, options = {}, onFrame,
 } = {}) {
   if (typeof VideoDecoder === 'undefined') throw new Error('VideoDecoder is not available in this runtime');
-  if (typeof codec !== 'string' || !codec) throw new TypeError('decodeWebmVideo requires a codec string');
+  const metadata = options.metadata ?? await parseWebmHeader(source);
+  const resolvedCodec = codec ?? webmCodec(metadata?.videoCodec);
+  if (typeof resolvedCodec !== 'string' || !resolvedCodec) throw new TypeError('decodeWebmVideo requires a codec string');
   if (!Number.isInteger(maxSamples) || maxSamples <= 0) throw new RangeError('maxSamples must be a positive integer');
   if (onFrame !== undefined && typeof onFrame !== 'function') throw new TypeError('onFrame must be a function');
-  const metadata = options.metadata ?? await parseWebmHeader(source);
   const samples = (await readWebmSamples(source, trackNumber, { ...options, metadata, cueIndex }))
     .slice(0, maxSamples);
   if (!samples.length) throw new RangeError('decodeWebmVideo found no samples in the requested cue');
@@ -629,14 +638,14 @@ export async function decodeWebmVideo(source, {
     output: (frame) => { if (onFrame) onFrame(frame); else frames.push(frame); },
     error: (error) => { failure = error; },
   });
-  const config = { codec };
+  const config = { codec: resolvedCodec };
   if (metadata.videoWidth && metadata.videoHeight) {
     config.codedWidth = metadata.videoWidth;
     config.codedHeight = metadata.videoHeight;
   }
   if (typeof VideoDecoder.isConfigSupported === 'function') {
     const support = await VideoDecoder.isConfigSupported(config);
-    if (!support.supported) { decoder.close(); throw new Error(`WebCodecs does not support video codec: ${codec}`); }
+    if (!support.supported) { decoder.close(); throw new Error(`WebCodecs does not support video codec: ${resolvedCodec}`); }
   }
   decoder.configure(config);
   try {
