@@ -346,6 +346,14 @@ fn vignette_factor(position: vec2<f32>, bounds: vec4<f32>, settings: vec4<f32>) 
     return 1.0 - darkness * smooth_factor;
 }
 
+fn composited_color(rgb: vec3<f32>, alpha: f32, instance: InstanceData) -> vec4<f32> {
+    // Multiply/Screen blend factors require premultiplied source RGB.
+    if instance.kind_data.z != 0u {
+        return vec4<f32>(rgb * alpha, alpha);
+    }
+    return vec4<f32>(rgb, alpha);
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let instance = instances[in.instance_index];
@@ -410,7 +418,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     col = apply_color_filters(col, instance);
     let vignette = vignette_factor(in.local_position, instance.shape_bounds, instance.vignette);
-    return vec4<f32>(col.rgb * vignette, col.a * instance.params.w * coverage * mask_coverage_value);
+    let alpha = col.a * instance.params.w * coverage * mask_coverage_value;
+    return composited_color(col.rgb * vignette, alpha, instance);
 }
 
 @fragment
@@ -422,7 +431,8 @@ fn fs_solid(in: VertexOutput) -> @location(0) vec4<f32> {
     }
     let color = apply_color_filters(instance.color, instance);
     let vignette = vignette_factor(in.local_position, instance.shape_bounds, instance.vignette);
-    return vec4<f32>(color.rgb * vignette, color.a * instance.params.w * mask_coverage_value);
+    let alpha = color.a * instance.params.w * mask_coverage_value;
+    return composited_color(color.rgb * vignette, alpha, instance);
 }
 
 @fragment
@@ -438,7 +448,8 @@ fn fs_image(in: VertexOutput) -> @location(0) vec4<f32> {
     let sampled = textureSample(image_texture, image_sampler, uv);
     let color = apply_color_filters(vec4<f32>(sampled.rgb, instance.color.a), instance);
     let vignette = vignette_factor(in.local_position, instance.shape_bounds, instance.vignette);
-    return vec4<f32>(color.rgb * vignette, sampled.a * instance.color.a * instance.params.w * mask_coverage_value);
+    let alpha = sampled.a * instance.color.a * instance.params.w * mask_coverage_value;
+    return composited_color(color.rgb * vignette, alpha, instance);
 }
 
 @fragment
@@ -454,7 +465,8 @@ fn fs_text(in: VertexOutput) -> @location(0) vec4<f32> {
     let coverage = textureSample(image_texture, image_sampler, uv).r;
     let color = apply_color_filters(instance.color, instance);
     let vignette = vignette_factor(in.local_position, instance.shape_bounds, instance.vignette);
-    return vec4<f32>(color.rgb * vignette, coverage * color.a * instance.params.w * mask_coverage_value);
+    let alpha = coverage * color.a * instance.params.w * mask_coverage_value;
+    return composited_color(color.rgb * vignette, alpha, instance);
 }
 
 fn mask_coverage(position: vec2<f32>, instance: InstanceData) -> f32 {
@@ -3450,6 +3462,11 @@ fn compile_nodes(
                         | crate::scene::BlendMode::Multiply
                         | crate::scene::BlendMode::Screen
                 )
+                && (matches!(blend_mode, crate::scene::BlendMode::Normal)
+                    || ((*layer_opacity - 1.0).abs() <= f32::EPSILON
+                        && gpu_layer_effects(filters, *layer_opacity)
+                            .map(|effects| (effects.0 - 1.0).abs() <= f32::EPSILON)
+                            .unwrap_or(false)))
                 && (*mask_mode == crate::scene::MaskMode::Alpha
                     || *mask_mode == crate::scene::MaskMode::Luminance)
                 && (clip.is_none()
