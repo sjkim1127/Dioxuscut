@@ -87,7 +87,7 @@ try {
     const webmAudioSamples = await window.dioxuscut.readWebmSamples('/assets/webm-audio-fixture.webm', 1);
     const webmAudioMetadata = await window.dioxuscut.parseMedia({ src: '/assets/webm-audio-fixture.webm' });
     const webmAudioData = await window.dioxuscut.decodeWebmAudio('/assets/webm-audio-fixture.webm', {
-      trackNumber: 1, maxSamples: 3, codec: 'opus', numberOfChannels: 1, sampleRate: 48000,
+      trackNumber: 1, maxSamples: 3,
     });
     const webmAudioFrames = webmAudioData.map(({ numberOfFrames }) => numberOfFrames);
     for (const audio of webmAudioData) audio.close();

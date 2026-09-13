@@ -807,13 +807,17 @@ export async function decodeWebmVideo(source, {
 }
 
 export async function decodeWebmAudio(source, {
-  trackNumber = 1, cueIndex = 0, maxSamples = 256, codec = 'opus', numberOfChannels = 2,
-  sampleRate = 48_000, options = {}, onAudioData,
+  trackNumber = 1, cueIndex = 0, maxSamples = 256, codec, numberOfChannels, sampleRate,
+  options = {}, onAudioData,
 } = {}) {
   if (typeof AudioDecoder === 'undefined') throw new Error('AudioDecoder is not available in this runtime');
   if (!Number.isInteger(maxSamples) || maxSamples <= 0) throw new RangeError('maxSamples must be a positive integer');
   if (onAudioData !== undefined && typeof onAudioData !== 'function') throw new TypeError('onAudioData must be a function');
   const metadata = options.metadata ?? await parseWebmHeader(source);
+  const resolvedCodec = codec ?? webmAudioCodec(metadata?.audioCodec);
+  const resolvedChannels = numberOfChannels ?? metadata?.audioChannels ?? 2;
+  const resolvedSampleRate = sampleRate ?? metadata?.audioSampleRate ?? 48_000;
+  if (typeof resolvedCodec !== 'string' || !resolvedCodec) throw new TypeError('decodeWebmAudio requires a codec string');
   const samples = (await readWebmSamples(source, trackNumber, { ...options, metadata, cueIndex }))
     .slice(0, maxSamples);
   if (!samples.length) throw new RangeError('decodeWebmAudio found no samples in the requested cue');
@@ -823,10 +827,10 @@ export async function decodeWebmAudio(source, {
     output: (audio) => { if (onAudioData) onAudioData(audio); else chunks.push(audio); },
     error: (error) => { failure = error; },
   });
-  const config = { codec, sampleRate, numberOfChannels };
+  const config = { codec: resolvedCodec, sampleRate: resolvedSampleRate, numberOfChannels: resolvedChannels };
   if (typeof AudioDecoder.isConfigSupported === 'function') {
     const support = await AudioDecoder.isConfigSupported(config);
-    if (!support.supported) { decoder.close(); throw new Error(`WebCodecs does not support audio codec: ${codec}`); }
+    if (!support.supported) { decoder.close(); throw new Error(`WebCodecs does not support audio codec: ${resolvedCodec}`); }
   }
   decoder.configure(config);
   try {
