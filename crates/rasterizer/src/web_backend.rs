@@ -496,15 +496,19 @@ impl BrowserFrameBackend {
             bytes = line.len(),
             "browser frame response received"
         );
-        let video_timestamp_us = serde_json::from_str::<WebWorkerMessage>(&line)
-            .ok()
-            .and_then(|message| match message {
-                WebWorkerMessage::Frame(response) if response.frame == request.frame => {
-                    response.video_frame.map(|frame| frame.timestamp_us)
-                }
-                _ => None,
-            });
-        let result = match serde_json::from_str::<WebWorkerMessage>(&line) {
+        // Parse the worker response once. The previous implementation parsed
+        // the full JSON payload once for WebCodecs timing and again for the
+        // image payload, which doubled allocation and deserialization cost on
+        // every uncached browser frame.
+        let parsed = serde_json::from_str::<WebWorkerMessage>(&line);
+        let video_timestamp_us = parsed.as_ref().ok().and_then(|message| match message {
+            WebWorkerMessage::Frame(response) if response.frame == request.frame => response
+                .video_frame
+                .as_ref()
+                .map(|frame| frame.timestamp_us),
+            _ => None,
+        });
+        let result = match parsed {
             Ok(WebWorkerMessage::Frame(WebFrameResponse {
                 frame,
                 width,
