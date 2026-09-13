@@ -59,8 +59,9 @@ fn main() {
             .unwrap();
         return;
     }
+    let concurrency: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(4);
     let config = PipeConfig::new(1280, 720, 30.0, 180, &args[1])
-        .with_concurrency(4)
+        .with_concurrency(concurrency)
         .with_quality(18, "fast");
     let start = Instant::now();
     render_to_ffmpeg_pipe(&backend, &config, scene).unwrap();
