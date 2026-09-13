@@ -284,6 +284,7 @@ export async function parseMedia({
   onAudioCodec,
   onVideoTrack,
   onAudioTrack,
+  onKeyframes,
   onSampleRate,
   onNumberOfAudioChannels,
   onContainer,
@@ -294,6 +295,7 @@ export async function parseMedia({
   for (const [name, callback] of Object.entries({
     onDimensions, onDurationInSeconds, onFps, onVideoCodec, onAudioCodec,
     onVideoTrack, onAudioTrack,
+    onKeyframes,
     onSampleRate, onNumberOfAudioChannels, onContainer, onTracks, onParseProgress,
   })) {
     if (callback !== undefined && typeof callback !== 'function') {
@@ -362,6 +364,9 @@ export async function parseMedia({
     });
   }
   if (audioTrack) await onAudioTrack?.({ ...audioTrack, codec: audioCodec });
+  if (videoTrack?.sampleTables?.keyframes) {
+    await onKeyframes?.(videoTrack.sampleTables.keyframes);
+  }
   await onTracks?.(container?.tracks ?? []);
   await onParseProgress?.({ bytes: 0, percentage: 1, totalBytes: null });
   const result = {
