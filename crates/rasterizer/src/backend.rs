@@ -69,6 +69,24 @@ impl FrameConfig {
     }
 }
 
+/// Destination for frames produced by a streaming rasterizer.
+///
+/// Backends currently provide tightly packed RGBA8 bytes. Keeping this
+/// boundary as a trait lets a future GPU-native encoder consume frames without
+/// changing scene scheduling or rasterizer implementations.
+pub trait FrameSink {
+    fn consume(&mut self, frame: u32, rgba: &[u8]) -> Result<(), RasterError>;
+}
+
+impl<F> FrameSink for F
+where
+    F: for<'a> FnMut(u32, &'a [u8]) -> Result<(), RasterError>,
+{
+    fn consume(&mut self, frame: u32, rgba: &[u8]) -> Result<(), RasterError> {
+        self(frame, rgba)
+    }
+}
+
 /// Trait implemented by every rasterizer backend.
 pub trait RasterizerBackend: Send + Sync {
     /// Render a single `Scene` into an `RgbaImage`.
@@ -97,7 +115,7 @@ pub trait RasterizerBackend: Send + Sync {
         _total: u32,
         _scene_fn: &(dyn Fn(u32) -> Result<Scene, RasterError> + Sync),
         _config_fn: &(dyn Fn(u32) -> FrameConfig + Sync),
-        _consume_fn: &mut dyn FnMut(u32, &[u8]) -> Result<(), RasterError>,
+        _sink: &mut dyn FrameSink,
     ) -> Result<(), RasterError> {
         Err(RasterError::Init(
             "Streaming is not supported on this backend".into(),

@@ -20,7 +20,7 @@
 //!                   Zero disk I/O, zero PNG compression overhead
 //! ```
 
-use crate::backend::{FrameConfig, RasterError, RasterizerBackend};
+use crate::backend::{FrameConfig, FrameSink, RasterError, RasterizerBackend};
 use crate::scene::{AudioTrack, Scene};
 use crate::security::MediaSecurityPolicy;
 use image::RgbaImage;
@@ -28,10 +28,46 @@ use rayon::prelude::*;
 use std::fmt;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
+
+struct FfmpegFrameSink<'a> {
+    control: &'a RenderControl,
+    started: Instant,
+    input_width: u32,
+    input_height: u32,
+    output_width: u32,
+    output_height: u32,
+    total: u32,
+    start_frame: u32,
+    stdin: &'a mut ChildStdin,
+}
+
+impl FrameSink for FfmpegFrameSink<'_> {
+    fn consume(&mut self, frame: u32, rgba: &[u8]) -> Result<(), RasterError> {
+        self.control.check(self.started)?;
+        let scaled = scale_rgba_frame(
+            rgba,
+            self.input_width,
+            self.input_height,
+            self.output_width,
+            self.output_height,
+        )?;
+        self.stdin
+            .write_all(&scaled)
+            .map_err(|e| RasterError::ImageEncode(format!("FFmpeg pipe write error: {e}")))?;
+        if let Some(callback) = &self.control.progress {
+            callback(RenderProgress {
+                completed_frames: frame + 1,
+                total_frames: self.total,
+                frame: self.start_frame + frame,
+            });
+        }
+        Ok(())
+    }
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -599,6 +635,17 @@ where
         .ok_or_else(|| RasterError::Init("Failed to open FFmpeg stdin".into()))?;
 
     let render_result = if backend.supports_streaming() {
+        let mut sink = FfmpegFrameSink {
+            control: &config.control,
+            started,
+            input_width: width,
+            input_height: height,
+            output_width,
+            output_height,
+            total,
+            start_frame: config.start_frame,
+            stdin: &mut stdin,
+        };
         backend.render_stream(
             total,
             &|frame| {
@@ -613,21 +660,7 @@ where
                 let composition_frame = config.start_frame + frame * config.frame_step;
                 FrameConfig::new(width, height, composition_frame, fps)
             },
-            &mut |frame, rgba| {
-                config.control.check(started)?;
-                let scaled = scale_rgba_frame(rgba, width, height, output_width, output_height)?;
-                stdin.write_all(&scaled).map_err(|e| {
-                    RasterError::ImageEncode(format!("FFmpeg pipe write error: {e}"))
-                })?;
-                if let Some(callback) = &config.control.progress {
-                    callback(RenderProgress {
-                        completed_frames: frame + 1,
-                        total_frames: total,
-                        frame: config.start_frame + frame,
-                    });
-                }
-                Ok(())
-            },
+            &mut sink,
         )
     } else {
         let pool = rayon::ThreadPoolBuilder::new()

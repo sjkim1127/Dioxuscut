@@ -46,7 +46,7 @@
 
 #![cfg(feature = "gpu")]
 
-use crate::backend::{BackendCapabilities, FrameConfig, RasterError, RasterizerBackend};
+use crate::backend::{BackendCapabilities, FrameConfig, FrameSink, RasterError, RasterizerBackend};
 use crate::image_cache::ImageCache;
 use crate::scene::ImageFit;
 use crate::scene::{Color, GradientStop, Scene, SceneNode};
@@ -1918,7 +1918,7 @@ impl WgpuBackend {
         width: u32,
         height: u32,
         scratch: &mut Vec<u8>,
-        consume_fn: &mut dyn FnMut(u32, &[u8]) -> Result<(), RasterError>,
+        sink: &mut dyn FrameSink,
     ) -> Result<(), RasterError> {
         self.ctx
             .device
@@ -1943,7 +1943,7 @@ impl WgpuBackend {
         let data = slice.get_mapped_range();
 
         let res = if bytes_per_row as usize == expected_row_bytes {
-            consume_fn(in_flight.frame_idx, &data[..total_bytes])
+            sink.consume(in_flight.frame_idx, &data[..total_bytes])
         } else {
             scratch.clear();
             scratch.reserve_exact(total_bytes);
@@ -1952,7 +1952,7 @@ impl WgpuBackend {
                 let end = start + expected_row_bytes;
                 scratch.extend_from_slice(&data[start..end]);
             }
-            consume_fn(in_flight.frame_idx, scratch)
+            sink.consume(in_flight.frame_idx, scratch)
         };
         drop(data);
         slot.readback.unmap();
@@ -2112,7 +2112,7 @@ impl RasterizerBackend for WgpuBackend {
             width,
             height,
             &mut scratch,
-            &mut |_frame, pixels| {
+            &mut |_frame, pixels: &[u8]| {
                 out_pixels = Some(pixels.to_vec());
                 Ok(())
             },
@@ -2143,7 +2143,7 @@ impl RasterizerBackend for WgpuBackend {
         total: u32,
         scene_fn: &(dyn Fn(u32) -> Result<Scene, RasterError> + Sync),
         config_fn: &(dyn Fn(u32) -> FrameConfig + Sync),
-        consume_fn: &mut dyn FnMut(u32, &[u8]) -> Result<(), RasterError>,
+        sink: &mut dyn FrameSink,
     ) -> Result<(), RasterError> {
         if total == 0 {
             return Ok(());
@@ -2156,7 +2156,7 @@ impl RasterizerBackend for WgpuBackend {
         if width > self.ctx.max_texture_dimension_2d || height > self.ctx.max_texture_dimension_2d {
             return self
                 .fallback
-                .render_stream(total, scene_fn, config_fn, consume_fn);
+                .render_stream(total, scene_fn, config_fn, sink);
         }
 
         let resource = {
@@ -2191,12 +2191,12 @@ impl RasterizerBackend for WgpuBackend {
             let Some((commands, path_mask)) = compile_scene_with_path_mask(&scene, &self.fallback)
             else {
                 while let Some(prev) = in_flight.pop_front() {
-                    self.drain_slot(prev, &res, width, height, &mut scratch, consume_fn)?;
+                    self.drain_slot(prev, &res, width, height, &mut scratch, sink)?;
                 }
                 self.cpu_fallback_frame_count
                     .fetch_add(1, Ordering::Relaxed);
                 let img = self.fallback.render_frame(&scene, &cfg)?;
-                consume_fn(frame, img.as_raw())?;
+                sink.consume(frame, img.as_raw())?;
                 continue;
             };
 
@@ -2209,7 +2209,7 @@ impl RasterizerBackend for WgpuBackend {
                     .pop_front()
                     .expect("in-flight ring length was checked");
                 debug_assert_eq!(prev.slot_idx, slot_idx);
-                self.drain_slot(prev, &res, width, height, &mut scratch, consume_fn)?;
+                self.drain_slot(prev, &res, width, height, &mut scratch, sink)?;
             }
 
             // Submit this frame to GPU
@@ -2234,7 +2234,7 @@ impl RasterizerBackend for WgpuBackend {
 
         // Drain any remaining in-flight frame at the end of the stream
         while let Some(prev) = in_flight.pop_front() {
-            self.drain_slot(prev, &res, width, height, &mut scratch, consume_fn)?;
+            self.drain_slot(prev, &res, width, height, &mut scratch, sink)?;
         }
 
         Ok(())
@@ -5708,7 +5708,7 @@ mod tests {
             total_frames,
             &|f| Ok(make_scene(f)),
             &|f| FrameConfig::new(width, height, f, 30.0),
-            &mut |_f, rgba| {
+            &mut |_f, rgba: &[u8]| {
                 streamed_frames.push(rgba.to_vec());
                 Ok(())
             },

@@ -2,7 +2,7 @@
 //!
 //! Renders a [`Scene`] into an RGBA pixel buffer without any GPU or browser dependency.
 
-use crate::backend::{FrameConfig, RasterError, RasterizerBackend};
+use crate::backend::{FrameConfig, FrameSink, RasterError, RasterizerBackend};
 use crate::font::FontCache;
 use crate::gif_cache::GifFrameCache;
 use crate::image_cache::ImageCache;
@@ -165,13 +165,13 @@ impl RasterizerBackend for TinySkiaBackend {
         total: u32,
         scene_fn: &(dyn Fn(u32) -> Result<Scene, RasterError> + Sync),
         config_fn: &(dyn Fn(u32) -> FrameConfig + Sync),
-        consume_fn: &mut dyn FnMut(u32, &[u8]) -> Result<(), RasterError>,
+        sink: &mut dyn FrameSink,
     ) -> Result<(), RasterError> {
         for frame in 0..total {
             let scene = scene_fn(frame)?;
             let cfg = config_fn(frame);
             let img = self.render_frame(&scene, &cfg)?;
-            consume_fn(frame, img.as_raw())?;
+            sink.consume(frame, img.as_raw())?;
         }
         Ok(())
     }
