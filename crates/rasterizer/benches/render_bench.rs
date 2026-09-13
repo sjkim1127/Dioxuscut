@@ -158,9 +158,7 @@ fn scene_complex_gradients() -> Scene {
     Scene { nodes }
 }
 
-/// A representative browser/native media scene.  The image node deliberately
-/// remains a fallback case until the WGPU texture path lands, so its timing is
-/// tracked separately from analytic GPU scenes.
+/// A representative browser/native media scene with a single image texture.
 fn scene_image_fallback() -> Scene {
     Scene {
         nodes: vec![
@@ -185,6 +183,14 @@ fn scene_image_fallback() -> Scene {
             },
         ],
     }
+}
+
+fn scene_image_source(src: String) -> Scene {
+    let mut scene = scene_image_fallback();
+    if let Some(SceneNode::Image { src: image_src, .. }) = scene.nodes.get_mut(1) {
+        *image_src = src;
+    }
+    scene
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -255,7 +261,7 @@ fn bench_gpu_scenes(c: &mut Criterion) {
         ("hello_world", scene_hello_world()),
         ("grid_25x14", scene_grid(25, 14)),
         ("complex_gradients", scene_complex_gradients()),
-        ("image_cpu_fallback", scene_image_fallback()),
+        ("image_texture", scene_image_fallback()),
     ];
 
     for (name, scene) in scenes {
@@ -264,6 +270,44 @@ fn bench_gpu_scenes(c: &mut Criterion) {
             b.iter(|| backend.render_frame(scene, &config).unwrap())
         });
     }
+    group.finish();
+}
+
+#[cfg(feature = "gpu")]
+fn bench_gpu_image_cache(c: &mut Criterion) {
+    use dioxuscut_rasterizer::wgpu_backend::WgpuBackend;
+
+    let Ok(warm_backend) = WgpuBackend::new() else {
+        eprintln!("GPU backend unavailable, skipping image cache benchmark");
+        return;
+    };
+    let Ok(cold_backend) = WgpuBackend::new() else {
+        return;
+    };
+    let config = FrameConfig::new(1920, 1080, 0, 30.0);
+    let base = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    let warm_scene = scene_image_source(base.into());
+    let cold_scenes: Vec<Scene> = (0..20)
+        .map(|index| {
+            scene_image_source(format!(
+                "data:image/png;cache_key={index};base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+            ))
+        })
+        .collect();
+
+    let mut group = c.benchmark_group("gpu_image_cache_1080p");
+    group.sample_size(10);
+    group.bench_function("warm_cache_hit", |b| {
+        b.iter(|| warm_backend.render_frame(&warm_scene, &config).unwrap())
+    });
+    let mut index = 0usize;
+    group.bench_function("cold_unique_upload", |b| {
+        b.iter(|| {
+            let scene = &cold_scenes[index % cold_scenes.len()];
+            index += 1;
+            cold_backend.render_frame(scene, &config).unwrap()
+        })
+    });
     group.finish();
 }
 
@@ -393,6 +437,7 @@ criterion_group!(
     bench_cpu_scenes,
     bench_cpu_resolutions,
     bench_gpu_scenes,
+    bench_gpu_image_cache,
     bench_gpu_resolutions,
     bench_gpu_streaming,
     bench_gpu_concurrent_resolutions
