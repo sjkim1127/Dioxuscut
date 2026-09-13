@@ -56,6 +56,83 @@ async function ensureThree() {
 // protocol. Adapters may register Three.js, R3F, or another WebGL renderer.
 const compositions = new Map();
 const threeCompositions = new Map();
+const remotionSpringDurationCache = new Map();
+
+// Remotion 4.0.495-compatible default spring calculation used by the
+// browser parity composition below. Keep this local to the browser adapter so
+// the worker and Studio share the same deterministic frame semantics.
+function remotionSpringCalculation(frame, fps, config = {}) {
+  const damping = config.damping ?? 10;
+  const mass = config.mass ?? 1;
+  const stiffness = config.stiffness ?? 100;
+  let current = 0;
+  let velocity = 0;
+  let lastTimestamp = 0;
+  const frameClamped = Math.max(0, frame);
+  const lastFrame = Math.floor(frameClamped);
+  const unevenRest = frameClamped % 1;
+  for (let f = 0; f <= lastFrame; f += 1) {
+    const now = (f + (f === lastFrame ? unevenRest : 0)) / fps * 1000;
+    const deltaTime = Math.min(now - lastTimestamp, 64);
+    const c = damping;
+    const m = mass;
+    const k = stiffness;
+    const x0 = 1 - current;
+    const v0 = -velocity;
+    const zeta = c / (2 * Math.sqrt(k * m));
+    const omega0 = Math.sqrt(k / m);
+    const omega1 = omega0 * Math.sqrt(Math.max(0, 1 - zeta ** 2));
+    const t = deltaTime / 1000;
+    const sin1 = Math.sin(omega1 * t);
+    const cos1 = Math.cos(omega1 * t);
+    const envelope = Math.exp(-zeta * omega0 * t);
+    const fragment = envelope * (omega1 === 0
+      ? x0 + (v0 + zeta * omega0 * x0) * t
+      : sin1 * ((v0 + zeta * omega0 * x0) / omega1) + x0 * cos1);
+    const underDampedPosition = 1 - fragment;
+    const underDampedVelocity = zeta * omega0 * fragment - envelope * (
+      cos1 * (v0 + zeta * omega0 * x0) - omega1 * x0 * sin1);
+    const criticallyDampedEnvelope = Math.exp(-omega0 * t);
+    const criticallyDampedPosition = 1 - criticallyDampedEnvelope *
+      (x0 + (v0 + omega0 * x0) * t);
+    const criticallyDampedVelocity = criticallyDampedEnvelope *
+      (v0 * (t * omega0 - 1) + t * x0 * omega0 * omega0);
+    current = zeta < 1 ? underDampedPosition : criticallyDampedPosition;
+    velocity = zeta < 1 ? underDampedVelocity : criticallyDampedVelocity;
+    lastTimestamp = now;
+  }
+  return current;
+}
+
+function remotionMeasureSpring(fps, config = {}, threshold = 0.005) {
+  let frame = 0;
+  let value = remotionSpringCalculation(frame, fps, config);
+  while (Math.abs(value - 1) >= threshold) {
+    frame += 1;
+    value = remotionSpringCalculation(frame, fps, config);
+  }
+  let finishedFrame = frame;
+  for (let i = 0; i < 20; i += 1) {
+    frame += 1;
+    value = remotionSpringCalculation(frame, fps, config);
+    if (Math.abs(value - 1) >= threshold) {
+      i = 0;
+      finishedFrame = frame + 1;
+    }
+  }
+  return finishedFrame;
+}
+
+function remotionSpring({ frame, fps, durationInFrames, delay = 0 }) {
+  if (!remotionSpringDurationCache.has(fps)) {
+    remotionSpringDurationCache.set(fps, remotionMeasureSpring(fps));
+  }
+  const naturalDuration = remotionSpringDurationCache.get(fps);
+  const delayed = frame - delay;
+  if (delayed > durationInFrames) return 1;
+  const adjusted = delayed / (durationInFrames / naturalDuration);
+  return remotionSpringCalculation(adjusted, fps);
+}
 const preloadedAssets = new Map();
 const preloadedSources = new Map();
 const imageDimensionsCache = new Map();
@@ -174,6 +251,29 @@ export function registerComposition(id, render) {
   }
   compositions.set(id, render);
 }
+
+registerComposition('SpringRects', async ({ frame: nextFrame, fps, width = 1280, height = 720 }) => {
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('SpringRects requires a 2D canvas context');
+  const scaleX = width / 1280;
+  const scaleY = height / 720;
+  context.fillStyle = 'rgb(15,23,42)';
+  context.fillRect(0, 0, width, height);
+  for (let index = 0; index < 32; index += 1) {
+    const progress = remotionSpring({
+      frame: nextFrame % 60,
+      fps,
+      durationInFrames: 24,
+      delay: (index % 8) * 2,
+    });
+    const left = Math.round((60 + (index % 8) * 145 + progress * 40) * scaleX);
+    const top = (80 + Math.floor(index / 8) * 140) * scaleY;
+    context.fillStyle = `rgb(${80 + index * 4},160,220)`;
+    context.fillRect(left, top, 64 * scaleX, 64 * scaleY);
+  }
+});
 
 /**
  * Register a reusable Three.js composition with an explicit scene lifecycle.
