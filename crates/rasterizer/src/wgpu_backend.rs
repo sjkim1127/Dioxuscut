@@ -3499,8 +3499,17 @@ fn gpu_layer_effects(
             crate::scene::SceneFilter::Invert { amount }
                 if amount.is_finite() && (0.0..=1.0).contains(amount) =>
             {
+                // Applying two invert filters sequentially composes their
+                // affine color transforms: I_b(I_a(x)) has amount
+                // a + b - 2ab. Preserve that composition instead of
+                // silently dropping every preceding invert filter.
                 Some((
-                    opacity, brightness, grayscale, contrast, saturation, *amount,
+                    opacity,
+                    brightness,
+                    grayscale,
+                    contrast,
+                    saturation,
+                    invert + *amount - 2.0 * invert * *amount,
                 ))
             }
             _ => None,
@@ -4876,6 +4885,16 @@ mod tests {
         eprintln!("invert pixel={pixel:?}");
         assert!(pixel[0] < 8 && pixel[1] > 247 && pixel[2] > 247);
         assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
+    }
+
+    #[test]
+    fn gpu_invert_filter_chain_composes_amounts_in_order() {
+        let filters = [
+            crate::scene::SceneFilter::Invert { amount: 0.25 },
+            crate::scene::SceneFilter::Invert { amount: 0.5 },
+        ];
+        let (_, _, _, _, _, amount) = gpu_layer_effects(&filters, 1.0).unwrap();
+        assert!((amount - 0.5).abs() < f32::EPSILON);
     }
 
     #[test]
