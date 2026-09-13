@@ -798,15 +798,16 @@ export function createWebmEncodedAudioChunk(sample, duration = 0) {
 // used by the ISO-BMFF backend. The codec string is supplied by the caller
 // because Matroska CodecID does not contain the WebCodecs profile fields.
 export async function decodeWebmVideo(source, {
-  trackNumber = 1, cueIndex = 0, maxSamples = 256, codec, options = {}, onFrame,
+  trackNumber, cueIndex = 0, maxSamples = 256, codec, options = {}, onFrame,
 } = {}) {
   if (typeof VideoDecoder === 'undefined') throw new Error('VideoDecoder is not available in this runtime');
   const metadata = options.metadata ?? await parseWebmHeader(source);
+  const resolvedTrackNumber = trackNumber ?? metadata?.videoTrackNumber ?? 1;
   const resolvedCodec = codec ?? webmCodec(metadata?.videoCodec);
   if (typeof resolvedCodec !== 'string' || !resolvedCodec) throw new TypeError('decodeWebmVideo requires a codec string');
   if (!Number.isInteger(maxSamples) || maxSamples <= 0) throw new RangeError('maxSamples must be a positive integer');
   if (onFrame !== undefined && typeof onFrame !== 'function') throw new TypeError('onFrame must be a function');
-  const samples = (await readWebmSamples(source, trackNumber, { ...options, metadata, cueIndex }))
+  const samples = (await readWebmSamples(source, resolvedTrackNumber, { ...options, metadata, cueIndex }))
     .slice(0, maxSamples);
   if (!samples.length) throw new RangeError('decodeWebmVideo found no samples in the requested cue');
   const frames = onFrame ? null : [];
@@ -842,18 +843,19 @@ export async function decodeWebmVideo(source, {
 }
 
 export async function decodeWebmAudio(source, {
-  trackNumber = 1, cueIndex = 0, maxSamples = 256, codec, numberOfChannels, sampleRate,
+  trackNumber, cueIndex = 0, maxSamples = 256, codec, numberOfChannels, sampleRate,
   options = {}, onAudioData,
 } = {}) {
   if (typeof AudioDecoder === 'undefined') throw new Error('AudioDecoder is not available in this runtime');
   if (!Number.isInteger(maxSamples) || maxSamples <= 0) throw new RangeError('maxSamples must be a positive integer');
   if (onAudioData !== undefined && typeof onAudioData !== 'function') throw new TypeError('onAudioData must be a function');
   const metadata = options.metadata ?? await parseWebmHeader(source);
+  const resolvedTrackNumber = trackNumber ?? metadata?.audioTrackNumber ?? 1;
   const resolvedCodec = codec ?? webmAudioCodec(metadata?.audioCodec);
   const resolvedChannels = numberOfChannels ?? metadata?.audioChannels ?? 2;
   const resolvedSampleRate = sampleRate ?? metadata?.audioSampleRate ?? 48_000;
   if (typeof resolvedCodec !== 'string' || !resolvedCodec) throw new TypeError('decodeWebmAudio requires a codec string');
-  const samples = (await readWebmSamples(source, trackNumber, { ...options, metadata, cueIndex }))
+  const samples = (await readWebmSamples(source, resolvedTrackNumber, { ...options, metadata, cueIndex }))
     .slice(0, maxSamples);
   if (!samples.length) throw new RangeError('decodeWebmAudio found no samples in the requested cue');
   const chunks = onAudioData ? null : [];
