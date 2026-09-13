@@ -172,6 +172,7 @@ struct InstanceData {
     brightness: vec4<f32>,
     grayscale: vec4<f32>,
     contrast: vec4<f32>,
+    saturation: vec4<f32>,
     // corner radius, stroke width, angle, inherited opacity
     params: vec4<f32>,
     // x' = dot(transform_x.xyz, vec3(x, y, 1))
@@ -282,7 +283,7 @@ fn linear_to_srgb(channel: f32) -> f32 {
 }
 
 fn apply_color_filters(color: vec4<f32>, instance: InstanceData) -> vec4<f32> {
-    if instance.brightness.x == 1.0 && instance.grayscale.x == 0.0 && instance.contrast.x == 1.0 {
+    if instance.brightness.x == 1.0 && instance.grayscale.x == 0.0 && instance.contrast.x == 1.0 && instance.saturation.x == 1.0 {
         return color;
     }
     var srgb = color.rgb;
@@ -294,6 +295,8 @@ fn apply_color_filters(color: vec4<f32>, instance: InstanceData) -> vec4<f32> {
         );
     }
     srgb = srgb * instance.brightness.x;
+    let luma = dot(srgb, vec3<f32>(0.299, 0.587, 0.114));
+    srgb = luma + (srgb - vec3<f32>(luma)) * instance.saturation.x;
     if instance.grayscale.x > 0.0 {
         let gray = dot(srgb, vec3<f32>(0.2126, 0.7152, 0.0722));
         srgb = mix(srgb, vec3<f32>(gray), instance.grayscale.x);
@@ -2170,6 +2173,7 @@ struct GpuInstance {
     brightness: [f32; 4],
     grayscale: [f32; 4],
     contrast: [f32; 4],
+    saturation: [f32; 4],
     params: [f32; 4],
     transform_x: [f32; 4],
     transform_y: [f32; 4],
@@ -2189,6 +2193,7 @@ impl GpuInstance {
             brightness: [1.0, 0.0, 0.0, 0.0],
             grayscale: [0.0, 0.0, 0.0, 0.0],
             contrast: [1.0, 0.0, 0.0, 0.0],
+            saturation: [1.0, 0.0, 0.0, 0.0],
             params: [0.0, 0.0, 0.0, opacity],
             transform_x,
             transform_y,
@@ -2524,7 +2529,7 @@ fn compile_nodes(
                 children,
                 ..
             } if gpu_layer_effects(filters, *layer_opacity).is_some() => {
-                let (layer_opacity, brightness, grayscale, contrast) =
+                let (layer_opacity, brightness, grayscale, contrast, saturation) =
                     gpu_layer_effects(filters, *layer_opacity).unwrap();
                 let start = output.len();
                 compile_nodes(children, transform, opacity * layer_opacity, output, font)?;
@@ -2533,6 +2538,7 @@ fn compile_nodes(
                     instance.brightness[0] *= brightness;
                     instance.grayscale[0] = 1.0 - (1.0 - instance.grayscale[0]) * (1.0 - grayscale);
                     instance.contrast[0] *= contrast;
+                    instance.saturation[0] *= saturation;
                 }
             }
 
@@ -2551,22 +2557,34 @@ fn compile_nodes(
 fn gpu_layer_effects(
     filters: &[crate::scene::SceneFilter],
     layer_opacity: f32,
-) -> Option<(f32, f32, f32, f32)> {
+) -> Option<(f32, f32, f32, f32, f32)> {
     if !layer_opacity.is_finite() {
         return None;
     }
     filters.iter().try_fold(
-        (layer_opacity, 1.0, 0.0, 1.0),
-        |(opacity, brightness, grayscale, contrast), filter| match filter {
+        (layer_opacity, 1.0, 0.0, 1.0, 1.0),
+        |(opacity, brightness, grayscale, contrast, saturation), filter| match filter {
             crate::scene::SceneFilter::Opacity { amount }
                 if amount.is_finite() && (0.0..=1.0).contains(amount) =>
             {
-                Some((opacity * amount, brightness, grayscale, contrast))
+                Some((
+                    opacity * amount,
+                    brightness,
+                    grayscale,
+                    contrast,
+                    saturation,
+                ))
             }
             crate::scene::SceneFilter::Brightness { amount }
                 if amount.is_finite() && (0.0..=10.0).contains(amount) =>
             {
-                Some((opacity, brightness * amount, grayscale, contrast))
+                Some((
+                    opacity,
+                    brightness * amount,
+                    grayscale,
+                    contrast,
+                    saturation,
+                ))
             }
             crate::scene::SceneFilter::Grayscale { amount }
                 if amount.is_finite() && (0.0..=1.0).contains(amount) =>
@@ -2576,12 +2594,30 @@ fn gpu_layer_effects(
                     brightness,
                     grayscale + amount - grayscale * amount,
                     contrast,
+                    saturation,
                 ))
             }
             crate::scene::SceneFilter::Contrast { factor }
                 if factor.is_finite() && *factor >= 0.0 =>
             {
-                Some((opacity, brightness, grayscale, contrast * factor))
+                Some((
+                    opacity,
+                    brightness,
+                    grayscale,
+                    contrast * factor,
+                    saturation,
+                ))
+            }
+            crate::scene::SceneFilter::Saturation { factor }
+                if factor.is_finite() && *factor >= 0.0 =>
+            {
+                Some((
+                    opacity,
+                    brightness,
+                    grayscale,
+                    contrast,
+                    saturation * factor,
+                ))
             }
             _ => None,
         },
@@ -3474,6 +3510,53 @@ mod tests {
             (i16::from(gpu_center[0]) - i16::from(cpu_center[0])).abs() <= 2,
             "GPU/CPU grayscale center mismatch: {gpu_center:?} vs {cpu_center:?}"
         );
+    }
+
+    #[test]
+    fn gpu_saturation_filter_matches_cpu_for_normal_layer() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping saturation GPU test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Layer {
+                opacity: 1.0,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: None,
+                mask: None,
+                mask_mode: crate::scene::MaskMode::Alpha,
+                filters: vec![crate::scene::SceneFilter::Saturation { factor: 0.5 }],
+                shadow: None,
+                children: vec![SceneNode::Rect {
+                    x: 8.0,
+                    y: 8.0,
+                    w: 16.0,
+                    h: 16.0,
+                    fill: Color::rgb(220, 40, 80),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                }],
+            }],
+        };
+        assert!(gpu_supports_scene(&scene));
+        let config = FrameConfig::new(32, 32, 0, 30.0);
+        let gpu_center = gpu
+            .render_frame(&scene, &config)
+            .unwrap()
+            .get_pixel(16, 16)
+            .to_owned();
+        let cpu_center = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap()
+            .get_pixel(16, 16)
+            .to_owned();
+        for channel in 0..3 {
+            assert!(
+                (i16::from(gpu_center[channel]) - i16::from(cpu_center[channel])).abs() <= 2,
+                "GPU/CPU saturation channel {channel} mismatch: {gpu_center:?} vs {cpu_center:?}"
+            );
+        }
     }
 
     #[test]
