@@ -350,17 +350,24 @@ export async function parseMedia({
     codec: webmCodec(webmMetadata.videoCodec),
     trackNumber: webmMetadata.videoTrackNumber,
   } : null;
+  const webmAudioTrack = webm && webmMetadata.audioTrackNumber !== null ? {
+    type: 'audio',
+    trackNumber: webmMetadata.audioTrackNumber,
+    codec: webmAudioCodec(webmMetadata.audioCodec),
+    sampleRate: webmMetadata.audioSampleRate,
+    numberOfChannels: webmMetadata.audioChannels,
+  } : null;
   const durationInSeconds = video?.durationInSeconds ?? audioDuration ?? container?.durationInSeconds
     ?? webmMetadata?.durationInSeconds ?? 0;
   const videoTrack = container?.tracks?.find((track) => track.type === 'video') ?? webmTrack;
-  const audioTrack = container?.tracks?.find((track) => track.type === 'audio');
+  const audioTrack = container?.tracks?.find((track) => track.type === 'audio') ?? webmAudioTrack;
   const fps = videoTrack?.fps ?? null;
   const videoCodec = videoTrack?.codecConfig
     ? makeIsoBmffWebCodecsConfig(videoTrack).codec
     : videoTrack?.codec ?? null;
   const audioCodec = audioTrack?.codecConfig
     ? makeIsoBmffWebCodecsConfig(audioTrack).codec
-    : null;
+    : audioTrack?.codec ?? null;
   await onDimensions?.(dimensions);
   await onDurationInSeconds?.(durationInSeconds);
   if (fps !== null) await onFps?.(fps);
@@ -406,7 +413,7 @@ export async function parseMedia({
       trackId: cue.trackNumber ?? 1,
     })));
   }
-  const tracks = container?.tracks ?? (webmTrack ? [webmTrack] : []);
+  const tracks = container?.tracks ?? [webmTrack, webmAudioTrack].filter(Boolean);
   await onTracks?.(tracks);
   await onParseProgress?.({ bytes: 0, percentage: 1, totalBytes: null });
   const result = {
@@ -414,6 +421,7 @@ export async function parseMedia({
     dimensions,
     videoTracks: video ? [{ width: video.width, height: video.height, aspectRatio: video.aspectRatio }] : [],
     videoCodec,
+    audioCodec,
     audioTracks: audioDuration !== null ? [{ durationInSeconds: audioDuration }] : [],
     container: container?.container ?? (webm ? 'webm' : null),
     tracks,
@@ -455,7 +463,7 @@ async function parseWebmHeader(source) {
   };
   const masters = new Set([
     0x1a45dfa3, 0x18538067, 0x1549a966, 0x1654ae6b, 0xae, 0xe0,
-    0x1c53bb6b, 0xbb, 0xb7,
+    0x1c53bb6b, 0xbb, 0xb7, 0xe1,
   ]);
   const parseRange = (rangeStart, rangeEnd) => {
     let offset = rangeStart;
@@ -492,11 +500,31 @@ async function parseWebmHeader(source) {
   const scale = info ? find(0x2ad7b1, info.start, info.end) : null;
   const duration = info ? find(0x4489, info.start, info.end) : null;
   const tracks = find(0x1654ae6b, segment.start, segment.end);
-  const entry = tracks ? find(0xae, tracks.start, tracks.end) : null;
-  const trackType = entry ? find(0x83, entry.start, entry.end) : null;
-  const trackNumber = entry ? find(0xd7, entry.start, entry.end) : null;
-  const codec = entry ? find(0x86, entry.start, entry.end) : null;
-  const video = entry ? find(0xe0, entry.start, entry.end) : null;
+  const entries = tracks ? findAll(0xae, tracks.start, tracks.end) : [];
+  const trackInfo = entries.map((entry) => {
+    const type = find(0x83, entry.start, entry.end);
+    const number = find(0xd7, entry.start, entry.end);
+    const codec = find(0x86, entry.start, entry.end);
+    const video = find(0xe0, entry.start, entry.end);
+    const audio = find(0xe1, entry.start, entry.end);
+    const samplingFrequency = audio ? find(0xb5, audio.start, audio.end) : null;
+    const channels = audio ? find(0x9f, audio.start, audio.end) : null;
+    return {
+      type: type ? integer(type) : null,
+      trackNumber: number ? integer(number) : null,
+      codec: codec ? new TextDecoder().decode(bytes.subarray(codec.start, codec.end)) : null,
+      video, audio,
+      sampleRate: samplingFrequency ? float(samplingFrequency) : null,
+      channels: channels ? integer(channels) : null,
+    };
+  });
+  const videoInfo = trackInfo.find((track) => track.type === 1) ?? null;
+  const audioInfo = trackInfo.find((track) => track.type === 2) ?? null;
+  const entry = videoInfo ? entries[trackInfo.indexOf(videoInfo)] : null;
+  const trackType = videoInfo?.type;
+  const trackNumber = videoInfo?.trackNumber;
+  const codec = videoInfo?.codec;
+  const video = videoInfo?.video;
   const cues = findAll(0xbb, segment.start, segment.end).map((cuePoint) => {
     const cueTime = find(0xb3, cuePoint.start, cuePoint.end);
     const positions = findAll(0xb7, cuePoint.start, cuePoint.end);
@@ -512,16 +540,19 @@ async function parseWebmHeader(source) {
   }).flat().filter((cue) => cue.clusterPosition !== null);
   const width = video ? find(0xb0, video.start, video.end) : null;
   const height = video ? find(0xba, video.start, video.end) : null;
-  const codecId = codec ? new TextDecoder().decode(bytes.subarray(codec.start, codec.end)) : null;
   return {
     container: 'webm',
     durationInSeconds: duration && scale ? float(duration) * integer(scale) / 1e9 : null,
     timecodeScale: scale ? integer(scale) : 1_000_000,
-    videoCodec: codecId,
-    videoTrackNumber: trackNumber ? integer(trackNumber) : null,
+    videoCodec: codec,
+    videoTrackNumber: trackNumber,
     videoWidth: width ? integer(width) : null,
     videoHeight: height ? integer(height) : null,
-    videoType: trackType ? integer(trackType) : null,
+    videoType: trackType,
+    audioCodec: audioInfo?.codec ?? null,
+    audioTrackNumber: audioInfo?.trackNumber ?? null,
+    audioSampleRate: audioInfo?.sampleRate ?? null,
+    audioChannels: audioInfo?.channels ?? null,
     cues,
   };
 }
@@ -530,6 +561,12 @@ function webmCodec(codecId) {
   if (codecId === 'V_VP8') return 'vp8';
   if (codecId === 'V_VP9') return 'vp09.00.10.08';
   if (codecId === 'V_AV1') return 'av01.0.08M.08';
+  return null;
+}
+
+function webmAudioCodec(codecId) {
+  if (codecId === 'A_OPUS') return 'opus';
+  if (codecId === 'A_VORBIS') return 'vorbis';
   return null;
 }
 

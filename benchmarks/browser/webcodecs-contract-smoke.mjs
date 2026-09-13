@@ -85,6 +85,7 @@ try {
     const webmDecodedDimensions = webmFrames.map(({ displayWidth, displayHeight }) => [displayWidth, displayHeight]);
     for (const frame of webmFrames) frame.close();
     const webmAudioSamples = await window.dioxuscut.readWebmSamples('/assets/webm-audio-fixture.webm', 1);
+    const webmAudioMetadata = await window.dioxuscut.parseMedia({ src: '/assets/webm-audio-fixture.webm' });
     const webmAudioData = await window.dioxuscut.decodeWebmAudio('/assets/webm-audio-fixture.webm', {
       trackNumber: 1, maxSamples: 3, codec: 'opus', numberOfChannels: 1, sampleRate: 48000,
     });
@@ -195,6 +196,9 @@ try {
         decoded: webmFrames.length,
         streamed: { count: streamedWebmFrames, returnValue: streamedWebmResult },
         audioSamples: webmAudioSamples.length,
+        audioCodec: webmAudioMetadata.audioCodec,
+        audioRate: webmAudioMetadata.tracks?.[0]?.sampleRate,
+        audioChannels: webmAudioMetadata.tracks?.[0]?.numberOfChannels,
         decodedAudio: webmAudioFrames,
         decodedDimensions: webmDecodedDimensions,
         firstSample: webmSamples[0] ? {
@@ -246,6 +250,9 @@ try {
   assert.equal(result.webm.streamed.count, 3);
   assert.equal(result.webm.streamed.returnValue, null);
   assert.ok(result.webm.audioSamples > 0);
+  assert.equal(result.webm.audioCodec, 'opus');
+  assert.equal(result.webm.audioRate, 48000);
+  assert.equal(result.webm.audioChannels, 1);
   assert.ok(result.webm.decodedAudio.length > 0);
   assert.ok(result.webm.decodedAudio.every((frames) => frames > 0));
   assert.deepEqual(result.webm.decodedDimensions[0], [160, 90]);
