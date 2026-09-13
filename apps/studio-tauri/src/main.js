@@ -1416,7 +1416,7 @@ export async function getVideoTexture(source, options = {}) {
   if (typeof source !== 'string' || !source) throw new TypeError('getVideoTexture expects a source URL');
   const cached = videoTextureCache.get(source);
   if (cached) {
-    seekVideoTexture(cached.video, options);
+    await seekVideoTexture(cached, options);
     return cached.texture;
   }
   const video = document.createElement('video');
@@ -1432,8 +1432,9 @@ export async function getVideoTexture(source, options = {}) {
   await ready;
   const texture = new THREE.VideoTexture(video);
   texture.colorSpace = THREE.SRGBColorSpace;
-  videoTextureCache.set(source, { video, texture });
-  seekVideoTexture(video, options);
+  const entry = { video, texture, frame: null, seekPromise: null };
+  videoTextureCache.set(source, entry);
+  await seekVideoTexture(entry, options);
   return texture;
 }
 
@@ -1453,12 +1454,45 @@ export async function getOffthreadVideoTexture(source, options = {}) {
 
 export const useOffthreadVideoTexture = getOffthreadVideoTexture;
 
-function seekVideoTexture(video, options) {
+async function seekVideoTexture(entry, options) {
   const frame = Number(options.frame);
   const fps = Number(options.fps ?? 30);
-  if (Number.isFinite(frame) && Number.isFinite(fps) && fps > 0) {
-    const time = Math.max(0, frame / fps);
-    if (Math.abs(video.currentTime - time) > 1e-4) video.currentTime = time;
+  if (!Number.isFinite(frame) || !Number.isFinite(fps) || fps <= 0) return;
+  if (entry.frame === frame) return;
+  if (entry.seekPromise) await entry.seekPromise;
+  if (entry.frame === frame) return;
+  const time = Math.max(0, frame / fps);
+  const { video } = entry;
+  if (Math.abs(video.currentTime - time) <= 1e-4 && video.readyState >= 2) {
+    entry.frame = frame;
+    return;
+  }
+  entry.seekPromise = new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      video.removeEventListener('seeked', onSeeked);
+      video.removeEventListener('error', onError);
+      if (video.requestVideoFrameCallback && callbackId !== null) video.cancelVideoFrameCallback?.(callbackId);
+      if (error) reject(error); else resolve();
+    };
+    const onSeeked = () => {
+      if (!video.requestVideoFrameCallback) finish();
+    };
+    const onError = () => finish(new Error(`failed to seek video texture at frame ${frame}`));
+    let callbackId = null;
+    video.addEventListener('seeked', onSeeked, { once: true });
+    video.addEventListener('error', onError, { once: true });
+    if (video.requestVideoFrameCallback) {
+      callbackId = video.requestVideoFrameCallback(() => finish());
+    }
+    video.currentTime = time;
+  }).then(() => { entry.frame = frame; });
+  try {
+    await entry.seekPromise;
+  } finally {
+    entry.seekPromise = null;
   }
 }
 
