@@ -486,8 +486,9 @@ export function getWaveformPortion({
   audioData, startTimeInSeconds, durationInSeconds, numberOfSamples,
   channel = 0, dataOffsetInSeconds = 0, outputRange = 'zero-to-one', normalize = true,
 }) {
-  if (!audioData?.channelWaveforms?.length || numberOfSamples <= 0) return [];
-  const waveform = audioData.channelWaveforms[Math.min(channel, audioData.channelWaveforms.length - 1)];
+  const channels = audioData?.channelWaveforms ?? audioData?.channelData;
+  if (!channels?.length || numberOfSamples <= 0) return [];
+  const waveform = channels[Math.min(channel, channels.length - 1)];
   const start = Math.floor((startTimeInSeconds - dataOffsetInSeconds) * audioData.sampleRate);
   const end = Math.floor((startTimeInSeconds - dataOffsetInSeconds + durationInSeconds) * audioData.sampleRate);
   const padded = new Float32Array(Math.max(0, end - start));
@@ -607,7 +608,7 @@ export function visualizeAudio({
     throw new TypeError(`numberOfSamples must produce a power-of-two FFT size; got ${numberOfSamples}`);
   }
   if (!fps) throw new TypeError('fps is required');
-  const waveform = audioData?.channelWaveforms?.[0];
+  const waveform = (audioData?.channelWaveforms ?? audioData?.channelData)?.[0];
   if (!waveform || waveform.length < size) throw new TypeError(`Audio data is not big enough to provide ${size} bars.`);
   const start = Math.floor((frame / fps - dataOffsetInSeconds) * audioData.sampleRate);
   const actualStart = Math.max(0, start - size / 2);
