@@ -1066,15 +1066,13 @@ fn compile_nodes(
                 stroke_width,
                 opacity: node_opacity,
             } => {
-                let Some(path) = svgpath_to_tiny_skia(d) else {
-                    continue;
-                };
+                let path = svgpath_to_tiny_skia(d)?;
                 let combined_opacity = opacity * node_opacity;
                 if let Some(fill) = fill {
                     output.push(mesh_command(&path, *fill, combined_opacity, transform)?);
                 }
                 if let Some(stroke) = stroke.filter(|_| *stroke_width > 0.0) {
-                    if let Some(stroked) = path.stroke(
+                    let stroked = path.stroke(
                         &Stroke {
                             width: *stroke_width,
                             ..Default::default()
@@ -1084,9 +1082,8 @@ fn compile_nodes(
                             .0
                             .max(transform.get_scale().1)
                             .max(1.0),
-                    ) {
-                        output.push(mesh_command(&stroked, stroke, combined_opacity, transform)?);
-                    }
+                    )?;
+                    output.push(mesh_command(&stroked, stroke, combined_opacity, transform)?);
                 }
             }
 
@@ -1341,6 +1338,17 @@ mod support_tests {
             }],
         };
         assert!(!gpu_supports_scene(&image_scene));
+
+        let invalid_path_scene = Scene {
+            nodes: vec![SceneNode::Path {
+                d: "M 0 0 L nope".into(),
+                fill: Some(Color::WHITE),
+                stroke: None,
+                stroke_width: 0.0,
+                opacity: 1.0,
+            }],
+        };
+        assert!(!gpu_supports_scene(&invalid_path_scene));
     }
 
     #[test]
