@@ -17,6 +17,8 @@ pub enum MediaMetadataError {
     AudioDecode(String),
     #[error("Image decode error: {0}")]
     ImageDecode(String),
+    #[error("Invalid media byte range: {0}")]
+    InvalidRange(String),
 }
 
 /// Pixel dimensions for a still image, matching Remotion's
@@ -70,6 +72,40 @@ pub struct ParsedMediaMetadata {
     pub video: Option<VideoMetadata>,
     pub audio: Option<AudioMetadata>,
     pub image: Option<ImageDimensions>,
+}
+
+/// Maximum single range read used by media parsers to avoid accidental whole
+/// file allocations when inspecting untrusted assets.
+pub const MAX_MEDIA_RANGE_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Read a bounded half-open byte range from a local media source.
+pub fn read_media_range(
+    path: impl AsRef<Path>,
+    start: u64,
+    end_exclusive: u64,
+) -> Result<Vec<u8>, MediaMetadataError> {
+    if start > end_exclusive {
+        return Err(MediaMetadataError::InvalidRange(format!(
+            "start {start} is greater than end {end_exclusive}"
+        )));
+    }
+    let length = end_exclusive - start;
+    if length > MAX_MEDIA_RANGE_BYTES {
+        return Err(MediaMetadataError::InvalidRange(format!(
+            "range length {length} exceeds {MAX_MEDIA_RANGE_BYTES} bytes"
+        )));
+    }
+    let path_ref = path.as_ref();
+    let mut file = std::fs::File::open(path_ref).map_err(|error| {
+        MediaMetadataError::FileNotFound(format!("{}: {error}", path_ref.display()))
+    })?;
+    use std::io::{Read, Seek, SeekFrom};
+    file.seek(SeekFrom::Start(start))
+        .map_err(|error| MediaMetadataError::FfprobeExecution(error.to_string()))?;
+    let mut bytes = vec![0; length as usize];
+    file.read_exact(&mut bytes)
+        .map_err(|error| MediaMetadataError::InvalidRange(error.to_string()))?;
+    Ok(bytes)
 }
 
 /// Inspect a media source once and return the metadata fields available for
@@ -369,5 +405,14 @@ mod tests {
         assert!(parsed.video.is_none());
         assert!(parsed.audio.is_none());
         assert_eq!(parsed.duration_in_seconds, 0.0);
+    }
+
+    #[test]
+    fn test_read_media_range_is_bounded_and_half_open() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml");
+        let bytes = read_media_range(&path, 0, 4).unwrap();
+        assert_eq!(bytes.len(), 4);
+        assert!(read_media_range(&path, 4, 3).is_err());
+        assert!(read_media_range(&path, 0, MAX_MEDIA_RANGE_BYTES + 1).is_err());
     }
 }
