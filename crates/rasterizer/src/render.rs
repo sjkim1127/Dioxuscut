@@ -624,6 +624,7 @@ where
 
     validate_pipe_config(config)?;
     config.control.check(started)?;
+    let output_preexisted = config.output.exists();
 
     // ── 1. Spawn FFmpeg ──────────────────────────────────────────────────────
     let ffmpeg_args = build_pipe_ffmpeg_args(config);
@@ -737,14 +738,22 @@ where
     if let Err(error) = render_result {
         let _ = ffmpeg.kill();
         let _ = ffmpeg.wait();
+        remove_failed_output(&config.output, output_preexisted);
         return Err(error);
     }
 
     // ── 4. Wait for FFmpeg to finish ─────────────────────────────────────────
-    let output = wait_for_ffmpeg(ffmpeg, &config.control, started)?;
+    let output = match wait_for_ffmpeg(ffmpeg, &config.control, started) {
+        Ok(output) => output,
+        Err(error) => {
+            remove_failed_output(&config.output, output_preexisted);
+            return Err(error);
+        }
+    };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        remove_failed_output(&config.output, output_preexisted);
         return Err(RasterError::ImageEncode(format!(
             "FFmpeg exited with non-zero status {:?}: {}",
             output.status.code(),
@@ -753,6 +762,12 @@ where
     }
 
     Ok(())
+}
+
+fn remove_failed_output(path: &Path, preexisted: bool) {
+    if !preexisted && path.exists() {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 /// Render at most `window` frames ahead, consuming them in timeline order.
@@ -2000,6 +2015,27 @@ mod tests {
         .unwrap_err();
         assert!(matches!(error, RasterError::Timeout));
         assert!(!timeout_output.exists());
+
+        let mid_render_output = temp.join("mid-render-cancelled.mp4");
+        let cancellation = RenderCancellationToken::default();
+        let callback_cancellation = cancellation.clone();
+        let mid_render_control = RenderControl::new()
+            .with_cancellation(cancellation)
+            .with_progress(move |progress| {
+                if progress.completed_frames == 1 {
+                    callback_cancellation.cancel();
+                }
+            });
+        let mid_render =
+            PipeConfig::new(32, 24, 30.0, 30, &mid_render_output).with_control(mid_render_control);
+        let error = render_to_ffmpeg_pipe(
+            &TinySkiaBackend::headless(),
+            &mid_render,
+            solid_scene(Color::rgb(1, 2, 3)),
+        )
+        .unwrap_err();
+        assert!(matches!(error, RasterError::Cancelled));
+        assert!(!mid_render_output.exists());
         std::fs::remove_dir_all(temp).unwrap();
     }
 
