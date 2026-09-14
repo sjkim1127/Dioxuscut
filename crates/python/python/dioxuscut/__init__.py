@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 # Import native PyO3 module
 from ._dioxuscut import (
@@ -86,6 +86,7 @@ def render(
     hw_accel: str = "auto",
     sandbox_roots: Optional[List[Union[str, Path]]] = None,
     permissive: bool = False,
+    progress_callback: Optional[Callable[[Dict[str, int]], None]] = None,
 ) -> None:
     """
     Render a registered video composition to an output video or still image.
@@ -107,6 +108,7 @@ def render(
         hw_accel: Hardware acceleration mode ('auto', 'disabled', 'videotoolbox', 'nvenc')
         sandbox_roots: List of allowed root paths for media security isolation
         permissive: Run in permissive mode without media sandbox jail
+        progress_callback: Optional callback receiving completed_frames, total_frames, and frame
     """
     props_json = json.dumps(props) if props is not None else None
     roots = [str(r) for r in sandbox_roots] if sandbox_roots is not None else None
@@ -128,6 +130,7 @@ def render(
         hw_accel=hw_accel,
         sandbox_roots=roots,
         permissive=permissive,
+        progress_callback=progress_callback,
     )
 
 
@@ -203,6 +206,7 @@ def render_script(
     hw_accel: str = "auto",
     sandbox_roots: Optional[List[Union[str, Path]]] = None,
     permissive: bool = False,
+    progress_callback: Optional[Callable[[Dict[str, int]], None]] = None,
 ) -> None:
     """
     Render a dynamic Rhai video script (.rhai) without recompiling Rust code.
@@ -241,6 +245,7 @@ def render_script(
         hw_accel=hw_accel,
         sandbox_roots=roots,
         permissive=permissive,
+        progress_callback=progress_callback,
     )
 
 
@@ -275,6 +280,7 @@ class Composition:
         hw_accel: str = "auto",
         sandbox_roots: Optional[List[Union[str, Path]]] = None,
         permissive: bool = False,
+        progress_callback: Optional[Callable[[Dict[str, int]], None]] = None,
     ) -> None:
         """Render the complete video."""
         if self.is_script:
@@ -293,6 +299,7 @@ class Composition:
                 hw_accel=hw_accel,
                 sandbox_roots=sandbox_roots,
                 permissive=permissive,
+                progress_callback=progress_callback,
             )
         else:
             render(
@@ -310,6 +317,7 @@ class Composition:
                 hw_accel=hw_accel,
                 sandbox_roots=sandbox_roots,
                 permissive=permissive,
+                progress_callback=progress_callback,
             )
 
     def render_still(

@@ -1,10 +1,9 @@
 //! Python native bindings for Dioxuscut using PyO3.
 #![allow(clippy::useless_conversion)]
-use dioxuscut_cli::{
-    built_in_registry, execute_render_command, RenderBackend, RenderCodec, RenderRequest,
-};
+use dioxuscut_cli::{built_in_registry, RenderBackend, RenderCodec, RenderRequest};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use std::path::PathBuf;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -86,7 +85,8 @@ fn parse_hw_accel(hw_accel: &str) -> Result<dioxuscut_rasterizer::HwAccel, PyErr
     preset = "fast",
     hw_accel = "auto",
     sandbox_roots = None,
-    permissive = false
+    permissive = false,
+    progress_callback = None
 ))]
 #[allow(clippy::too_many_arguments)]
 fn render_native(
@@ -108,6 +108,7 @@ fn render_native(
     hw_accel: &str,
     sandbox_roots: Option<Vec<String>>,
     permissive: bool,
+    progress_callback: Option<Py<PyAny>>,
 ) -> PyResult<()> {
     let parsed_codec = parse_codec(codec)?;
     let parsed_backend = parse_backend(backend)?;
@@ -155,14 +156,28 @@ fn render_native(
     };
 
     // Release GIL while rendering in a dedicated Tokio runtime
-    let result = py.detach(|| {
+    let result = py.detach(move || {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to initialize runtime: {e}")))?;
 
         rt.block_on(async {
-            execute_render_command(&request)
+            let control = dioxuscut_rasterizer::RenderControl::new();
+            let control = if let Some(callback) = progress_callback {
+                control.with_progress(move |progress| {
+                    Python::attach(|py| {
+                        let payload = PyDict::new(py);
+                        let _ = payload.set_item("completed_frames", progress.completed_frames);
+                        let _ = payload.set_item("total_frames", progress.total_frames);
+                        let _ = payload.set_item("frame", progress.frame);
+                        let _ = callback.call1(py, (payload,));
+                    });
+                })
+            } else {
+                control
+            };
+            dioxuscut_cli::execute_render_command_with_control(&request, control)
                 .await
                 .map_err(|e| PyRuntimeError::new_err(format!("Render failed: {e:#}")))
         })
