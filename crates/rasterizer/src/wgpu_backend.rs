@@ -3674,11 +3674,7 @@ fn compile_nodes(
                     || *mask_mode == crate::scene::MaskMode::Luminance)
                 && matches!(
                     blend_mode,
-                    crate::scene::BlendMode::Normal
-                        | crate::scene::BlendMode::Multiply
-                        | crate::scene::BlendMode::Screen
-                        | crate::scene::BlendMode::Darken
-                        | crate::scene::BlendMode::Lighten
+                    crate::scene::BlendMode::Normal | crate::scene::BlendMode::Multiply
                 )
                 && (matches!(blend_mode, crate::scene::BlendMode::Normal)
                     || gpu_blend_layer_filters_supported(filters))
@@ -3705,9 +3701,6 @@ fn compile_nodes(
                     instance.kind_data[3] = 1;
                     instance.kind_data[2] = match blend_mode {
                         crate::scene::BlendMode::Multiply => 1,
-                        crate::scene::BlendMode::Screen => 2,
-                        crate::scene::BlendMode::Darken => 3,
-                        crate::scene::BlendMode::Lighten => 4,
                         crate::scene::BlendMode::Normal => 0,
                         _ => return None,
                     };
@@ -6739,7 +6732,7 @@ mod tests {
             println!("GPU backend unavailable; skipping path alpha mask GPU test");
             return;
         };
-        let scene = Scene {
+        let mut scene = Scene {
             nodes: vec![
                 SceneNode::Rect {
                     x: 0.0,
@@ -6778,26 +6771,35 @@ mod tests {
                 },
             ],
         };
-        assert!(gpu_supports_scene(&scene));
         let config = FrameConfig::new(32, 32, 0, 30.0);
-        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
-        let cpu_image = TinySkiaBackend::new()
-            .render_frame(&scene, &config)
-            .unwrap();
-        for (x, y) in [(16, 10), (16, 20), (2, 2)] {
-            for channel in 0..4 {
-                assert!(
-                    (i16::from(gpu_image.get_pixel(x, y)[channel])
-                        - i16::from(cpu_image.get_pixel(x, y)[channel]))
-                    .abs()
-                        <= 5,
-                    "GPU/CPU path luminance mask mismatch at ({x},{y}) channel {channel}: {:?} vs {:?}",
-                    gpu_image.get_pixel(x, y),
-                    cpu_image.get_pixel(x, y)
-                );
+        for blend_mode in [crate::scene::BlendMode::Multiply] {
+            let SceneNode::Layer {
+                blend_mode: mode, ..
+            } = &mut scene.nodes[1]
+            else {
+                unreachable!("path mask test lost its layer");
+            };
+            *mode = blend_mode;
+            assert!(gpu_supports_scene(&scene));
+            let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+            let cpu_image = TinySkiaBackend::new()
+                .render_frame(&scene, &config)
+                .unwrap();
+            for (x, y) in [(16, 10), (16, 20), (2, 2)] {
+                for channel in 0..4 {
+                    assert!(
+                        (i16::from(gpu_image.get_pixel(x, y)[channel])
+                            - i16::from(cpu_image.get_pixel(x, y)[channel]))
+                        .abs()
+                            <= 5,
+                        "GPU/CPU path luminance mask mismatch for {blend_mode:?} at ({x},{y}) channel {channel}: {:?} vs {:?}",
+                        gpu_image.get_pixel(x, y),
+                        cpu_image.get_pixel(x, y)
+                    );
+                }
             }
+            assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
         }
-        assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
     }
 
     #[test]
