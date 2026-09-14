@@ -689,6 +689,15 @@ impl JobStore {
             .jobs
             .get_mut(id)
             .ok_or_else(|| ProjectError::JobNotFound(id.to_string()))?;
+        if !matches!(
+            job.status,
+            JobStatus::Queued | JobStatus::Preparing | JobStatus::Rendering | JobStatus::Encoding
+        ) {
+            return Err(ProjectError::InvalidJobTransition {
+                from: job.status.clone(),
+                to: JobStatus::Encoding,
+            });
+        }
         if encoded_frames < job.encoded_frames {
             return Err(ProjectError::ProgressRegressed {
                 previous: job.encoded_frames,
@@ -1368,6 +1377,24 @@ mod tests {
             })
         ));
         assert_eq!(store.get(&id).unwrap().status, JobStatus::Cancelled);
+    }
+
+    #[test]
+    fn late_encoding_progress_cannot_mutate_terminal_job() {
+        let mut store = JobStore::default();
+        let id = store.submit(project()).unwrap();
+        store.try_update(&id, JobStatus::Preparing, 0).unwrap();
+        store.try_update(&id, JobStatus::Rendering, 4).unwrap();
+        store.cancel(&id).unwrap();
+
+        assert!(matches!(
+            store.set_encoding_progress(&id, 4),
+            Err(ProjectError::InvalidJobTransition {
+                from: JobStatus::Cancelled,
+                to: JobStatus::Encoding,
+            })
+        ));
+        assert_eq!(store.get(&id).unwrap().encoded_frames, 0);
     }
 
     #[test]
