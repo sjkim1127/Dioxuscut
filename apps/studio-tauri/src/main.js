@@ -2605,11 +2605,14 @@ async function refreshJobList() {
   const list = document.querySelector('#job-list');
   if (!jobs.length) { list.textContent = 'No jobs'; return; }
   list.replaceChildren(...jobs.map((job) => {
-    const item = document.createElement('div');
+  const item = document.createElement('div');
     item.className = 'job-item';
     const progress = `${job.completed_frames}/${job.project.settings.duration}`;
+    const diagnostics = job.gpu_frames !== null && job.gpu_frames !== undefined
+      ? ` · GPU ${job.gpu_frames} · CPU fallback ${job.cpu_fallback_frames ?? 0}${job.gpu_fallback_reason ? ` (${job.gpu_fallback_reason})` : ''}`
+      : '';
     const label = document.createElement('span');
-    label.textContent = `${job.id} · ${job.status} · ${progress}${job.error ? ` · ${job.error}` : ''}`;
+    label.textContent = `${job.id} · ${job.status} · ${progress}${diagnostics}${job.error ? ` · ${job.error}` : ''}`;
     item.append(label);
     if (['failed', 'cancelled'].includes(job.status)) {
       const retry = document.createElement('button');
