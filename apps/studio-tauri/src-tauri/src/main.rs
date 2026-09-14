@@ -560,12 +560,7 @@ fn update_render_job(
     status: JobStatus,
     completed_frames: u32,
 ) -> Result<(), String> {
-    state
-        .jobs
-        .lock()
-        .map_err(|_| "job store lock poisoned".to_string())?
-        .try_update(&id, status, completed_frames)
-        .map_err(|error| error.to_string())
+    RenderJobController::new(Arc::clone(&state.jobs)).update(&id, status, completed_frames)
 }
 
 #[tauri::command]
