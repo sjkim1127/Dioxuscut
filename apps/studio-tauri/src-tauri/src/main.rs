@@ -7,8 +7,8 @@ use dioxuscut_project::{JobStatus, JobStore, Project, RenderJob};
 use dioxuscut_rasterizer::{
     make_cancel_signal, render_still_fallible_scaled, render_web_to_ffmpeg_pipe_fallible,
     BackendCapabilities, BrowserFrameBackend, PipeConfig, RenderCancellationToken, RenderControl,
-    StillImageFormat, VideoCodec, WebFrameRequest, WebTimelineClip, WebWorkerMessage,
-    WEB_WORKER_PROTOCOL_VERSION,
+    RenderDiagnostics, StillImageFormat, VideoCodec, WebFrameRequest, WebTimelineClip,
+    WebWorkerMessage, WEB_WORKER_PROTOCOL_VERSION,
 };
 use dioxuscut_renderer::spawn_server;
 use std::collections::HashMap;
@@ -252,6 +252,8 @@ fn start_render_job(
                 };
                 let progress_state = Arc::clone(&state_jobs);
                 let progress_id = id.clone();
+                let diagnostics_state = Arc::clone(&state_jobs);
+                let diagnostics_id = id.clone();
                 let control = RenderControl::new()
                     .with_cancellation(cancellation)
                     .with_progress(move |progress| {
@@ -260,6 +262,16 @@ fn start_render_job(
                                 &progress_id,
                                 JobStatus::Rendering,
                                 progress.completed_frames,
+                            );
+                        }
+                    })
+                    .with_diagnostics(move |diagnostics: RenderDiagnostics| {
+                        if let Ok(mut store) = diagnostics_state.lock() {
+                            let _ = store.set_render_diagnostics(
+                                &diagnostics_id,
+                                diagnostics.gpu_frames,
+                                diagnostics.cpu_fallback_frames,
+                                diagnostics.fallback_reason,
                             );
                         }
                     });
@@ -382,6 +394,8 @@ fn start_render_job(
                 .map_err(|error| error.to_string())?;
             let state_for_progress = Arc::clone(&state_jobs);
             let progress_id = id.clone();
+            let diagnostics_state = Arc::clone(&state_jobs);
+            let diagnostics_id = id.clone();
             let control = RenderControl::new()
                 .with_cancellation(cancellation)
                 .with_progress(move |progress| {
@@ -390,6 +404,16 @@ fn start_render_job(
                             &progress_id,
                             JobStatus::Rendering,
                             progress.completed_frames,
+                        );
+                    }
+                })
+                .with_diagnostics(move |diagnostics: RenderDiagnostics| {
+                    if let Ok(mut store) = diagnostics_state.lock() {
+                        let _ = store.set_render_diagnostics(
+                            &diagnostics_id,
+                            diagnostics.gpu_frames,
+                            diagnostics.cpu_fallback_frames,
+                            diagnostics.fallback_reason,
                         );
                     }
                 });

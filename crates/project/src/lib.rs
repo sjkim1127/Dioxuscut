@@ -156,6 +156,12 @@ pub struct RenderJob {
     pub error: Option<String>,
     #[serde(default)]
     pub output: Option<String>,
+    #[serde(default)]
+    pub gpu_frames: Option<u64>,
+    #[serde(default)]
+    pub cpu_fallback_frames: Option<u64>,
+    #[serde(default)]
+    pub gpu_fallback_reason: Option<String>,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -630,6 +636,9 @@ impl JobStore {
                 completed_frames: 0,
                 error: None,
                 output: None,
+                gpu_frames: None,
+                cpu_fallback_frames: None,
+                gpu_fallback_reason: None,
             },
         );
         Ok(id)
@@ -646,6 +655,23 @@ impl JobStore {
             .get_mut(id)
             .ok_or_else(|| ProjectError::JobNotFound(id.to_string()))?;
         job.output = Some(output.into());
+        Ok(())
+    }
+
+    pub fn set_render_diagnostics(
+        &mut self,
+        id: &str,
+        gpu_frames: u64,
+        cpu_fallback_frames: u64,
+        fallback_reason: Option<String>,
+    ) -> Result<(), ProjectError> {
+        let job = self
+            .jobs
+            .get_mut(id)
+            .ok_or_else(|| ProjectError::JobNotFound(id.to_string()))?;
+        job.gpu_frames = Some(gpu_frames);
+        job.cpu_fallback_frames = Some(cpu_fallback_frames);
+        job.gpu_fallback_reason = fallback_reason;
         Ok(())
     }
     pub fn update(&mut self, id: &str, status: JobStatus, completed_frames: u32) -> bool {
