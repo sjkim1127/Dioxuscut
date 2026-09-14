@@ -2018,7 +2018,7 @@ impl WgpuBackend {
 
         let mut all_instances: Vec<GpuInstance> = commands.iter().map(|c| *c.instance()).collect();
         let mut image_resources = Vec::with_capacity(commands.len());
-        let atlas_snapshot = self.fallback.text_atlas_snapshot();
+        let atlas_snapshot = self.fallback.take_text_atlas_snapshot();
         let atlas_resource = self.gpu_text_atlas(&atlas_snapshot);
         for (index, command) in commands.iter().enumerate() {
             let (source, fit) = match command {

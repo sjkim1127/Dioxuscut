@@ -163,6 +163,15 @@ impl TextAtlas {
         }
     }
 
+    /// Take a snapshot for an incremental consumer and clear the pending
+    /// upload region. The atlas pixels and entries remain intact; only the
+    /// change region is acknowledged by the consumer.
+    pub(crate) fn take_snapshot(&mut self) -> TextAtlasSnapshot {
+        let snapshot = self.snapshot();
+        self.dirty = None;
+        snapshot
+    }
+
     #[allow(dead_code)]
     pub(crate) fn sample(&self, entry: AtlasEntry) -> Vec<u8> {
         let mut output = vec![0; (entry.width * entry.height) as usize];
@@ -242,5 +251,27 @@ mod tests {
                 height: 2
             })
         );
+    }
+
+    #[test]
+    fn take_snapshot_acknowledges_only_the_pending_dirty_region() {
+        let mut atlas = TextAtlas::new(16, 4);
+        atlas.insert("a".into(), &[1, 2], 2, 1, 0).unwrap();
+        let first = atlas.take_snapshot();
+        assert!(first.dirty.is_some());
+        assert_eq!(atlas.snapshot().dirty, None);
+
+        atlas.insert("b".into(), &[3, 4], 2, 1, 0).unwrap();
+        let second = atlas.take_snapshot();
+        assert_eq!(
+            second.dirty,
+            Some(AtlasRect {
+                x: 2,
+                y: 0,
+                width: 2,
+                height: 1
+            })
+        );
+        assert_eq!(atlas.snapshot().dirty, None);
     }
 }

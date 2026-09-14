@@ -117,8 +117,8 @@ impl TinySkiaBackend {
     }
 
     #[cfg(feature = "gpu")]
-    pub(crate) fn text_atlas_snapshot(&self) -> crate::text_atlas::TextAtlasSnapshot {
-        self.font.text_atlas_snapshot()
+    pub(crate) fn take_text_atlas_snapshot(&self) -> crate::text_atlas::TextAtlasSnapshot {
+        self.font.take_text_atlas_snapshot()
     }
 
     #[cfg(feature = "gpu")]

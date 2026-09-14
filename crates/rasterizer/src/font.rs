@@ -454,6 +454,14 @@ impl FontCache {
     }
 
     #[allow(dead_code)]
+    pub(crate) fn take_text_atlas_snapshot(&self) -> TextAtlasSnapshot {
+        self.atlas
+            .lock()
+            .expect("text atlas lock poisoned")
+            .take_snapshot()
+    }
+
+    #[allow(dead_code)]
     pub(crate) fn text_atlas_entry(&self, key: &str) -> Option<AtlasEntry> {
         self.atlas
             .lock()
