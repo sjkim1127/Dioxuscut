@@ -5336,6 +5336,62 @@ mod tests {
     }
 
     #[test]
+    fn gpu_text_unicode_and_weight_use_distinct_atlas_entries() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping Unicode text test");
+            return;
+        };
+        let regular = Scene {
+            nodes: vec![SceneNode::Text {
+                x: 4.0,
+                y: 30.0,
+                content: "한글 日本語".into(),
+                font_size: 20.0,
+                color: Color::WHITE,
+                font_weight: 400,
+                font_sources: Vec::new(),
+            }],
+        };
+        let bold = Scene {
+            nodes: vec![SceneNode::Text {
+                x: 4.0,
+                y: 30.0,
+                content: "한글 日本語".into(),
+                font_size: 20.0,
+                color: Color::WHITE,
+                font_weight: 700,
+                font_sources: Vec::new(),
+            }],
+        };
+        let config = FrameConfig::new(192, 48, 0, 30.0);
+        let regular_gpu = gpu.render_frame(&regular, &config).unwrap();
+        let regular_cpu = TinySkiaBackend::new()
+            .render_frame(&regular, &config)
+            .unwrap();
+        let bold_gpu = gpu.render_frame(&bold, &config).unwrap();
+        let bold_cpu = TinySkiaBackend::new().render_frame(&bold, &config).unwrap();
+        assert!(regular_gpu.pixels().any(|pixel| pixel[3] > 0));
+        assert!(bold_gpu.pixels().any(|pixel| pixel[3] > 0));
+        for (gpu_image, cpu_image) in [(&regular_gpu, &regular_cpu), (&bold_gpu, &bold_cpu)] {
+            let mean_alpha_error = gpu_image
+                .pixels()
+                .zip(cpu_image.pixels())
+                .map(|(gpu, cpu)| (i16::from(gpu[3]) - i16::from(cpu[3])).unsigned_abs() as u64)
+                .sum::<u64>() as f64
+                / (192 * 48) as f64;
+            assert!(
+                mean_alpha_error < 14.0,
+                "Unicode alpha error: {mean_alpha_error}"
+            );
+        }
+        assert_ne!(
+            regular_gpu.pixels().collect::<Vec<_>>(),
+            bold_gpu.pixels().collect::<Vec<_>>()
+        );
+        assert!(gpu.text_atlas_upload_bytes() > 0);
+    }
+
+    #[test]
     fn gpu_vignette_filter_matches_cpu_layer_falloff() {
         let Ok(gpu) = WgpuBackend::new() else {
             println!("GPU backend unavailable; skipping vignette GPU test");
