@@ -197,6 +197,52 @@ try {
       codec: codecConfig.codec, description: codecConfig.description, options: { parsed },
     });
     const thirtyFrameDecodeMs = performance.now() - thirtyFrameDecodeStarted;
+    let webgpuVideo = null;
+    if (navigator.gpu) {
+      const adapter = await navigator.gpu.requestAdapter();
+      if (adapter) {
+        const device = await adapter.requestDevice();
+        const width = thirtyFrameVideo[0].displayWidth;
+        const height = thirtyFrameVideo[0].displayHeight;
+        const texture = device.createTexture({
+          size: { width, height, depthOrArrayLayers: 1 },
+          format: 'rgba8unorm',
+          usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC,
+        });
+        const bytesPerRow = width * 4;
+        const readback = device.createBuffer({
+          size: bytesPerRow * height,
+          usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+        });
+        const gpuStarted = performance.now();
+        for (const frame of thirtyFrameVideo) {
+          device.queue.copyExternalImageToTexture(
+            { source: frame },
+            { texture },
+            { width, height, depthOrArrayLayers: 1 },
+          );
+          const encoder = device.createCommandEncoder();
+          encoder.copyTextureToBuffer(
+            { texture },
+            { buffer: readback, bytesPerRow, rowsPerImage: height },
+            { width, height, depthOrArrayLayers: 1 },
+          );
+          device.queue.submit([encoder.finish()]);
+          await device.queue.onSubmittedWorkDone();
+          await readback.mapAsync(GPUMapMode.READ);
+          readback.getMappedRange().slice(0, 4);
+          readback.unmap();
+        }
+        webgpuVideo = {
+          frames: thirtyFrameVideo.length,
+          uploadReadbackMs: performance.now() - gpuStarted,
+          bytes: bytesPerRow * height * thirtyFrameVideo.length,
+        };
+        readback.destroy();
+        texture.destroy();
+        device.destroy();
+      }
+    }
     const thirtyFrameRgbaStarted = performance.now();
     let thirtyFrameRgbaBytes = 0;
     for (const frame of thirtyFrameVideo) {
@@ -264,6 +310,7 @@ try {
         decodeMs: thirtyFrameDecodeMs,
         rgbaMs: thirtyFrameRgbaMs,
         rgbaBytes: thirtyFrameRgbaBytes,
+        webgpu: webgpuVideo,
       },
       decodedAudio,
       audioDecodeMs,
