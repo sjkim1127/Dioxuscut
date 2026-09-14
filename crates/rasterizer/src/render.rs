@@ -170,6 +170,11 @@ pub struct RenderDiagnostics {
     pub output_width: u32,
     pub output_height: u32,
     pub fps: f64,
+    pub texture_cache_hits: u64,
+    pub texture_cache_misses: u64,
+    pub video_decode_ms: f64,
+    pub texture_upload_ms: f64,
+    pub gpu_submit_readback_ms: f64,
 }
 
 #[derive(Clone, Default)]
@@ -292,7 +297,7 @@ impl RenderControl {
     pub fn with_stderr_render_stats(self) -> Self {
         self.with_diagnostics(|diagnostics| {
             eprintln!(
-                "{{\"dioxuscut_render\":true,\"backend\":\"{}\",\"elapsed_ms\":{:.3},\"encoded_frames\":{},\"encoded_fps\":{:.3},\"resolution\":\"{}x{}\",\"gpu_frames\":{},\"cpu_fallback_frames\":{},\"fallback_reason\":{}}}",
+                "{{\"dioxuscut_render\":true,\"backend\":\"{}\",\"elapsed_ms\":{:.3},\"encoded_frames\":{},\"encoded_fps\":{:.3},\"resolution\":\"{}x{}\",\"gpu_frames\":{},\"cpu_fallback_frames\":{},\"texture_cache_hits\":{},\"texture_cache_misses\":{},\"video_decode_ms\":{:.3},\"texture_upload_ms\":{:.3},\"gpu_submit_readback_ms\":{:.3},\"fallback_reason\":{}}}",
                 diagnostics.backend,
                 diagnostics.elapsed_ms,
                 diagnostics.encoded_frames,
@@ -305,6 +310,11 @@ impl RenderControl {
                 diagnostics.output_height,
                 diagnostics.gpu_frames,
                 diagnostics.cpu_fallback_frames,
+                diagnostics.texture_cache_hits,
+                diagnostics.texture_cache_misses,
+                diagnostics.video_decode_ms,
+                diagnostics.texture_upload_ms,
+                diagnostics.gpu_submit_readback_ms,
                 serde_json::to_string(&diagnostics.fallback_reason).unwrap_or_else(|_| "null".into()),
             );
         })
@@ -922,6 +932,7 @@ where
     }
 
     let capabilities = backend.capabilities();
+    let backend_stats = backend.render_stats();
     config.control.report_diagnostics(RenderDiagnostics {
         backend: if capabilities.browser_runtime {
             "browser"
@@ -930,14 +941,19 @@ where
         } else {
             "native"
         },
-        gpu_frames: 0,
-        cpu_fallback_frames: 0,
+        gpu_frames: backend_stats.gpu_frames,
+        cpu_fallback_frames: backend_stats.cpu_fallback_frames,
         fallback_reason: None,
         elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
         encoded_frames: total,
         output_width,
         output_height,
         fps,
+        texture_cache_hits: backend_stats.texture_cache_hits,
+        texture_cache_misses: backend_stats.texture_cache_misses,
+        video_decode_ms: backend_stats.video_decode_ns as f64 / 1_000_000.0,
+        texture_upload_ms: backend_stats.texture_upload_ns as f64 / 1_000_000.0,
+        gpu_submit_readback_ms: backend_stats.gpu_submit_readback_ns as f64 / 1_000_000.0,
     });
 
     Ok(())
@@ -1597,6 +1613,11 @@ mod tests {
             output_width: 1280,
             output_height: 720,
             fps: 30.0,
+            texture_cache_hits: 2,
+            texture_cache_misses: 1,
+            video_decode_ms: 0.5,
+            texture_upload_ms: 0.25,
+            gpu_submit_readback_ms: 1.0,
         });
         assert_eq!(
             received.lock().unwrap().as_slice(),
@@ -1610,6 +1631,11 @@ mod tests {
                 output_width: 1280,
                 output_height: 720,
                 fps: 30.0,
+                texture_cache_hits: 2,
+                texture_cache_misses: 1,
+                video_decode_ms: 0.5,
+                texture_upload_ms: 0.25,
+                gpu_submit_readback_ms: 1.0,
             }]
         );
     }

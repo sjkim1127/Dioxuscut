@@ -46,7 +46,9 @@
 
 #![cfg(feature = "gpu")]
 
-use crate::backend::{BackendCapabilities, FrameConfig, FrameSink, RasterError, RasterizerBackend};
+use crate::backend::{
+    BackendCapabilities, BackendRenderStats, FrameConfig, FrameSink, RasterError, RasterizerBackend,
+};
 use crate::image_cache::ImageCache;
 use crate::scene::ImageFit;
 use crate::scene::{Color, GradientStop, Scene, SceneNode};
@@ -2569,6 +2571,20 @@ impl RasterizerBackend for WgpuBackend {
             browser_runtime: false,
             gpu_accelerated: true,
             supports_streaming: self.supports_streaming(),
+        }
+    }
+
+    fn render_stats(&self) -> BackendRenderStats {
+        let stats = self.render_stats();
+        let timing = self.video_timing_stats();
+        BackendRenderStats {
+            gpu_frames: stats.gpu_frames,
+            cpu_fallback_frames: stats.cpu_fallback_frames,
+            texture_cache_hits: stats.texture_cache_hits,
+            texture_cache_misses: stats.texture_cache_misses,
+            video_decode_ns: timing.video_decode_ns,
+            texture_upload_ns: timing.texture_upload_ns,
+            gpu_submit_readback_ns: timing.gpu_submit_readback_ns,
         }
     }
 

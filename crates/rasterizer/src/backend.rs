@@ -53,6 +53,18 @@ pub struct BackendCapabilities {
     pub supports_streaming: bool,
 }
 
+/// Monotonic counters exposed by a backend after a render.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BackendRenderStats {
+    pub gpu_frames: u64,
+    pub cpu_fallback_frames: u64,
+    pub texture_cache_hits: u64,
+    pub texture_cache_misses: u64,
+    pub video_decode_ns: u64,
+    pub texture_upload_ns: u64,
+    pub gpu_submit_readback_ns: u64,
+}
+
 impl FrameConfig {
     pub fn new(width: u32, height: u32, frame: u32, fps: f64) -> Self {
         Self {
@@ -100,6 +112,11 @@ pub trait RasterizerBackend: Send + Sync {
             gpu_accelerated: false,
             supports_streaming: self.supports_streaming(),
         }
+    }
+
+    /// Return cumulative backend counters for engine-level diagnostics.
+    fn render_stats(&self) -> BackendRenderStats {
+        BackendRenderStats::default()
     }
 
     /// Whether this backend provides an internal pipelined streaming implementation
