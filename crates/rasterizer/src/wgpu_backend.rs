@@ -3739,7 +3739,8 @@ fn compile_nodes(
                         | crate::scene::BlendMode::Lighten
                 )
                 && (matches!(blend_mode, crate::scene::BlendMode::Normal)
-                    || (filters.is_empty() && gpu_blend_children_supported(children)))
+                    || (gpu_blend_layer_filters_supported(filters)
+                        && gpu_blend_children_supported(children)))
                 && (*mask_mode == crate::scene::MaskMode::Alpha
                     || *mask_mode == crate::scene::MaskMode::Luminance)
                 && (clip.is_none()
@@ -4038,6 +4039,20 @@ fn gpu_layer_effects(
             _ => None,
         },
     )
+}
+
+/// Non-normal blend modes operate directly on the ordered child draw calls,
+/// rather than an offscreen layer. Opacity is safe in that representation
+/// because it composes into each child instance; color-changing filters are
+/// not, since they require filtering the already-composited layer.
+fn gpu_blend_layer_filters_supported(filters: &[crate::scene::SceneFilter]) -> bool {
+    filters.iter().all(|filter| {
+        matches!(
+            filter,
+            crate::scene::SceneFilter::Opacity { amount }
+                if amount.is_finite() && (0.0..=1.0).contains(amount)
+        )
+    })
 }
 
 fn gpu_tint(filters: &[crate::scene::SceneFilter]) -> Option<[f32; 4]> {
@@ -5842,6 +5857,17 @@ mod tests {
         ];
         let (_, _, _, _, _, amount, _) = gpu_layer_effects(&filters, 1.0).unwrap();
         assert!((amount - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn gpu_non_normal_blends_accept_opacity_only_filters() {
+        assert!(gpu_blend_layer_filters_supported(&[]));
+        assert!(gpu_blend_layer_filters_supported(&[
+            crate::scene::SceneFilter::Opacity { amount: 0.5 },
+        ]));
+        assert!(!gpu_blend_layer_filters_supported(&[
+            crate::scene::SceneFilter::Brightness { amount: 1.1 },
+        ]));
     }
 
     #[test]
