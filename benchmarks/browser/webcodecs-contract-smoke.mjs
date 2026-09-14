@@ -191,6 +191,20 @@ try {
     const videoDecodeMs = performance.now() - decodeStarted;
     const decoded = frames.map((frame) => ({ width: frame.displayWidth, height: frame.displayHeight, timestamp: frame.timestamp }));
     for (const frame of frames) frame.close();
+    const thirtyFrameDecodeStarted = performance.now();
+    const thirtyFrameVideo = await window.dioxuscut.decodeIsoBmffVideo('/assets/showcase.mp4', {
+      trackIndex: 0, startSample: 0, endSample: 30, maxSamples: 30,
+      codec: codecConfig.codec, description: codecConfig.description, options: { parsed },
+    });
+    const thirtyFrameDecodeMs = performance.now() - thirtyFrameDecodeStarted;
+    const thirtyFrameRgbaStarted = performance.now();
+    let thirtyFrameRgbaBytes = 0;
+    for (const frame of thirtyFrameVideo) {
+      const rgba = await window.dioxuscut.videoFrameToRgba(frame);
+      thirtyFrameRgbaBytes += rgba.rgba.byteLength;
+      frame.close();
+    }
+    const thirtyFrameRgbaMs = performance.now() - thirtyFrameRgbaStarted;
     const streamedVideo = [];
     const streamedVideoResult = await window.dioxuscut.decodeIsoBmffVideo('/assets/showcase.mp4', {
       trackIndex: 0, startSample: 0, endSample: 3, maxSamples: 3,
@@ -245,6 +259,12 @@ try {
       parseEvents,
       decoded,
       videoDecodeMs,
+      thirtyFrame: {
+        decoded: thirtyFrameVideo.length,
+        decodeMs: thirtyFrameDecodeMs,
+        rgbaMs: thirtyFrameRgbaMs,
+        rgbaBytes: thirtyFrameRgbaBytes,
+      },
       decodedAudio,
       audioDecodeMs,
       streamedVideo: { count: streamedVideo.length, returnValue: streamedVideoResult },
@@ -310,6 +330,10 @@ try {
   assert.ok(result.decoded.every(({ timestamp }, index, frames) => index === 0 || timestamp > frames[index - 1].timestamp));
   assert.ok(result.decodedAudio.length > 0);
   assert.ok(result.decodedAudio.every(({ frames }) => frames > 0));
+  assert.equal(result.thirtyFrame.decoded, 30);
+  assert.ok(result.thirtyFrame.decodeMs > 0);
+  assert.ok(result.thirtyFrame.rgbaMs > 0);
+  assert.equal(result.thirtyFrame.rgbaBytes, 30 * 1920 * 1080 * 4);
   assert.equal(result.streamedVideo.count, 3);
   assert.equal(result.streamedVideo.returnValue, null);
   assert.ok(result.streamedAudio.count > 0);
