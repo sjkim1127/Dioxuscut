@@ -92,29 +92,62 @@ fn scene(frame: u32) -> Scene {
         }
     }
 
-    // 5. Layer with Neon Magenta Drop Shadow and Chromatic Aberration Filter
+    // 5. Reproduce Remotion's three text layers: the white glyphs stay sharp,
+    // while the cyan/magenta screen layers carry the chromatic shift.
     let glitch_chroma = if frame % 15 == 0 { 6.0 } else { 2.5 };
+    let text_variant = |color: Color, dx: f32, dy: f32, shadow: Option<SceneShadow>| {
+        let mut nodes = title_nodes.clone();
+        for node in &mut nodes {
+            if let SceneNode::Text {
+                x,
+                y,
+                color: node_color,
+                ..
+            } = node
+            {
+                *x += dx;
+                *y += dy;
+                *node_color = color;
+            }
+        }
+        SceneNode::Layer {
+            opacity: 1.0,
+            blend_mode: if shadow.is_some() {
+                BlendMode::Normal
+            } else {
+                BlendMode::Screen
+            },
+            clip: None,
+            mask: None,
+            mask_mode: MaskMode::Alpha,
+            filters: Vec::new(),
+            shadow,
+            children: nodes,
+        }
+    };
     root_scene.push(SceneNode::Layer {
         opacity: progress.clamp(0.0, 1.0),
         blend_mode: BlendMode::Normal,
         clip: None,
         mask: None,
         mask_mode: MaskMode::Alpha,
-        filters: vec![
-            SceneFilter::Brightness { amount: 1.2 },
-            SceneFilter::ChromaticAberration {
-                offset_x: glitch_chroma,
-                offset_y: 1.0,
-                angle_rad: 0.2,
-            },
+        filters: vec![SceneFilter::Brightness { amount: 1.2 }],
+        shadow: None,
+        children: vec![
+            text_variant(Color::rgba(255, 0, 80, 179), glitch_chroma, 1.0, None),
+            text_variant(Color::rgba(0, 240, 255, 179), -glitch_chroma, -1.0, None),
+            text_variant(
+                Color::WHITE,
+                0.0,
+                0.0,
+                Some(SceneShadow {
+                    offset_x: 0.0,
+                    offset_y: 0.0,
+                    blur_sigma: 14.0,
+                    color: Color::rgba(255, 0, 128, 220),
+                }),
+            ),
         ],
-        shadow: Some(SceneShadow {
-            offset_x: 0.0,
-            offset_y: 0.0,
-            blur_sigma: 14.0,
-            color: Color::rgba(255, 0, 128, 220), // Neon Magenta Glow
-        }),
-        children: title_nodes,
     });
 
     // 6. Cyberpunk badge container with text
