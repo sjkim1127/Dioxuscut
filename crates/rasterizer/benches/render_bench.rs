@@ -359,32 +359,46 @@ fn bench_gpu_video_frames(c: &mut Criterion) {
         eprintln!("GPU backend unavailable, skipping warm video benchmark");
         return;
     };
-    let dir =
-        std::env::temp_dir().join(format!("dioxuscut-gpu-video-bench-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    let source = dir.join("gradient.mkv");
-    let generated = std::process::Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-loglevel",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "testsrc2=size=64x64:rate=30:duration=2",
-            "-an",
-            "-c:v",
-            "ffv1",
-        ])
-        .arg(&source)
-        .status()
-        .unwrap();
-    if !generated.success() {
+    let external_source =
+        std::env::var_os("DIOXUSCUT_VIDEO_BENCH_SOURCE").map(std::path::PathBuf::from);
+    let (source, temporary_dir) = if let Some(source) = external_source {
+        if !source.is_file() {
+            eprintln!(
+                "Video benchmark source does not exist: {}",
+                source.display()
+            );
+            return;
+        }
+        (source, None)
+    } else {
+        let dir =
+            std::env::temp_dir().join(format!("dioxuscut-gpu-video-bench-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        eprintln!("Could not create video benchmark input");
-        return;
-    }
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("gradient.mkv");
+        let generated = std::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=64x64:rate=30:duration=2",
+                "-an",
+                "-c:v",
+                "ffv1",
+            ])
+            .arg(&source)
+            .status()
+            .unwrap();
+        if !generated.success() {
+            let _ = std::fs::remove_dir_all(&dir);
+            eprintln!("Could not create video benchmark input");
+            return;
+        }
+        (source, Some(dir))
+    };
 
     let mut group = c.benchmark_group("gpu_video_frames_1080p");
     group.sample_size(10);
@@ -487,7 +501,9 @@ fn bench_gpu_video_frames(c: &mut Criterion) {
         warm_timing.texture_upload_ns as f64 / 1_000_000.0,
         warm_timing.gpu_submit_readback_ns as f64 / 1_000_000.0,
     );
-    let _ = std::fs::remove_dir_all(dir);
+    if let Some(dir) = temporary_dir {
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
 #[cfg(feature = "gpu")]
