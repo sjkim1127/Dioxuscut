@@ -706,6 +706,82 @@ fn bench_gpu_text_atlas(c: &mut Criterion) {
     group.finish();
 }
 
+#[cfg(feature = "gpu")]
+fn bench_gpu_lottie(c: &mut Criterion) {
+    use dioxuscut_rasterizer::gif_cache::LoopBehavior;
+    use dioxuscut_rasterizer::wgpu_backend::WgpuBackend;
+    use std::time::Instant;
+
+    let source = std::env::temp_dir().join(format!(
+        "dioxuscut-bench-lottie-{}.json",
+        std::process::id()
+    ));
+    std::fs::write(
+        &source,
+        r#"{"v":"5.5.7","fr":30,"ip":0,"op":30,"w":64,"h":64,"ddd":0,"assets":[],"layers":[{"ddd":0,"ind":1,"ty":4,"nm":"shape","sr":1,"ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":{"a":0,"k":[32,32,0]},"a":{"a":0,"k":[0,0,0]},"s":{"a":0,"k":[100,100,100]}},"ao":0,"shapes":[{"ty":"el","p":{"a":0,"k":[0,0]},"s":{"a":0,"k":[40,40]}},{"ty":"fl","c":{"a":0,"k":[1,0.2,0.05,1]},"o":{"a":0,"k":100},"r":1}],"ip":0,"op":30,"st":0,"bm":0}]}"#,
+    )
+    .expect("write Lottie benchmark fixture");
+    let backend = match WgpuBackend::new() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("GPU backend unavailable, skipping Lottie bench: {e}");
+            let _ = std::fs::remove_file(&source);
+            return;
+        }
+    };
+    let make_scene = |time: f64| Scene {
+        nodes: vec![SceneNode::Lottie {
+            src: source.display().to_string(),
+            time,
+            x: 0.0,
+            y: 0.0,
+            w: 64.0,
+            h: 64.0,
+            playback_rate: 1.0,
+            loop_behavior: LoopBehavior::Loop,
+            opacity: 1.0,
+        }],
+    };
+    let config = FrameConfig::new(1920, 1080, 0, 30.0);
+    let cold_scene = make_scene(0.0);
+    let cold_started = Instant::now();
+    backend.render_frame(&cold_scene, &config).unwrap();
+    eprintln!(
+        "lottie cold frame: elapsed_ms={:.3} uploads={} upload_bytes={} cache_hits={} cache_misses={}",
+        cold_started.elapsed().as_secs_f64() * 1000.0,
+        backend.gpu_texture_uploads(),
+        backend.gpu_texture_upload_bytes(),
+        backend.gpu_texture_cache_hits(),
+        backend.gpu_texture_cache_misses(),
+    );
+    let mut group = c.benchmark_group("gpu_lottie_1080p");
+    group.sample_size(15);
+    group.bench_function("single_frame_warm_reuse", |b| {
+        b.iter(|| backend.render_frame(&cold_scene, &config).unwrap())
+    });
+    let mut frame = 0u32;
+    group.bench_function("30_frame_sequence", |b| {
+        b.iter(|| {
+            frame = (frame + 1) % 30;
+            backend
+                .render_frame(
+                    &make_scene(f64::from(frame) / 30.0),
+                    &FrameConfig::new(1920, 1080, frame, 30.0),
+                )
+                .unwrap()
+        })
+    });
+    eprintln!(
+        "lottie warm stats: uploads={} upload_bytes={} cache_hits={} cache_misses={}",
+        backend.gpu_texture_uploads(),
+        backend.gpu_texture_upload_bytes(),
+        backend.gpu_texture_cache_hits(),
+        backend.gpu_texture_cache_misses(),
+    );
+    group.finish();
+    let _ = std::fs::remove_file(source);
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Entry points
 // ─────────────────────────────────────────────────────────────────
@@ -730,7 +806,8 @@ criterion_group!(
     bench_gpu_resolutions,
     bench_gpu_streaming,
     bench_gpu_concurrent_resolutions,
-    bench_gpu_text_atlas
+    bench_gpu_text_atlas,
+    bench_gpu_lottie
 );
 
 criterion_main!(benches);
