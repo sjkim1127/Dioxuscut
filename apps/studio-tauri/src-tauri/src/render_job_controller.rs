@@ -69,6 +69,34 @@ impl RenderJobController {
 mod tests {
     use super::*;
     use dioxuscut_project::{BackendKind, ProjectSettings};
+    use dioxuscut_rasterizer::{
+        render_to_ffmpeg_pipe, Color, PipeConfig, RenderControl, Scene, SceneNode, TinySkiaBackend,
+        VideoCodec,
+    };
+    use std::path::PathBuf;
+    use std::process::{Command, Stdio};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn ffmpeg_available() -> bool {
+        Command::new("ffmpeg")
+            .arg("-version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    fn smoke_output() -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "dioxuscut_tauri_smoke_{}_{}.gif",
+            std::process::id(),
+            nonce
+        ))
+    }
 
     #[test]
     fn controller_reads_empty_store_without_tauri_runtime() {
@@ -117,5 +145,92 @@ mod tests {
         assert_eq!(job.status, JobStatus::Completed);
         assert_eq!(job.completed_frames, 3);
         assert_eq!(job.encoded_frames, 3);
+    }
+
+    #[test]
+    fn controller_tracks_real_native_pipe_render() {
+        if !ffmpeg_available() {
+            return;
+        }
+
+        let controller = RenderJobController::new(Arc::new(Mutex::new(JobStore::default())));
+        let id = controller
+            .submit(Project {
+                version: 1,
+                composition: "native-smoke".into(),
+                settings: ProjectSettings {
+                    width: 16,
+                    height: 16,
+                    fps: 30.0,
+                    duration: 3,
+                    scale: 1.0,
+                    crf: None,
+                    preset: None,
+                    concurrency: None,
+                    frame_step: 1,
+                    frame_start: None,
+                    frame_end: None,
+                    backend: BackendKind::Native,
+                    browser_image_format: None,
+                    browser_jpeg_quality: None,
+                    browser_frame_timeout_ms: None,
+                    browser_transport: None,
+                    browser_transport_retries: None,
+                },
+                props: serde_json::json!({}),
+                assets: vec![],
+                tracks: vec![],
+            })
+            .unwrap();
+        controller.update(&id, JobStatus::Preparing, 0).unwrap();
+        controller.update(&id, JobStatus::Rendering, 0).unwrap();
+
+        let progress_controller = controller.clone();
+        let encoding_controller = controller.clone();
+        let progress_id = id.clone();
+        let encoding_id = id.clone();
+        let control = RenderControl::new()
+            .with_progress(move |progress| {
+                progress_controller
+                    .update(
+                        &progress_id,
+                        JobStatus::Rendering,
+                        progress.completed_frames,
+                    )
+                    .unwrap();
+            })
+            .with_encoding_progress(move |progress| {
+                encoding_controller
+                    .set_encoding_progress(&encoding_id, progress.encoded_frames)
+                    .unwrap();
+            });
+        let output = smoke_output();
+        let config = PipeConfig::new(16, 16, 30.0, 3, &output)
+            .with_codec(VideoCodec::Gif)
+            .with_control(control);
+        let backend = TinySkiaBackend::headless();
+        render_to_ffmpeg_pipe(&backend, &config, |frame| {
+            let mut scene = Scene::new();
+            scene.push(SceneNode::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 16.0,
+                h: 16.0,
+                fill: Color::rgb((frame * 40) as u8, 20, 200),
+                stroke: None,
+                stroke_width: 0.0,
+                corner_radius: 0.0,
+            });
+            scene
+        })
+        .unwrap();
+        controller.complete(&id, 3).unwrap();
+
+        let job = controller.get(&id).unwrap().unwrap();
+        assert_eq!(job.status, JobStatus::Completed);
+        assert_eq!(job.completed_frames, 3);
+        assert_eq!(job.encoded_frames, 3);
+        assert!(output.is_file());
+        std::fs::remove_file(output).unwrap();
     }
 }

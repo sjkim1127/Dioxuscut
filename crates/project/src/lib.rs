@@ -753,10 +753,16 @@ impl JobStore {
                 JobStatus::Rendering | JobStatus::Cancelled | JobStatus::Failed
             ) | (
                 JobStatus::Rendering,
-                JobStatus::Encoding | JobStatus::Cancelled | JobStatus::Failed
+                JobStatus::Rendering
+                    | JobStatus::Encoding
+                    | JobStatus::Cancelled
+                    | JobStatus::Failed
             ) | (
                 JobStatus::Encoding,
-                JobStatus::Completed | JobStatus::Cancelled | JobStatus::Failed
+                JobStatus::Encoding
+                    | JobStatus::Completed
+                    | JobStatus::Cancelled
+                    | JobStatus::Failed
             ) | (JobStatus::Completed, JobStatus::Completed)
                 | (JobStatus::Failed, JobStatus::Failed)
                 | (JobStatus::Cancelled, JobStatus::Cancelled)
