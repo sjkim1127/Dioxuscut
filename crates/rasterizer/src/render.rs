@@ -175,6 +175,7 @@ pub struct RenderDiagnostics {
     pub video_decode_ms: f64,
     pub texture_upload_ms: f64,
     pub gpu_submit_readback_ms: f64,
+    pub browser_frame_ms: f64,
 }
 
 #[derive(Clone, Default)]
@@ -297,7 +298,7 @@ impl RenderControl {
     pub fn with_stderr_render_stats(self) -> Self {
         self.with_diagnostics(|diagnostics| {
             eprintln!(
-                "{{\"dioxuscut_render\":true,\"backend\":\"{}\",\"elapsed_ms\":{:.3},\"encoded_frames\":{},\"encoded_fps\":{:.3},\"resolution\":\"{}x{}\",\"gpu_frames\":{},\"cpu_fallback_frames\":{},\"texture_cache_hits\":{},\"texture_cache_misses\":{},\"video_decode_ms\":{:.3},\"texture_upload_ms\":{:.3},\"gpu_submit_readback_ms\":{:.3},\"fallback_reason\":{}}}",
+                "{{\"dioxuscut_render\":true,\"backend\":\"{}\",\"elapsed_ms\":{:.3},\"encoded_frames\":{},\"encoded_fps\":{:.3},\"resolution\":\"{}x{}\",\"gpu_frames\":{},\"cpu_fallback_frames\":{},\"texture_cache_hits\":{},\"texture_cache_misses\":{},\"video_decode_ms\":{:.3},\"texture_upload_ms\":{:.3},\"gpu_submit_readback_ms\":{:.3},\"browser_frame_ms\":{:.3},\"fallback_reason\":{}}}",
                 diagnostics.backend,
                 diagnostics.elapsed_ms,
                 diagnostics.encoded_frames,
@@ -315,6 +316,7 @@ impl RenderControl {
                 diagnostics.video_decode_ms,
                 diagnostics.texture_upload_ms,
                 diagnostics.gpu_submit_readback_ms,
+                diagnostics.browser_frame_ms,
                 serde_json::to_string(&diagnostics.fallback_reason).unwrap_or_else(|_| "null".into()),
             );
         })
@@ -955,6 +957,7 @@ where
         video_decode_ms: backend_stats.video_decode_ns as f64 / 1_000_000.0,
         texture_upload_ms: backend_stats.texture_upload_ns as f64 / 1_000_000.0,
         gpu_submit_readback_ms: backend_stats.gpu_submit_readback_ns as f64 / 1_000_000.0,
+        browser_frame_ms: backend_stats.browser_frame_ns as f64 / 1_000_000.0,
     });
 
     Ok(())
@@ -1619,6 +1622,7 @@ mod tests {
             video_decode_ms: 0.5,
             texture_upload_ms: 0.25,
             gpu_submit_readback_ms: 1.0,
+            browser_frame_ms: 0.0,
         });
         assert_eq!(
             received.lock().unwrap().as_slice(),
@@ -1637,6 +1641,7 @@ mod tests {
                 video_decode_ms: 0.5,
                 texture_upload_ms: 0.25,
                 gpu_submit_readback_ms: 1.0,
+                browser_frame_ms: 0.0,
             }]
         );
     }

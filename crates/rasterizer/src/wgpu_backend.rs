@@ -2585,6 +2585,7 @@ impl RasterizerBackend for WgpuBackend {
             video_decode_ns: timing.video_decode_ns,
             texture_upload_ns: timing.texture_upload_ns,
             gpu_submit_readback_ns: timing.gpu_submit_readback_ns,
+            browser_frame_ns: 0,
         }
     }
 

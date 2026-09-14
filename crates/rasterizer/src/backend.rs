@@ -63,6 +63,7 @@ pub struct BackendRenderStats {
     pub video_decode_ns: u64,
     pub texture_upload_ns: u64,
     pub gpu_submit_readback_ns: u64,
+    pub browser_frame_ns: u64,
 }
 
 impl BackendRenderStats {
@@ -86,6 +87,9 @@ impl BackendRenderStats {
             gpu_submit_readback_ns: self
                 .gpu_submit_readback_ns
                 .saturating_sub(before.gpu_submit_readback_ns),
+            browser_frame_ns: self
+                .browser_frame_ns
+                .saturating_sub(before.browser_frame_ns),
         }
     }
 }

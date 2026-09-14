@@ -14,7 +14,7 @@ use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -52,6 +52,7 @@ pub struct BrowserFrameBackend {
     props: Mutex<serde_json::Value>,
     cache: FrameCacheManager,
     timing_cache: Mutex<HashMap<FrameCacheKey, WebFrameTiming>>,
+    browser_frame_ns: AtomicU64,
 }
 
 impl BrowserFrameBackend {
@@ -120,6 +121,7 @@ impl BrowserFrameBackend {
             props: Mutex::new(serde_json::json!({})),
             cache: FrameCacheManager::default(),
             timing_cache: Mutex::new(HashMap::new()),
+            browser_frame_ns: AtomicU64::new(0),
         })
     }
 }
@@ -415,6 +417,7 @@ impl BrowserFrameBackend {
         &self,
         request: &WebFrameRequest,
     ) -> Result<(RgbaImage, Option<WebFrameTiming>), RasterError> {
+        let started = std::time::Instant::now();
         let composition = request.composition.clone().or_else(|| {
             self.composition
                 .lock()
@@ -442,6 +445,8 @@ impl BrowserFrameBackend {
                 .lock()
                 .ok()
                 .and_then(|cache| cache.get(&cache_key).copied());
+            self.browser_frame_ns
+                .fetch_add(started.elapsed().as_nanos() as u64, Ordering::Relaxed);
             return Ok(((*image).clone(), timing));
         }
         let encoded =
@@ -687,6 +692,8 @@ impl BrowserFrameBackend {
                 }
             }
         }
+        self.browser_frame_ns
+            .fetch_add(started.elapsed().as_nanos() as u64, Ordering::Relaxed);
         result.map(|image| (image, timing))
     }
 }
@@ -712,6 +719,16 @@ impl RasterizerBackend for BrowserFrameBackend {
             browser_runtime: true,
             gpu_accelerated: true,
             supports_streaming: false,
+        }
+    }
+
+    fn render_stats(&self) -> crate::backend::BackendRenderStats {
+        let metrics = self.cache.metrics();
+        crate::backend::BackendRenderStats {
+            texture_cache_hits: metrics.hits,
+            texture_cache_misses: metrics.misses,
+            browser_frame_ns: self.browser_frame_ns.load(Ordering::Relaxed),
+            ..Default::default()
         }
     }
     fn render_frame(&self, _scene: &Scene, config: &FrameConfig) -> Result<RgbaImage, RasterError> {
