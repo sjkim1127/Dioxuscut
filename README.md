@@ -21,7 +21,7 @@ The repository also contains Dioxus timeline, media, shape, transition, player, 
 
 - Native scene graph with rectangles, circles, paths, shaped text, local raster images, decoded video frames, audio tracks, gradients, and transformed groups.
 - CPU rendering through `tiny-skia`.
-- Experimental GPU rendering through `wgpu` for rectangles, circles, tessellated paths, strokes, transformed groups, and gradients with up to 16 stops; text, media, and composited layers retain whole-frame CPU fallback for correctness.
+- Experimental GPU rendering through `wgpu` for rectangles, circles, tessellated paths, strokes, transformed groups, gradients with up to 16 stops, cached image/video/Lottie textures, and text atlas draws; unsupported node combinations still use CPU fallback.
 - Bounded-memory parallel frame rendering into an FFmpeg stdin pipe, including
   persistent Chromium workers for Browser compositions.
 - Cached FFprobe metadata and persistent, bounded FFmpeg rawvideo decoder sessions.
@@ -100,14 +100,14 @@ encoding contract across hosts. Choose the backend according to the scene:
 | Backend | Best for | Current trade-off |
 | --- | --- | --- |
 | `native` | Fast, low-memory Rust rendering and AI-generated short scenes | Complex media, text, and browser APIs use the CPU renderer |
-| `gpu` | Native shapes, gradients, and SVG paths | Images, video, text, Lottie, shaders, and complex compositing still fall back to CPU |
+| `gpu` | Native shapes, gradients, SVG paths, cached image/video/Lottie textures, and text atlas draws | Unsupported shaders and complex compositing combinations still fall back to CPU |
 | `browser` | Tauri/Chromium, Three.js, WebGL, Canvas, and Remotion-compatible web APIs | Requires a browser worker and has process/transport overhead |
 
 This split is intentional: Dioxus can remain the lightweight composition and
 short-form path, while Tauri/Chromium provides ecosystem compatibility for
 Three.js and browser-native media. Native GPU texture and text paths are being
-added only when their output can be kept equivalent to the CPU and browser
-backends.
+expanded only when their output can be checked against CPU and browser
+references.
 
 Install FFmpeg on common platforms:
 
@@ -453,7 +453,7 @@ written into workflow files.
   rendered scene as a legacy fallback, so audio discovered only after frame
   zero is not currently inferred automatically.
 - `SceneLayer` supports rectangular or SVG-path clips, alpha or luminance masks, twelve blend modes, ordered blur/brightness/grayscale/opacity filters, and drop shadows. These effects use CPU offscreen surfaces for export and SVG/CSS equivalents for Player preview.
-- GPU acceleration covers rectangles, circles, tessellated path fills and strokes, nested group transforms and opacity, plain normal layers, and gradients with up to 16 stops. Text, image, video, composited layers with masks/blends/filters, and gradients beyond the stop limit use whole-frame CPU fallback.
+- GPU acceleration covers rectangles, circles, tessellated path fills and strokes, nested group transforms and opacity, plain normal layers, gradients with up to 16 stops, cached image/video/Lottie textures, and text atlas draws. Unsupported shaders, gradients beyond the stop limit, and some composited mask/blend/filter combinations use CPU fallback; the supported texture/text paths have dedicated CPU/GPU parity tests.
 - Text nodes accept ordered local TTF/OTF `font_sources`; native rendering caches those files, shapes glyph runs with Rustybuzz, and falls through per grapheme. `SceneTextBlock` and Rhai `text_box` add Unicode line breaking, fitting, alignment, line limits, and ellipsis. Text without explicit sources still uses platform font discovery and is not pixel-identical across platforms; full mixed-direction paragraph layout remains incomplete.
 - Studio project loading and Tauri render-queue controls are available; timeline editing and media management are not yet a full editor.
 
