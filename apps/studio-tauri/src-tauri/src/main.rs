@@ -299,9 +299,7 @@ fn start_render_job(
                 }
             } else if let Ok(mut store) = state_jobs.lock() {
                 let frames = output_frame_count;
-                let _ = store.try_update(&id, JobStatus::Rendering, frames);
-                let _ = store.try_update(&id, JobStatus::Encoding, frames);
-                let _ = store.try_update(&id, JobStatus::Completed, frames);
+                let _ = store.complete_render(&id, frames);
             }
         });
         return Ok(());
@@ -466,11 +464,9 @@ fn start_render_job(
                 .lock()
                 .map_err(|_| "job store lock poisoned".to_string())?;
             store
-                .try_update(&id, JobStatus::Encoding, output_frame_count)
+                .complete_render(&id, output_frame_count)
                 .map_err(|error| error.to_string())?;
-            store
-                .try_update(&id, JobStatus::Completed, output_frame_count)
-                .map_err(|error| error.to_string())
+            Ok(())
         })();
         if let Ok(mut cancellations) = state_cancellations.lock() {
             cancellations.remove(&id);

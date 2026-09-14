@@ -674,6 +674,28 @@ impl JobStore {
         job.gpu_fallback_reason = fallback_reason;
         Ok(())
     }
+
+    /// Advance a successfully rendered job through encoding to completion.
+    /// Keeping this transition sequence in the store prevents backend workers
+    /// from accidentally omitting or reordering terminal states.
+    pub fn complete_render(&mut self, id: &str, completed_frames: u32) -> Result<(), ProjectError> {
+        let status = self
+            .jobs
+            .get(id)
+            .ok_or_else(|| ProjectError::JobNotFound(id.to_string()))?
+            .status
+            .clone();
+        if status == JobStatus::Preparing {
+            self.try_update(id, JobStatus::Rendering, completed_frames)?;
+        } else if status != JobStatus::Rendering {
+            return Err(ProjectError::InvalidJobTransition {
+                from: status,
+                to: JobStatus::Completed,
+            });
+        }
+        self.try_update(id, JobStatus::Encoding, completed_frames)?;
+        self.try_update(id, JobStatus::Completed, completed_frames)
+    }
     pub fn update(&mut self, id: &str, status: JobStatus, completed_frames: u32) -> bool {
         self.try_update(id, status, completed_frames).is_ok()
     }
@@ -1293,8 +1315,7 @@ mod tests {
         store.try_update(&id, JobStatus::Preparing, 0).unwrap();
         store.try_update(&id, JobStatus::Rendering, 8).unwrap();
         store.set_render_diagnostics(&id, 8, 0, None).unwrap();
-        store.try_update(&id, JobStatus::Encoding, 8).unwrap();
-        store.try_update(&id, JobStatus::Completed, 8).unwrap();
+        store.complete_render(&id, 8).unwrap();
 
         let job = store.get(&id).unwrap();
         assert_eq!(job.status, JobStatus::Completed);
