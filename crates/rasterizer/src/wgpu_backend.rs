@@ -1305,6 +1305,7 @@ pub struct WgpuBackend {
     gpu_submit_readback_ns: AtomicU64,
     gpu_frame_count: AtomicU64,
     cpu_fallback_frame_count: AtomicU64,
+    last_cpu_fallback_reason: Mutex<Option<String>>,
 }
 
 /// Runtime counters for deciding whether a WGPU render is actually using the
@@ -1374,6 +1375,7 @@ impl WgpuBackend {
             gpu_submit_readback_ns: AtomicU64::new(0),
             gpu_frame_count: AtomicU64::new(0),
             cpu_fallback_frame_count: AtomicU64::new(0),
+            last_cpu_fallback_reason: Mutex::new(None),
         })
     }
 
@@ -1384,6 +1386,24 @@ impl WgpuBackend {
             cpu_fallback_frames: self.cpu_fallback_frame_count.load(Ordering::Relaxed),
             texture_cache_hits: self.gpu_texture_cache_hits.load(Ordering::Relaxed),
             texture_cache_misses: self.gpu_texture_cache_misses.load(Ordering::Relaxed),
+        }
+    }
+
+    /// Return the most recent reason a frame was rendered by the CPU fallback.
+    /// This is intended for diagnostics and benchmark attribution, not for
+    /// controlling rendering behavior.
+    pub fn last_cpu_fallback_reason(&self) -> Option<String> {
+        self.last_cpu_fallback_reason
+            .lock()
+            .ok()
+            .and_then(|reason| reason.clone())
+    }
+
+    fn record_cpu_fallback(&self, reason: impl Into<String>) {
+        self.cpu_fallback_frame_count
+            .fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut last) = self.last_cpu_fallback_reason.lock() {
+            *last = Some(reason.into());
         }
     }
 
@@ -2628,16 +2648,14 @@ impl RasterizerBackend for WgpuBackend {
         let gpu_scene = gpu_base_scene.as_ref().unwrap_or(scene);
         let Some((commands, path_mask)) = compile_scene_with_path_mask(gpu_scene, &self.fallback)
         else {
-            self.cpu_fallback_frame_count
-                .fetch_add(1, Ordering::Relaxed);
+            self.record_cpu_fallback("scene contains GPU-unsupported nodes or effects");
             return self.fallback.render_frame(scene, config);
         };
 
         if config.width > self.ctx.max_texture_dimension_2d
             || config.height > self.ctx.max_texture_dimension_2d
         {
-            self.cpu_fallback_frame_count
-                .fetch_add(1, Ordering::Relaxed);
+            self.record_cpu_fallback("frame dimensions exceed the GPU texture limit");
             return self.fallback.render_frame(scene, config);
         }
 
@@ -2775,8 +2793,7 @@ impl RasterizerBackend for WgpuBackend {
                 while let Some(prev) = in_flight.pop_front() {
                     self.drain_slot(prev, &res, width, height, &mut scratch, sink)?;
                 }
-                self.cpu_fallback_frame_count
-                    .fetch_add(1, Ordering::Relaxed);
+                self.record_cpu_fallback("stream scene contains GPU-unsupported nodes or effects");
                 let img = self.fallback.render_frame(&scene, &cfg)?;
                 sink.consume(frame, img.as_raw())?;
                 continue;
@@ -5890,6 +5907,10 @@ mod tests {
         let cpu_pixel = cpu_image.get_pixel(8, 8);
         assert_eq!(gpu_pixel, cpu_pixel);
         assert_eq!(gpu.render_stats().cpu_fallback_frames, 1);
+        assert_eq!(
+            gpu.last_cpu_fallback_reason().as_deref(),
+            Some("scene contains GPU-unsupported nodes or effects")
+        );
     }
 
     #[test]
