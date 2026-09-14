@@ -183,10 +183,13 @@ rl.on('line', (line) => { queue = queue.then(async () => {
           rgba_base64: Buffer.from(decoded.data).toString('base64'),
         } });
     } else {
+    const encodedScreenshot = Buffer.isBuffer(screenshot)
+      ? screenshot.toString('base64')
+      : screenshot;
     write({ type: 'frame', frame: request.frame, width: request.width, height: request.height,
       ...(imageType === 'png'
-        ? { png_base64: screenshot }
-        : { jpeg_base64: screenshot }) });
+        ? { png_base64: encodedScreenshot }
+        : { jpeg_base64: encodedScreenshot }) });
     }
   } catch (error) {
     write({ type: 'error', frame: message.frame ?? null, message: String(error) });
