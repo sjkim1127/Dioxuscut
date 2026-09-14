@@ -217,6 +217,8 @@ try {
         const shader = device.createShaderModule({ code: `
           @group(0) @binding(0) var video_texture: texture_2d<f32>;
           @group(0) @binding(1) var video_sampler: sampler;
+          struct Params { source_uv: vec4<f32>, transform: vec4<f32>, style: vec4<f32> };
+          @group(0) @binding(2) var<uniform> params: Params;
           struct VertexOutput { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f32> };
           @vertex fn vs(@builtin(vertex_index) index: u32) -> VertexOutput {
             var positions = array<vec2<f32>, 3>(
@@ -224,17 +226,21 @@ try {
             var uvs = array<vec2<f32>, 3>(
               vec2<f32>(0.0, 1.0), vec2<f32>(2.0, 1.0), vec2<f32>(0.0, -1.0));
             var out: VertexOutput;
-            out.position = vec4<f32>(positions[index], 0.0, 1.0);
+            let transformed = positions[index] * params.transform.xy + params.transform.zw;
+            out.position = vec4<f32>(transformed, 0.0, 1.0);
             out.uv = uvs[index];
             return out;
           }
           @fragment fn fs(in: VertexOutput) -> @location(0) vec4<f32> {
-            return textureSample(video_texture, video_sampler, in.uv);
+            let uv = mix(params.source_uv.xy, params.source_uv.zw, in.uv);
+            let sampled = textureSample(video_texture, video_sampler, uv);
+            return vec4<f32>(sampled.rgb, sampled.a * params.style.x);
           }
         ` });
         const bindGroupLayout = device.createBindGroupLayout({ entries: [
           { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: {} },
           { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
+          { binding: 2, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
         ] });
         const pipeline = device.createRenderPipeline({
           layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
@@ -243,11 +249,23 @@ try {
           primitive: { topology: 'triangle-list' },
         });
         const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+        const paramsBuffer = device.createBuffer({
+          size: 48,
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+        // Full-source UVs, identity transform, and a non-trivial opacity so
+        // this measures the same parameter path as native textured draws.
+        device.queue.writeBuffer(paramsBuffer, 0, new Float32Array([
+          0, 0, 1, 1,
+          1, 1, 0, 0,
+          0.75, 0, 0, 0,
+        ]));
         const bindGroup = device.createBindGroup({
           layout: bindGroupLayout,
           entries: [
             { binding: 0, resource: texture.createView() },
             { binding: 1, resource: sampler },
+            { binding: 2, resource: { buffer: paramsBuffer } },
           ],
         });
         const bytesPerRow = width * 4;
@@ -314,6 +332,7 @@ try {
         readback.destroy();
         output.destroy();
         texture.destroy();
+        paramsBuffer.destroy();
         device.destroy();
       }
     }
