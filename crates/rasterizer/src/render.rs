@@ -223,7 +223,14 @@ impl RenderControl {
         mut self,
         callback: impl Fn(RenderProgress) + Send + Sync + 'static,
     ) -> Self {
-        self.progress = Some(Arc::new(callback));
+        let callback = Arc::new(callback);
+        let previous = self.progress.take();
+        self.progress = Some(Arc::new(move |progress| {
+            if let Some(previous) = &previous {
+                previous(progress);
+            }
+            callback(progress);
+        }));
         self
     }
 
@@ -1884,6 +1891,26 @@ mod tests {
             );
         }
         std::fs::remove_dir_all(temp).unwrap();
+    }
+
+    #[test]
+    fn progress_callbacks_compose_instead_of_replacing_engine_output() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let first = Arc::clone(&calls);
+        let second = Arc::clone(&calls);
+        let control = RenderControl::new()
+            .with_progress(move |_| first.lock().unwrap().push("first"))
+            .with_progress(move |_| second.lock().unwrap().push("second"));
+
+        if let Some(callback) = &control.progress {
+            callback(RenderProgress {
+                completed_frames: 1,
+                total_frames: 1,
+                frame: 0,
+            });
+        }
+
+        assert_eq!(*calls.lock().unwrap(), vec!["first", "second"]);
     }
 
     #[test]
