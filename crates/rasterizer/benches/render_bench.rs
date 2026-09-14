@@ -635,6 +635,7 @@ fn bench_gpu_concurrent_resolutions(c: &mut Criterion) {
 #[cfg(feature = "gpu")]
 fn bench_gpu_text_atlas(c: &mut Criterion) {
     use dioxuscut_rasterizer::wgpu_backend::WgpuBackend;
+    use std::time::Instant;
     let backend = match WgpuBackend::new() {
         Ok(b) => b,
         Err(e) => {
@@ -644,6 +645,19 @@ fn bench_gpu_text_atlas(c: &mut Criterion) {
     };
     let scene = scene_text_heavy();
     let config = FrameConfig::new(1920, 1080, 0, 30.0);
+    let cold_backend = WgpuBackend::new().expect("GPU backend initialized above");
+    let cold_started = Instant::now();
+    cold_backend.render_frame(&scene, &config).unwrap();
+    eprintln!(
+        "text atlas cold frame: elapsed_ms={:.3} full_uploads={} full_bytes={} dirty_uploads={} dirty_bytes={} hits={} misses={}",
+        cold_started.elapsed().as_secs_f64() * 1000.0,
+        cold_backend.text_atlas_full_uploads(),
+        cold_backend.text_atlas_full_upload_bytes(),
+        cold_backend.text_atlas_dirty_uploads(),
+        cold_backend.text_atlas_dirty_upload_bytes(),
+        cold_backend.text_atlas_cache_hits(),
+        cold_backend.text_atlas_cache_misses(),
+    );
     let mut group = c.benchmark_group("gpu_text_atlas_1080p");
     group.sample_size(15);
     group.bench_function("80_text_nodes_atlas_reuse", |b| {
@@ -662,8 +676,14 @@ fn bench_gpu_text_atlas(c: &mut Criterion) {
         })
     });
     eprintln!(
-        "text atlas upload bytes after bench: {}",
-        backend.text_atlas_upload_bytes()
+        "text atlas warm stats: upload_bytes={} full_uploads={} full_bytes={} dirty_uploads={} dirty_bytes={} hits={} misses={}",
+        backend.text_atlas_upload_bytes(),
+        backend.text_atlas_full_uploads(),
+        backend.text_atlas_full_upload_bytes(),
+        backend.text_atlas_dirty_uploads(),
+        backend.text_atlas_dirty_upload_bytes(),
+        backend.text_atlas_cache_hits(),
+        backend.text_atlas_cache_misses(),
     );
     group.finish();
 }
