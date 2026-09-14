@@ -198,8 +198,10 @@ struct InstanceData {
     mask_color3: array<vec4<f32>, 4>,
     mask_stop_positions: array<vec4<f32>, 4>,
     mask_stop_counts: vec4<u32>,
-    // corner radius, stroke width, angle, inherited opacity
+    // corner radius, stroke width, angle, legacy inherited opacity slot
     params: vec4<f32>,
+    // inherited opacity kept separate from image/text UV coordinates
+    opacity: vec4<f32>,
     // x' = dot(transform_x.xyz, vec3(x, y, 1))
     // y' = dot(transform_y.xyz, vec3(x, y, 1))
     transform_x: vec4<f32>,
@@ -497,7 +499,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     col = apply_color_filters(col, instance);
     let vignette = vignette_factor(in.local_position, instance.shape_bounds, instance.vignette);
-    let alpha = col.a * instance.params.w * coverage * mask_coverage_value;
+    let alpha = col.a * instance.opacity.x * coverage * mask_coverage_value;
     return composited_color(col.rgb * vignette, alpha, instance);
 }
 
@@ -510,7 +512,7 @@ fn fs_solid(in: VertexOutput) -> @location(0) vec4<f32> {
     }
     let color = apply_color_filters(instance.color, instance);
     let vignette = vignette_factor(in.local_position, instance.shape_bounds, instance.vignette);
-    let alpha = color.a * instance.params.w * mask_coverage_value;
+    let alpha = color.a * instance.opacity.x * mask_coverage_value;
     return composited_color(color.rgb * vignette, alpha, instance);
 }
 
@@ -527,7 +529,7 @@ fn fs_image(in: VertexOutput) -> @location(0) vec4<f32> {
     let sampled = textureSample(image_texture, image_sampler, uv);
     let color = apply_color_filters(vec4<f32>(sampled.rgb, instance.color.a), instance);
     let vignette = vignette_factor(in.local_position, instance.shape_bounds, instance.vignette);
-    let alpha = sampled.a * instance.color.a * instance.params.w * mask_coverage_value;
+    let alpha = sampled.a * instance.color.a * instance.opacity.x * mask_coverage_value;
     return composited_color(color.rgb * vignette, alpha, instance);
 }
 
@@ -544,7 +546,7 @@ fn fs_text(in: VertexOutput) -> @location(0) vec4<f32> {
     let coverage = textureSample(image_texture, image_sampler, uv).r;
     let color = apply_color_filters(instance.color, instance);
     let vignette = vignette_factor(in.local_position, instance.shape_bounds, instance.vignette);
-    let alpha = coverage * color.a * instance.params.w * mask_coverage_value;
+    let alpha = coverage * color.a * instance.opacity.x * mask_coverage_value;
     return composited_color(color.rgb * vignette, alpha, instance);
 }
 
@@ -3074,6 +3076,7 @@ struct GpuInstance {
     mask_stop_positions: [[f32; 4]; 4],
     mask_stop_counts: [u32; 4],
     params: [f32; 4],
+    opacity: [f32; 4],
     transform_x: [f32; 4],
     transform_y: [f32; 4],
     stop_positions: [[f32; 4]; MAX_GRADIENT_STOPS],
@@ -3112,6 +3115,7 @@ impl GpuInstance {
             mask_stop_positions: [[0.0; 4]; 4],
             mask_stop_counts: [0; 4],
             params: [0.0, 0.0, 0.0, opacity],
+            opacity: [opacity, 0.0, 0.0, 0.0],
             transform_x,
             transform_y,
             stop_positions: [[0.0; 4]; MAX_GRADIENT_STOPS],
@@ -5926,6 +5930,63 @@ mod tests {
             image.pixels().collect::<Vec<_>>(),
             second.pixels().collect::<Vec<_>>()
         );
+        let composited = Scene {
+            nodes: vec![
+                SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 32.0,
+                    h: 32.0,
+                    fill: Color::rgb(0, 0, 255),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                },
+                SceneNode::Layer {
+                    opacity: 0.5,
+                    blend_mode: crate::scene::BlendMode::Normal,
+                    clip: None,
+                    mask: None,
+                    mask_mode: crate::scene::MaskMode::Alpha,
+                    filters: Vec::new(),
+                    shadow: None,
+                    children: vec![SceneNode::Lottie {
+                        src: source.display().to_string(),
+                        time: 0.0,
+                        x: 0.0,
+                        y: 0.0,
+                        w: 32.0,
+                        h: 32.0,
+                        playback_rate: 1.0,
+                        loop_behavior: crate::gif_cache::LoopBehavior::Loop,
+                        opacity: 1.0,
+                    }],
+                },
+            ],
+        };
+        let composited_gpu = gpu
+            .render_frame(&composited, &FrameConfig::new(32, 32, 0, 30.0))
+            .unwrap();
+        let composited_cpu = TinySkiaBackend::new()
+            .render_frame(&composited, &FrameConfig::new(32, 32, 0, 30.0))
+            .unwrap();
+        let composite_error = composited_gpu
+            .pixels()
+            .zip(composited_cpu.pixels())
+            .map(|(gpu, cpu)| {
+                (0..4)
+                    .map(|channel| {
+                        (i16::from(gpu[channel]) - i16::from(cpu[channel])).unsigned_abs() as u64
+                    })
+                    .sum::<u64>()
+            })
+            .sum::<u64>() as f64
+            / (32 * 32 * 4) as f64;
+        assert!(
+            composite_error < 18.0,
+            "Lottie layer opacity/draw-order mean error was {composite_error}"
+        );
+        assert!(composited_gpu.get_pixel(16, 16)[3] > 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
