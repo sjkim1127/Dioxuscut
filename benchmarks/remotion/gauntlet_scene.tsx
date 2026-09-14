@@ -54,6 +54,7 @@ export const GauntletScene: React.FC = () => {
       >
         <OffthreadVideo
           src={testVideo}
+          loop
           style={{width: '100%', height: '100%', objectFit: 'cover'}}
         />
       </div>
@@ -75,6 +76,7 @@ export const GauntletScene: React.FC = () => {
       >
         <OffthreadVideo
           src={testVideo}
+          loop
           style={{width: '100%', height: '100%', objectFit: 'cover'}}
           playbackRate={1.5}
         />
