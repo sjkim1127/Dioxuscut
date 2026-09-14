@@ -168,8 +168,9 @@ fn render_native(
 
         rt.block_on(async {
             let cancellation = dioxuscut_rasterizer::RenderCancellationToken::default();
-            let control =
-                dioxuscut_rasterizer::RenderControl::new().with_cancellation(cancellation.clone());
+            let control = dioxuscut_rasterizer::RenderControl::new()
+                .with_cancellation(cancellation.clone())
+                .with_stderr_progress();
             let control = if let Some(callback) = progress_callback {
                 let callback_error = Arc::clone(&callback_error_for_render);
                 let cancellation = cancellation.clone();
