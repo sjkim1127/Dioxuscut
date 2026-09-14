@@ -5,6 +5,7 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -155,6 +156,9 @@ fn render_native(
         permissive,
     };
 
+    let callback_error = Arc::new(Mutex::new(None::<String>));
+    let callback_error_for_render = Arc::clone(&callback_error);
+
     // Release GIL while rendering in a dedicated Tokio runtime
     let result = py.detach(move || {
         let rt = tokio::runtime::Builder::new_multi_thread()
@@ -165,13 +169,20 @@ fn render_native(
         rt.block_on(async {
             let control = dioxuscut_rasterizer::RenderControl::new();
             let control = if let Some(callback) = progress_callback {
+                let callback_error = Arc::clone(&callback_error_for_render);
                 control.with_progress(move |progress| {
                     Python::attach(|py| {
                         let payload = PyDict::new(py);
                         let _ = payload.set_item("completed_frames", progress.completed_frames);
                         let _ = payload.set_item("total_frames", progress.total_frames);
                         let _ = payload.set_item("frame", progress.frame);
-                        let _ = callback.call1(py, (payload,));
+                        if let Err(error) = callback.call1(py, (payload,)) {
+                            if let Ok(mut stored) = callback_error.lock() {
+                                if stored.is_none() {
+                                    *stored = Some(error.to_string());
+                                }
+                            }
+                        }
                     });
                 })
             } else {
@@ -185,6 +196,14 @@ fn render_native(
 
     if let Some(path) = props_path {
         let _ = std::fs::remove_file(path);
+    }
+
+    if let Ok(stored) = callback_error.lock() {
+        if let Some(error) = stored.as_ref() {
+            return Err(PyRuntimeError::new_err(format!(
+                "Render progress callback failed: {error}"
+            )));
+        }
     }
 
     result

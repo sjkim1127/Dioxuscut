@@ -108,7 +108,8 @@ def render(
         hw_accel: Hardware acceleration mode ('auto', 'disabled', 'videotoolbox', 'nvenc')
         sandbox_roots: List of allowed root paths for media security isolation
         permissive: Run in permissive mode without media sandbox jail
-        progress_callback: Optional callback receiving completed_frames, total_frames, and frame
+        progress_callback: Optional callback receiving completed_frames, total_frames, and frame;
+            callback exceptions are raised as RuntimeError after rendering stops
     """
     props_json = json.dumps(props) if props is not None else None
     roots = [str(r) for r in sandbox_roots] if sandbox_roots is not None else None
