@@ -292,41 +292,55 @@ try {
           readback.getMappedRange().slice(0, 4);
           readback.unmap();
         }
-        const compositeStarted = performance.now();
-        for (const frame of thirtyFrameVideo) {
-          device.queue.copyExternalImageToTexture(
-            { source: frame },
-            { texture },
-            { width, height, depthOrArrayLayers: 1 },
-          );
-          const encoder = device.createCommandEncoder();
-          const pass = encoder.beginRenderPass({
-            colorAttachments: [{
-              view: output.createView(),
-              clearValue: { r: 0, g: 0, b: 0, a: 1 },
-              loadOp: 'clear',
-              storeOp: 'store',
-            }],
-          });
-          pass.setPipeline(pipeline);
-          pass.setBindGroup(0, bindGroup);
-          pass.draw(3);
-          pass.end();
-          encoder.copyTextureToBuffer(
-            { texture: output },
-            { buffer: readback, bytesPerRow, rowsPerImage: height },
-            { width, height, depthOrArrayLayers: 1 },
-          );
-          device.queue.submit([encoder.finish()]);
-          await device.queue.onSubmittedWorkDone();
-          await readback.mapAsync(GPUMapMode.READ);
-          readback.getMappedRange().slice(0, 4);
-          readback.unmap();
+        const fitParams = {
+          cover: [0.21875, 0, 0.78125, 1, 1, 1, 0, 0],
+          contain: [0, 0, 1, 1, 1, 0.5625, 0, 0],
+          fill: [0, 0, 1, 1, 1, 1, 0, 0],
+          none: [0, 0, 1, 1, 1, 1, 0, 0],
+          scaleDown: [0, 0, 1, 1, 1, 0.5625, 0, 0],
+        };
+        const fitTimings = {};
+        for (const [fit, geometry] of Object.entries(fitParams)) {
+          device.queue.writeBuffer(paramsBuffer, 0, new Float32Array([
+            ...geometry.slice(0, 4), ...geometry.slice(4), 0.75, 0, 0, 0,
+          ]));
+          const compositeStarted = performance.now();
+          for (const frame of thirtyFrameVideo) {
+            device.queue.copyExternalImageToTexture(
+              { source: frame },
+              { texture },
+              { width, height, depthOrArrayLayers: 1 },
+            );
+            const encoder = device.createCommandEncoder();
+            const pass = encoder.beginRenderPass({
+              colorAttachments: [{
+                view: output.createView(),
+                clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                loadOp: 'clear',
+                storeOp: 'store',
+              }],
+            });
+            pass.setPipeline(pipeline);
+            pass.setBindGroup(0, bindGroup);
+            pass.draw(3);
+            pass.end();
+            encoder.copyTextureToBuffer(
+              { texture: output },
+              { buffer: readback, bytesPerRow, rowsPerImage: height },
+              { width, height, depthOrArrayLayers: 1 },
+            );
+            device.queue.submit([encoder.finish()]);
+            await device.queue.onSubmittedWorkDone();
+            await readback.mapAsync(GPUMapMode.READ);
+            readback.getMappedRange().slice(0, 4);
+            readback.unmap();
+          }
+          fitTimings[fit] = performance.now() - compositeStarted;
         }
         webgpuVideo = {
           frames: thirtyFrameVideo.length,
           uploadReadbackMs: performance.now() - gpuStarted,
-          uploadCompositeReadbackMs: performance.now() - compositeStarted,
+          fitCompositeReadbackMs: fitTimings,
           bytes: bytesPerRow * height * thirtyFrameVideo.length,
         };
         readback.destroy();
