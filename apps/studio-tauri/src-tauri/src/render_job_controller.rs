@@ -70,8 +70,8 @@ mod tests {
     use super::*;
     use dioxuscut_project::{BackendKind, ProjectSettings};
     use dioxuscut_rasterizer::{
-        render_to_ffmpeg_pipe, Color, PipeConfig, RenderControl, Scene, SceneNode, TinySkiaBackend,
-        VideoCodec,
+        render_to_ffmpeg_pipe, BrowserFrameBackend, Color, PipeConfig, RenderControl, Scene,
+        SceneNode, TinySkiaBackend, VideoCodec, WebFrameRequest,
     };
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
@@ -232,5 +232,35 @@ mod tests {
         assert_eq!(job.encoded_frames, 3);
         assert!(output.is_file());
         std::fs::remove_file(output).unwrap();
+    }
+
+    #[test]
+    fn real_chrome_worker_frames_decode_in_rust_backend() {
+        let Ok(url) = std::env::var("DIOXUSCUT_BROWSER_SMOKE_URL") else {
+            return;
+        };
+        let worker =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../scripts/three-render-worker.mjs");
+        let backend = BrowserFrameBackend::new("node", worker, url).unwrap();
+        for frame in 0..3 {
+            let image = backend
+                .render_web_frame(&WebFrameRequest {
+                    composition: Some("three_preview".into()),
+                    frame,
+                    fps: 30.0,
+                    width: 2,
+                    height: 2,
+                    props: serde_json::json!({}),
+                    assets: vec![],
+                    timeline: vec![],
+                    image_format: None,
+                    jpeg_quality: None,
+                    transparent: false,
+                    transport: None,
+                })
+                .unwrap();
+            assert_eq!((image.width(), image.height()), (2, 2));
+            assert_eq!(image.as_raw().len(), 16);
+        }
     }
 }
