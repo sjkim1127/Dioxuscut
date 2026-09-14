@@ -5626,6 +5626,7 @@ mod tests {
         let SceneNode::Layer {
             blend_mode,
             mask,
+            mask_mode,
             filters,
             ..
         } = &mut scene.nodes[1]
@@ -5633,6 +5634,7 @@ mod tests {
             unreachable!("blend test scene lost its layer");
         };
         *blend_mode = crate::scene::BlendMode::Multiply;
+        *mask_mode = crate::scene::MaskMode::Luminance;
         *filters = vec![crate::scene::SceneFilter::Opacity { amount: 0.75 }];
         *mask = Some(vec![
             SceneNode::Rect {
@@ -5640,7 +5642,7 @@ mod tests {
                 y: 2.0,
                 w: 4.0,
                 h: 12.0,
-                fill: Color::WHITE,
+                fill: Color::rgb(128, 128, 128),
                 stroke: None,
                 stroke_width: 0.0,
                 corner_radius: 0.0,
