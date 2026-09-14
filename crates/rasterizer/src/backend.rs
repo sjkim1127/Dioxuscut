@@ -65,6 +65,31 @@ pub struct BackendRenderStats {
     pub gpu_submit_readback_ns: u64,
 }
 
+impl BackendRenderStats {
+    /// Compute the counters attributable to one render invocation.
+    pub fn delta_since(self, before: Self) -> Self {
+        Self {
+            gpu_frames: self.gpu_frames.saturating_sub(before.gpu_frames),
+            cpu_fallback_frames: self
+                .cpu_fallback_frames
+                .saturating_sub(before.cpu_fallback_frames),
+            texture_cache_hits: self
+                .texture_cache_hits
+                .saturating_sub(before.texture_cache_hits),
+            texture_cache_misses: self
+                .texture_cache_misses
+                .saturating_sub(before.texture_cache_misses),
+            video_decode_ns: self.video_decode_ns.saturating_sub(before.video_decode_ns),
+            texture_upload_ns: self
+                .texture_upload_ns
+                .saturating_sub(before.texture_upload_ns),
+            gpu_submit_readback_ns: self
+                .gpu_submit_readback_ns
+                .saturating_sub(before.gpu_submit_readback_ns),
+        }
+    }
+}
+
 impl FrameConfig {
     pub fn new(width: u32, height: u32, frame: u32, fps: f64) -> Self {
         Self {

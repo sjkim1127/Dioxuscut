@@ -745,6 +745,7 @@ where
     let fps = config.fps;
     let total = config.duration_in_frames;
     let started = Instant::now();
+    let backend_stats_before = backend.render_stats();
 
     validate_pipe_config(config)?;
     config.control.check(started)?;
@@ -932,7 +933,7 @@ where
     }
 
     let capabilities = backend.capabilities();
-    let backend_stats = backend.render_stats();
+    let backend_stats = backend.render_stats().delta_since(backend_stats_before);
     config.control.report_diagnostics(RenderDiagnostics {
         backend: if capabilities.browser_runtime {
             "browser"
