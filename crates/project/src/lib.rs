@@ -153,6 +153,10 @@ pub struct RenderJob {
     pub project: Project,
     pub status: JobStatus,
     pub completed_frames: u32,
+    /// Frames accepted by the media encoder. During rendering this may lag
+    /// behind `completed_frames` when frame rendering is concurrent.
+    #[serde(default)]
+    pub encoded_frames: u32,
     pub error: Option<String>,
     #[serde(default)]
     pub output: Option<String>,
@@ -634,6 +638,7 @@ impl JobStore {
                 project,
                 status: JobStatus::Queued,
                 completed_frames: 0,
+                encoded_frames: 0,
                 error: None,
                 output: None,
                 gpu_frames: None,
@@ -675,6 +680,25 @@ impl JobStore {
         Ok(())
     }
 
+    pub fn set_encoding_progress(
+        &mut self,
+        id: &str,
+        encoded_frames: u32,
+    ) -> Result<(), ProjectError> {
+        let job = self
+            .jobs
+            .get_mut(id)
+            .ok_or_else(|| ProjectError::JobNotFound(id.to_string()))?;
+        if encoded_frames < job.encoded_frames {
+            return Err(ProjectError::ProgressRegressed {
+                previous: job.encoded_frames,
+                next: encoded_frames,
+            });
+        }
+        job.encoded_frames = encoded_frames;
+        Ok(())
+    }
+
     /// Advance a successfully rendered job through encoding to completion.
     /// Keeping this transition sequence in the store prevents backend workers
     /// from accidentally omitting or reordering terminal states.
@@ -694,6 +718,7 @@ impl JobStore {
             });
         }
         self.try_update(id, JobStatus::Encoding, completed_frames)?;
+        self.set_encoding_progress(id, completed_frames)?;
         self.try_update(id, JobStatus::Completed, completed_frames)
     }
     pub fn update(&mut self, id: &str, status: JobStatus, completed_frames: u32) -> bool {

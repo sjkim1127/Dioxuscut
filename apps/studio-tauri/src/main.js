@@ -2593,7 +2593,7 @@ document.querySelector('#timeline-slider').addEventListener('input', (event) => 
 async function refreshJob(id) {
   const job = await invoke('get_render_job', { id });
   if (!job) return;
-  const progress = `${job.completed_frames}/${job.project.settings.duration}`;
+  const progress = `render ${job.completed_frames}/${job.project.settings.duration} · encode ${job.encoded_frames ?? 0}/${job.project.settings.duration}`;
   document.querySelector('#job').textContent = `${job.id} · ${job.status} · ${progress}`;
   const terminal = ['completed', 'failed', 'cancelled'].includes(job.status);
   document.querySelector('#cancel-render').disabled = terminal;
@@ -2607,7 +2607,7 @@ async function refreshJobList() {
   list.replaceChildren(...jobs.map((job) => {
   const item = document.createElement('div');
     item.className = 'job-item';
-    const progress = `${job.completed_frames}/${job.project.settings.duration}`;
+    const progress = `render ${job.completed_frames}/${job.project.settings.duration} · encode ${job.encoded_frames ?? 0}/${job.project.settings.duration}`;
     const diagnostics = job.gpu_frames !== null && job.gpu_frames !== undefined
       ? ` · GPU ${job.gpu_frames} · CPU fallback ${job.cpu_fallback_frames ?? 0}${job.gpu_fallback_reason ? ` (${job.gpu_fallback_reason})` : ''}`
       : '';

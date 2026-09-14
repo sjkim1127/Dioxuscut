@@ -47,6 +47,14 @@ impl RenderJobController {
             .complete_render(id, frames)
             .map_err(|error| error.to_string())
     }
+
+    pub(crate) fn set_encoding_progress(&self, id: &str, frames: u32) -> Result<(), String> {
+        self.jobs
+            .lock()
+            .map_err(|_| "job store lock poisoned".to_string())?
+            .set_encoding_progress(id, frames)
+            .map_err(|error| error.to_string())
+    }
 }
 
 #[cfg(test)]

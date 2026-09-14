@@ -6,9 +6,9 @@ use dioxuscut_cli::{
 use dioxuscut_project::{JobStatus, JobStore, Project, RenderJob};
 use dioxuscut_rasterizer::{
     make_cancel_signal, render_still_fallible_scaled, render_web_to_ffmpeg_pipe_fallible,
-    BackendCapabilities, BrowserFrameBackend, PipeConfig, RenderCancellationToken, RenderControl,
-    RenderDiagnostics, StillImageFormat, VideoCodec, WebFrameRequest, WebTimelineClip,
-    WebWorkerMessage, WEB_WORKER_PROTOCOL_VERSION,
+    BackendCapabilities, BrowserFrameBackend, EncodingProgress, PipeConfig,
+    RenderCancellationToken, RenderControl, RenderDiagnostics, StillImageFormat, VideoCodec,
+    WebFrameRequest, WebTimelineClip, WebWorkerMessage, WEB_WORKER_PROTOCOL_VERSION,
 };
 use dioxuscut_renderer::spawn_server;
 use std::collections::HashMap;
@@ -252,6 +252,8 @@ fn start_render_job(
                 let progress_id = id.clone();
                 let diagnostics_state = Arc::clone(&state_jobs);
                 let diagnostics_id = id.clone();
+                let encoding_state = Arc::clone(&state_jobs);
+                let encoding_id = id.clone();
                 let control = RenderControl::new()
                     .with_cancellation(cancellation)
                     .with_progress(move |progress| {
@@ -272,6 +274,11 @@ fn start_render_job(
                                 diagnostics.fallback_reason,
                             );
                         }
+                    })
+                    .with_encoding_progress(move |progress: EncodingProgress| {
+                        let controller = RenderJobController::new(Arc::clone(&encoding_state));
+                        let _ =
+                            controller.set_encoding_progress(&encoding_id, progress.encoded_frames);
                     });
                 tokio::runtime::Runtime::new()
                     .map_err(|e| e.to_string())?
@@ -404,6 +411,8 @@ fn start_render_job(
             let progress_id = id.clone();
             let diagnostics_state = Arc::clone(&state_jobs);
             let diagnostics_id = id.clone();
+            let encoding_state = Arc::clone(&state_jobs);
+            let encoding_id = id.clone();
             let control = RenderControl::new()
                 .with_cancellation(cancellation)
                 .with_progress(move |progress| {
@@ -424,6 +433,10 @@ fn start_render_job(
                             diagnostics.fallback_reason,
                         );
                     }
+                })
+                .with_encoding_progress(move |progress: EncodingProgress| {
+                    let controller = RenderJobController::new(Arc::clone(&encoding_state));
+                    let _ = controller.set_encoding_progress(&encoding_id, progress.encoded_frames);
                 });
             let output_path = PathBuf::from(&output);
             if let Some(format) = project_still_format(&output_path) {
