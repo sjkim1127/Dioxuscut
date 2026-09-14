@@ -1126,21 +1126,11 @@ pub async fn execute_project_render_command_with_control(
 
 /// Build the standard CLI progress and timeout controls for a render request.
 pub fn default_render_control(request: &RenderRequest) -> dioxuscut_rasterizer::RenderControl {
-    let mut control = dioxuscut_rasterizer::RenderControl::new().with_progress(|progress| {
-        let total = u64::from(progress.total_frames.max(1));
-        let completed = u64::from(progress.completed_frames);
-        let percent = completed.saturating_mul(100) / total;
-        let previous_percent = completed.saturating_sub(1).saturating_mul(100) / total;
-        if completed == 1 || completed == total || percent != previous_percent {
-            tracing::info!(
-                completed = progress.completed_frames,
-                total = progress.total_frames,
-                frame = progress.frame,
-                percent,
-                "Render progress"
-            );
-        }
-    });
+    // Progress is emitted by the shared render engine so every CLI render
+    // path (native, browser, still, and video) has the same observable
+    // behavior. Keep the CLI responsible only for request-specific timeout
+    // configuration.
+    let mut control = dioxuscut_rasterizer::RenderControl::new().with_stderr_progress();
     if let Some(seconds) = request.timeout_seconds {
         control = control.with_timeout(std::time::Duration::from_secs(seconds));
     }
