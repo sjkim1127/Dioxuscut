@@ -6855,49 +6855,61 @@ mod tests {
             return;
         };
         let scene = Scene {
-            nodes: vec![SceneNode::Layer {
-                opacity: 1.0,
-                blend_mode: crate::scene::BlendMode::Normal,
-                clip: None,
-                mask: Some(vec![SceneNode::LinearGradient {
+            nodes: vec![
+                SceneNode::Rect {
                     x: 0.0,
                     y: 0.0,
                     w: 32.0,
                     h: 32.0,
-                    angle_deg: 45.0,
-                    stops: vec![
-                        crate::scene::GradientStop {
-                            position: 0.0,
-                            color: Color::rgba(255, 255, 255, 0),
-                        },
-                        crate::scene::GradientStop {
-                            position: 0.5,
-                            color: Color::WHITE,
-                        },
-                        crate::scene::GradientStop {
-                            position: 0.75,
-                            color: Color::rgba(255, 255, 255, 128),
-                        },
-                        crate::scene::GradientStop {
-                            position: 1.0,
-                            color: Color::rgba(255, 255, 255, 0),
-                        },
-                    ],
-                }]),
-                mask_mode: crate::scene::MaskMode::Alpha,
-                filters: Vec::new(),
-                shadow: None,
-                children: vec![SceneNode::Rect {
-                    x: 0.0,
-                    y: 0.0,
-                    w: 32.0,
-                    h: 32.0,
-                    fill: Color::rgb(255, 0, 0),
+                    fill: Color::rgb(40, 80, 160),
                     stroke: None,
                     stroke_width: 0.0,
                     corner_radius: 0.0,
-                }],
-            }],
+                },
+                SceneNode::Layer {
+                    opacity: 1.0,
+                    blend_mode: crate::scene::BlendMode::Multiply,
+                    clip: None,
+                    mask: Some(vec![SceneNode::LinearGradient {
+                        x: 0.0,
+                        y: 0.0,
+                        w: 32.0,
+                        h: 32.0,
+                        angle_deg: 45.0,
+                        stops: vec![
+                            crate::scene::GradientStop {
+                                position: 0.0,
+                                color: Color::rgba(255, 255, 255, 0),
+                            },
+                            crate::scene::GradientStop {
+                                position: 0.5,
+                                color: Color::WHITE,
+                            },
+                            crate::scene::GradientStop {
+                                position: 0.75,
+                                color: Color::rgba(255, 255, 255, 128),
+                            },
+                            crate::scene::GradientStop {
+                                position: 1.0,
+                                color: Color::rgba(255, 255, 255, 0),
+                            },
+                        ],
+                    }]),
+                    mask_mode: crate::scene::MaskMode::Luminance,
+                    filters: Vec::new(),
+                    shadow: None,
+                    children: vec![SceneNode::Rect {
+                        x: 0.0,
+                        y: 0.0,
+                        w: 32.0,
+                        h: 32.0,
+                        fill: Color::rgb(255, 0, 0),
+                        stroke: None,
+                        stroke_width: 0.0,
+                        corner_radius: 0.0,
+                    }],
+                },
+            ],
         };
         assert!(gpu_supports_scene(&scene));
         let config = FrameConfig::new(32, 32, 0, 30.0);
