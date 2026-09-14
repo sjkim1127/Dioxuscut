@@ -1290,6 +1290,8 @@ pub struct WgpuBackend {
     gpu_images: GpuImageCache,
     text_atlas: Mutex<Option<Arc<GpuTextAtlasResource>>>,
     text_atlas_upload_bytes: AtomicU64,
+    text_atlas_cache_hits: AtomicU64,
+    text_atlas_cache_misses: AtomicU64,
     gpu_texture_uploads: AtomicU64,
     gpu_texture_upload_bytes: AtomicU64,
     gpu_texture_cache_hits: AtomicU64,
@@ -1353,6 +1355,8 @@ impl WgpuBackend {
             gpu_images: Mutex::new(GpuImageCacheState::new(256 * 1024 * 1024)),
             text_atlas: Mutex::new(None),
             text_atlas_upload_bytes: AtomicU64::new(0),
+            text_atlas_cache_hits: AtomicU64::new(0),
+            text_atlas_cache_misses: AtomicU64::new(0),
             gpu_texture_uploads: AtomicU64::new(0),
             gpu_texture_upload_bytes: AtomicU64::new(0),
             gpu_texture_cache_hits: AtomicU64::new(0),
@@ -1549,6 +1553,7 @@ impl WgpuBackend {
             if resource.width == snapshot.width && resource.height == snapshot.height {
                 let generation = resource.generation.load(Ordering::Acquire);
                 if generation == snapshot.generation {
+                    self.text_atlas_cache_hits.fetch_add(1, Ordering::Relaxed);
                     return resource.clone();
                 }
                 if let Some(rect) = snapshot.dirty {
@@ -1595,6 +1600,7 @@ impl WgpuBackend {
         }
         let device = &self.ctx.device;
         let queue = &self.ctx.queue;
+        self.text_atlas_cache_misses.fetch_add(1, Ordering::Relaxed);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("text_atlas_texture"),
             size: wgpu::Extent3d {
@@ -1702,6 +1708,16 @@ impl WgpuBackend {
     /// Number of R8 atlas bytes uploaded since backend creation.
     pub fn text_atlas_upload_bytes(&self) -> u64 {
         self.text_atlas_upload_bytes.load(Ordering::Relaxed)
+    }
+
+    /// Number of GPU text atlas snapshots reused without an upload.
+    pub fn text_atlas_cache_hits(&self) -> u64 {
+        self.text_atlas_cache_hits.load(Ordering::Relaxed)
+    }
+
+    /// Number of GPU text atlas allocations after the initial snapshot.
+    pub fn text_atlas_cache_misses(&self) -> u64 {
+        self.text_atlas_cache_misses.load(Ordering::Relaxed)
     }
 
     /// Render a GPU-compatible scene without scheduling a CPU readback.
@@ -5859,6 +5875,8 @@ mod tests {
         assert_eq!(gpu.render_stats().gpu_frames, 3);
         assert!(gpu.text_atlas_upload_bytes() > 0);
         let upload_bytes = gpu.text_atlas_upload_bytes();
+        assert_eq!(gpu.text_atlas_cache_misses(), 1);
+        assert!(gpu.text_atlas_cache_hits() >= 2);
         gpu.render_stream_gpu(
             3,
             &|_frame| Ok(scene.clone()),
@@ -5867,6 +5885,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(gpu.text_atlas_upload_bytes(), upload_bytes);
+        assert!(gpu.text_atlas_cache_hits() >= 5);
     }
 
     #[test]
