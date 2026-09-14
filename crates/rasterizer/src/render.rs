@@ -1421,6 +1421,31 @@ pub fn render_web_to_ffmpeg_pipe_fallible(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diagnostics_callback_survives_control_clone() {
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&received);
+        let control = RenderControl::new().with_diagnostics(move |diagnostics| {
+            captured.lock().unwrap().push(diagnostics);
+        });
+        let cloned = control.clone();
+        cloned.report_diagnostics(RenderDiagnostics {
+            backend: "gpu",
+            gpu_frames: 9,
+            cpu_fallback_frames: 1,
+            fallback_reason: Some("unsupported node".into()),
+        });
+        assert_eq!(
+            received.lock().unwrap().as_slice(),
+            &[RenderDiagnostics {
+                backend: "gpu",
+                gpu_frames: 9,
+                cpu_fallback_frames: 1,
+                fallback_reason: Some("unsupported node".into()),
+            }]
+        );
+    }
     use crate::scene::{Color, Scene, SceneNode};
     use crate::tiny_skia_backend::TinySkiaBackend;
     use std::sync::Mutex;
