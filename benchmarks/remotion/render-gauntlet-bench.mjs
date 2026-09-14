@@ -5,6 +5,7 @@ import {bundle} from '@remotion/bundler';
 import {openBrowser, renderMedia, selectComposition} from '@remotion/renderer';
 import {execFileSync, spawn} from 'node:child_process';
 import {mkdirSync, writeFileSync} from 'node:fs';
+import {existsSync} from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {performance} from 'node:perf_hooks';
@@ -16,6 +17,34 @@ mkdirSync(outputDir, {recursive: true});
 const nativeBinary = path.join(root, 'target/release/examples/gauntlet_bench');
 const browserExecutable = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
+function ensureGauntletAssets() {
+  const assetsDir = path.join(root, 'target/assets');
+  mkdirSync(assetsDir, {recursive: true});
+  const video = path.join(assetsDir, 'test_video.mp4');
+  if (!existsSync(video)) {
+    execFileSync('ffmpeg', [
+      '-hide_banner', '-loglevel', 'error', '-y',
+      '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=30',
+      '-t', '2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart', video,
+    ], {stdio: 'inherit'});
+  }
+  for (let i = 0; i < 20; i++) {
+    const image = path.join(assetsDir, `img_${i.toString().padStart(2, '0')}.png`);
+    if (existsSync(image)) continue;
+    const r = 30 + i * 11;
+    const g = 40 + i * 7;
+    const b = 180 - i * 5;
+    const color = `0x${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+    execFileSync('ffmpeg', [
+      '-hide_banner', '-loglevel', 'error', '-y',
+      '-f', 'lavfi', '-i', `color=c=${color}:s=256x256`,
+      '-frames:v', '1', image,
+    ], {stdio: 'inherit'});
+  }
+}
+
+ensureGauntletAssets();
 console.log('[*] Bundling Remotion Gauntlet scene...');
 const setupStart = performance.now();
 const serveUrl = await bundle({
