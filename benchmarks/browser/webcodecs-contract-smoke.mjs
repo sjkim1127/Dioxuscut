@@ -234,7 +234,7 @@ try {
           @fragment fn fs(in: VertexOutput) -> @location(0) vec4<f32> {
             let uv = mix(params.source_uv.xy, params.source_uv.zw, in.uv);
             let sampled = textureSample(video_texture, video_sampler, uv);
-            return vec4<f32>(sampled.rgb, sampled.a * params.style.x);
+            return vec4<f32>(sampled.rgb, params.style.x);
           }
         ` });
         const bindGroupLayout = device.createBindGroupLayout({ entries: [
@@ -300,12 +300,13 @@ try {
           scaleDown: [0, 0, 1, 1, 1, 0.5625, 0, 0],
         };
         const fitTimings = {};
+        let fillGpuPixels = null;
         for (const [fit, geometry] of Object.entries(fitParams)) {
           device.queue.writeBuffer(paramsBuffer, 0, new Float32Array([
             ...geometry.slice(0, 4), ...geometry.slice(4), 0.75, 0, 0, 0,
           ]));
           const compositeStarted = performance.now();
-          for (const frame of thirtyFrameVideo) {
+          for (const [frameIndex, frame] of thirtyFrameVideo.entries()) {
             device.queue.copyExternalImageToTexture(
               { source: frame },
               { texture },
@@ -332,7 +333,9 @@ try {
             device.queue.submit([encoder.finish()]);
             await device.queue.onSubmittedWorkDone();
             await readback.mapAsync(GPUMapMode.READ);
-            readback.getMappedRange().slice(0, 4);
+            if (fit === 'fill' && frameIndex === 0) {
+              fillGpuPixels = new Uint8Array(readback.getMappedRange()).slice();
+            }
             readback.unmap();
           }
           fitTimings[fit] = performance.now() - compositeStarted;
@@ -341,6 +344,21 @@ try {
           frames: thirtyFrameVideo.length,
           uploadReadbackMs: performance.now() - gpuStarted,
           fitCompositeReadbackMs: fitTimings,
+          fillParityMeanError: (() => {
+            if (!fillGpuPixels) return null;
+            const canvas = new OffscreenCanvas(width, height);
+            const context = canvas.getContext('2d', { willReadFrequently: true });
+            if (!context) throw new Error('Canvas2D unavailable for video parity');
+            context.globalAlpha = 0.75;
+            context.drawImage(thirtyFrameVideo[0], 0, 0, width, height);
+            const expected = context.getImageData(0, 0, width, height).data;
+            let totalError = 0;
+            for (let index = 0; index < expected.length; index += 1) {
+              const error = Math.abs(fillGpuPixels[index] - expected[index]);
+              totalError += error;
+            }
+            return totalError / expected.length;
+          })(),
           bytes: bytesPerRow * height * thirtyFrameVideo.length,
         };
         readback.destroy();
@@ -494,6 +512,9 @@ try {
     ]);
     assert.ok(Object.values(result.thirtyFrame.webgpu.fitCompositeReadbackMs)
       .every((milliseconds) => milliseconds > 0));
+    assert.ok(Number.isFinite(result.thirtyFrame.webgpu.fillParityMeanError));
+    assert.ok(result.thirtyFrame.webgpu.fillParityMeanError < 35,
+      `Fill pixel parity error too high: ${result.thirtyFrame.webgpu.fillParityMeanError}`);
   }
   assert.equal(result.streamedVideo.count, 3);
   assert.equal(result.streamedVideo.returnValue, null);
