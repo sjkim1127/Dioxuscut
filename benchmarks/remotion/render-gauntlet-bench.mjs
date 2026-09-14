@@ -5,7 +5,7 @@ import {bundle} from '@remotion/bundler';
 import {openBrowser, renderMedia, selectComposition} from '@remotion/renderer';
 import {execFileSync, spawn} from 'node:child_process';
 import {mkdirSync, writeFileSync} from 'node:fs';
-import {existsSync} from 'node:fs';
+import {existsSync, readFileSync} from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {performance} from 'node:perf_hooks';
@@ -98,6 +98,26 @@ try {
   const nativeStats = JSON.parse(rawOutput.trim());
   console.log(`[+] Dioxuscut Gauntlet render completed in ${(dioxuscutProcessMs / 1000).toFixed(2)}s (internal render: ${(nativeStats.render_ms / 1000).toFixed(2)}s, ${(900 / (dioxuscutProcessMs / 1000)).toFixed(2)} FPS)`);
 
+  const ssimStatsPath = path.join(outputDir, 'gauntlet-ssim.log');
+  execFileSync('ffmpeg', [
+    '-hide_banner', '-loglevel', 'error',
+    '-i', path.join(outputDir, 'remotion-gauntlet.mp4'),
+    '-i', path.join(outputDir, 'dioxuscut-gauntlet.mp4'),
+    '-lavfi', `ssim=stats_file=${ssimStatsPath}`,
+    '-f', 'null', '-',
+  ], {stdio: 'inherit'});
+  const ssimValues = readFileSync(ssimStatsPath, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => Number(/All:([0-9.]+)/.exec(line)?.[1]))
+    .filter(Number.isFinite);
+  const ssim = {
+    frames: ssimValues.length,
+    min: Math.min(...ssimValues),
+    mean: ssimValues.reduce((sum, value) => sum + value, 0) / ssimValues.length,
+  };
+  console.log(`[+] Frame SSIM: min ${ssim.min.toFixed(6)}, mean ${ssim.mean.toFixed(6)} (${ssim.frames} frames)`);
+
   const speedup = remotionMs / dioxuscutProcessMs;
   console.log(`\n======================================================`);
   console.log(`🔥 THE GAUNTLET RESULT: Dioxuscut is ${speedup.toFixed(2)}x faster!`);
@@ -127,6 +147,7 @@ try {
       render_ms: nativeStats.render_ms,
       fps: 900 / (dioxuscutProcessMs / 1000),
     },
+    ssim,
     speedup,
   };
 
