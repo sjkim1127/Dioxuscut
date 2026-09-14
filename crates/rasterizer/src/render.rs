@@ -2036,6 +2036,24 @@ mod tests {
         .unwrap_err();
         assert!(matches!(error, RasterError::Cancelled));
         assert!(!mid_render_output.exists());
+
+        let preserved_output = temp.join("preserved.mp4");
+        std::fs::write(&preserved_output, b"existing valid output").unwrap();
+        let preserved_control = RenderControl::new();
+        preserved_control.cancellation_token().cancel();
+        let preserved =
+            PipeConfig::new(32, 24, 30.0, 2, &preserved_output).with_control(preserved_control);
+        let error = render_to_ffmpeg_pipe(
+            &TinySkiaBackend::headless(),
+            &preserved,
+            solid_scene(Color::rgb(1, 2, 3)),
+        )
+        .unwrap_err();
+        assert!(matches!(error, RasterError::Cancelled));
+        assert_eq!(
+            std::fs::read(&preserved_output).unwrap(),
+            b"existing valid output"
+        );
         std::fs::remove_dir_all(temp).unwrap();
     }
 
