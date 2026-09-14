@@ -5349,7 +5349,7 @@ mod tests {
             nodes: vec![SceneNode::Text {
                 x: 4.0,
                 y: 30.0,
-                content: "한글 日本語".into(),
+                content: "한글 日本語 العربية 😀".into(),
                 font_size: 20.0,
                 color: Color::WHITE,
                 font_weight: 400,
@@ -5360,7 +5360,7 @@ mod tests {
             nodes: vec![SceneNode::Text {
                 x: 4.0,
                 y: 30.0,
-                content: "한글 日本語".into(),
+                content: "한글 日本語 العربية 😀".into(),
                 font_size: 20.0,
                 color: Color::WHITE,
                 font_weight: 700,
