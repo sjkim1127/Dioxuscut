@@ -148,6 +148,15 @@ pub struct RenderProgress {
     pub frame: u32,
 }
 
+/// Backend-level counters reported after a render path has finished.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderDiagnostics {
+    pub backend: &'static str,
+    pub gpu_frames: u64,
+    pub cpu_fallback_frames: u64,
+    pub fallback_reason: Option<String>,
+}
+
 #[derive(Clone, Default)]
 pub struct RenderCancellationToken(Arc<AtomicBool>);
 
@@ -176,6 +185,7 @@ pub struct RenderControl {
     cancellation: RenderCancellationToken,
     timeout: Option<Duration>,
     progress: Option<Arc<dyn Fn(RenderProgress) + Send + Sync>>,
+    diagnostics: Option<Arc<dyn Fn(RenderDiagnostics) + Send + Sync>>,
 }
 
 impl fmt::Debug for RenderControl {
@@ -185,6 +195,7 @@ impl fmt::Debug for RenderControl {
             .field("cancelled", &self.cancellation.is_cancelled())
             .field("timeout", &self.timeout)
             .field("has_progress_callback", &self.progress.is_some())
+            .field("has_diagnostics_callback", &self.diagnostics.is_some())
             .finish()
     }
 }
@@ -214,6 +225,20 @@ impl RenderControl {
     ) -> Self {
         self.progress = Some(Arc::new(callback));
         self
+    }
+
+    pub fn with_diagnostics(
+        mut self,
+        callback: impl Fn(RenderDiagnostics) + Send + Sync + 'static,
+    ) -> Self {
+        self.diagnostics = Some(Arc::new(callback));
+        self
+    }
+
+    pub fn report_diagnostics(&self, diagnostics: RenderDiagnostics) {
+        if let Some(callback) = &self.diagnostics {
+            callback(diagnostics);
+        }
     }
 
     /// Report bounded render progress to stderr from the shared render engine.

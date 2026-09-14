@@ -1138,8 +1138,17 @@ pub fn default_render_control(request: &RenderRequest) -> dioxuscut_rasterizer::
 }
 
 #[cfg(feature = "gpu")]
-fn report_gpu_fallback_diagnostics(rasterizer: &dioxuscut_rasterizer::WgpuBackend) {
+fn report_gpu_fallback_diagnostics(
+    rasterizer: &dioxuscut_rasterizer::WgpuBackend,
+    control: &dioxuscut_rasterizer::RenderControl,
+) {
     let stats = rasterizer.render_stats();
+    control.report_diagnostics(dioxuscut_rasterizer::RenderDiagnostics {
+        backend: "gpu",
+        gpu_frames: stats.gpu_frames,
+        cpu_fallback_frames: stats.cpu_fallback_frames,
+        fallback_reason: rasterizer.last_cpu_fallback_reason(),
+    });
     if stats.cpu_fallback_frames > 0 {
         tracing::warn!(
             gpu_frames = stats.gpu_frames,
@@ -1490,7 +1499,7 @@ pub async fn execute_render_command_with_registry_and_control(
                             prepared.render(frame)
                         },
                     )?;
-                    report_gpu_fallback_diagnostics(&rasterizer);
+                    report_gpu_fallback_diagnostics(&rasterizer, &control);
                 } else {
                     let first_scene = std::sync::Arc::clone(&first_scene_cache);
                     let pipe_config = PipeConfig::new(
@@ -1527,7 +1536,7 @@ pub async fn execute_render_command_with_registry_and_control(
                         }
                         prepared.render(frame)
                     })?;
-                    report_gpu_fallback_diagnostics(&rasterizer);
+                    report_gpu_fallback_diagnostics(&rasterizer, &control);
                 }
             }
         }
