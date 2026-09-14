@@ -16,6 +16,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+mod render_job_controller;
+use render_job_controller::RenderJobController;
+
 fn project_render_codec(path: &std::path::Path) -> RenderCodec {
     match path
         .extension()
@@ -131,12 +134,7 @@ struct AppState {
 
 #[tauri::command]
 fn submit_project(state: tauri::State<'_, AppState>, project: Project) -> Result<String, String> {
-    state
-        .jobs
-        .lock()
-        .map_err(|_| "job store lock poisoned".to_string())?
-        .submit(project)
-        .map_err(|error| error.to_string())
+    RenderJobController::new(Arc::clone(&state.jobs)).submit(project)
 }
 
 /// Load and submit a project using its file directory as the asset base.
@@ -297,15 +295,19 @@ fn start_render_job(
                         let _ = store.fail(&id, error);
                     }
                 }
-            } else if let Ok(mut store) = state_jobs.lock() {
+            } else {
                 let frames = output_frame_count;
-                if let Err(error) = store.complete_render(&id, frames) {
-                    if store
-                        .get(&id)
-                        .is_some_and(|job| job.status != JobStatus::Cancelled)
-                    {
-                        let _ = store
-                            .fail(&id, format!("render completion transition failed: {error}"));
+                if let Err(error) =
+                    RenderJobController::new(Arc::clone(&state_jobs)).complete(&id, frames)
+                {
+                    if let Ok(mut store) = state_jobs.lock() {
+                        if store
+                            .get(&id)
+                            .is_some_and(|job| job.status != JobStatus::Cancelled)
+                        {
+                            let _ = store
+                                .fail(&id, format!("render completion transition failed: {error}"));
+                        }
                     }
                 }
             }
@@ -468,12 +470,7 @@ fn start_render_job(
                 render_web_to_ffmpeg_pipe_fallible(&backend, &config, project.props.clone())
                     .map_err(|error| error.to_string())?;
             }
-            let mut store = state_jobs
-                .lock()
-                .map_err(|_| "job store lock poisoned".to_string())?;
-            store
-                .complete_render(&id, output_frame_count)
-                .map_err(|error| error.to_string())?;
+            RenderJobController::new(Arc::clone(&state_jobs)).complete(&id, output_frame_count)?;
             Ok(())
         })();
         if let Ok(mut cancellations) = state_cancellations.lock() {
@@ -535,21 +532,12 @@ fn get_render_job(
     state: tauri::State<'_, AppState>,
     id: String,
 ) -> Result<Option<RenderJob>, String> {
-    Ok(state
-        .jobs
-        .lock()
-        .map_err(|_| "job store lock poisoned".to_string())?
-        .get(&id)
-        .cloned())
+    RenderJobController::new(Arc::clone(&state.jobs)).get(&id)
 }
 
 #[tauri::command]
 fn list_render_jobs(state: tauri::State<'_, AppState>) -> Result<Vec<RenderJob>, String> {
-    Ok(state
-        .jobs
-        .lock()
-        .map_err(|_| "job store lock poisoned".to_string())?
-        .list())
+    RenderJobController::new(Arc::clone(&state.jobs)).list()
 }
 
 #[tauri::command]
