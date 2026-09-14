@@ -1305,7 +1305,11 @@ mod tests {
         store.cancel(&original).unwrap();
         let retry = store.retry(&original).unwrap();
         assert_eq!(retry, "job-2");
-        assert_eq!(store.get(&retry).unwrap().status, JobStatus::Queued);
-        assert_eq!(store.get(&retry).unwrap().project, project());
+        let retry_job = store.get(&retry).unwrap();
+        assert_eq!(retry_job.status, JobStatus::Queued);
+        assert_eq!(retry_job.project, project());
+        assert_eq!(retry_job.gpu_frames, None);
+        assert_eq!(retry_job.cpu_fallback_frames, None);
+        assert_eq!(retry_job.gpu_fallback_reason, None);
     }
 }
