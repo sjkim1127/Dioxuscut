@@ -1130,7 +1130,9 @@ pub fn default_render_control(request: &RenderRequest) -> dioxuscut_rasterizer::
     // path (native, browser, still, and video) has the same observable
     // behavior. Keep the CLI responsible only for request-specific timeout
     // configuration.
-    let mut control = dioxuscut_rasterizer::RenderControl::new().with_stderr_progress();
+    let mut control = dioxuscut_rasterizer::RenderControl::new()
+        .with_stderr_progress()
+        .with_stderr_render_stats();
     if let Some(seconds) = request.timeout_seconds {
         control = control.with_timeout(std::time::Duration::from_secs(seconds));
     }
@@ -1148,6 +1150,17 @@ fn report_gpu_fallback_diagnostics(
         gpu_frames: stats.gpu_frames,
         cpu_fallback_frames: stats.cpu_fallback_frames,
         fallback_reason: rasterizer.last_cpu_fallback_reason(),
+        elapsed_ms: 0.0,
+        encoded_frames: 0,
+        output_width: 0,
+        output_height: 0,
+        fps: 0.0,
+        texture_cache_hits: stats.texture_cache_hits,
+        texture_cache_misses: stats.texture_cache_misses,
+        video_decode_ms: 0.0,
+        texture_upload_ms: 0.0,
+        gpu_submit_readback_ms: 0.0,
+        browser_frame_ms: 0.0,
     });
     if stats.cpu_fallback_frames > 0 {
         tracing::warn!(
