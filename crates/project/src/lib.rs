@@ -1262,6 +1262,31 @@ mod tests {
     }
 
     #[test]
+    fn render_diagnostics_are_stored_and_serde_compatible() {
+        let mut store = JobStore::default();
+        let id = store.submit(project()).unwrap();
+        store
+            .set_render_diagnostics(
+                &id,
+                120,
+                3,
+                Some("scene contains GPU-unsupported nodes or effects".into()),
+            )
+            .unwrap();
+        let job = store.get(&id).unwrap();
+        assert_eq!(job.gpu_frames, Some(120));
+        assert_eq!(job.cpu_fallback_frames, Some(3));
+        assert_eq!(
+            job.gpu_fallback_reason.as_deref(),
+            Some("scene contains GPU-unsupported nodes or effects")
+        );
+
+        let encoded = serde_json::to_value(job).unwrap();
+        let decoded: RenderJob = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, *job);
+    }
+
+    #[test]
     fn list_returns_jobs_in_submission_order() {
         let mut store = JobStore::default();
         let first = store.submit(project()).unwrap();
