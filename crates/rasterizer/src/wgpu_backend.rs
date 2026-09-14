@@ -7206,6 +7206,88 @@ mod tests {
     }
 
     #[test]
+    fn gpu_video_fits_match_cpu_for_all_modes() {
+        if std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .is_err()
+        {
+            println!("FFmpeg unavailable; skipping GPU video fit test");
+            return;
+        }
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping GPU video fit test");
+            return;
+        };
+        let dir =
+            std::env::temp_dir().join(format!("dioxuscut-wgpu-video-fit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("rectangular.mkv");
+        let generated = std::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:s=16x8:r=1:d=1",
+                "-c:v",
+                "ffv1",
+            ])
+            .arg(&source)
+            .status()
+            .unwrap();
+        assert!(generated.success());
+        let config = FrameConfig::new(32, 32, 0, 1.0);
+        for fit in [
+            ImageFit::Cover,
+            ImageFit::Contain,
+            ImageFit::Fill,
+            ImageFit::None,
+            ImageFit::ScaleDown,
+        ] {
+            let scene = Scene {
+                nodes: vec![SceneNode::Video {
+                    src: source.display().to_string(),
+                    time: 0.0,
+                    looped: false,
+                    x: 4.0,
+                    y: 4.0,
+                    w: 24.0,
+                    h: 24.0,
+                    fit,
+                    opacity: 1.0,
+                }],
+            };
+            let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+            let cpu_image = TinySkiaBackend::new()
+                .render_frame(&scene, &config)
+                .unwrap();
+            let mean_error = gpu_image
+                .pixels()
+                .zip(cpu_image.pixels())
+                .map(|(gpu, cpu)| {
+                    (0..4)
+                        .map(|channel| {
+                            (i16::from(gpu[channel]) - i16::from(cpu[channel])).unsigned_abs()
+                                as u64
+                        })
+                        .sum::<u64>()
+                })
+                .sum::<u64>() as f64
+                / (32 * 32 * 4) as f64;
+            assert!(
+                mean_error < 20.0,
+                "GPU/CPU video {fit:?} mean error was {mean_error}"
+            );
+        }
+        assert_eq!(gpu.gpu_image_cache_len(), 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn gpu_renders_transformed_path_stroke_and_three_stop_gradient() {
         let Ok(gpu) = WgpuBackend::new() else {
             println!("GPU backend unavailable; skipping render comparison");
