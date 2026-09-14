@@ -1326,6 +1326,23 @@ mod tests {
     }
 
     #[test]
+    fn complete_render_rejects_cancelled_job_without_reviving_it() {
+        let mut store = JobStore::default();
+        let id = store.submit(project()).unwrap();
+        store.try_update(&id, JobStatus::Preparing, 0).unwrap();
+        store.try_update(&id, JobStatus::Rendering, 4).unwrap();
+        store.cancel(&id).unwrap();
+        assert!(matches!(
+            store.complete_render(&id, 4),
+            Err(ProjectError::InvalidJobTransition {
+                from: JobStatus::Cancelled,
+                to: JobStatus::Completed,
+            })
+        ));
+        assert_eq!(store.get(&id).unwrap().status, JobStatus::Cancelled);
+    }
+
+    #[test]
     fn list_returns_jobs_in_submission_order() {
         let mut store = JobStore::default();
         let first = store.submit(project()).unwrap();

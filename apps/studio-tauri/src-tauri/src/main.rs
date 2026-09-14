@@ -299,7 +299,15 @@ fn start_render_job(
                 }
             } else if let Ok(mut store) = state_jobs.lock() {
                 let frames = output_frame_count;
-                let _ = store.complete_render(&id, frames);
+                if let Err(error) = store.complete_render(&id, frames) {
+                    if store
+                        .get(&id)
+                        .is_some_and(|job| job.status != JobStatus::Cancelled)
+                    {
+                        let _ = store
+                            .fail(&id, format!("render completion transition failed: {error}"));
+                    }
+                }
             }
         });
         return Ok(());
