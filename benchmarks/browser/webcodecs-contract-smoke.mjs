@@ -432,6 +432,16 @@ try {
       numberOfChannels: 1, sampleRate: 48000, options: { parsed: audioParsed },
       onAudioData: (audio) => { streamedAudio.push(audio.timestamp); audio.close(); },
     });
+    const textCanvas = new OffscreenCanvas(640, 96);
+    const textContext = textCanvas.getContext('2d', { willReadFrequently: true });
+    if (!textContext) throw new Error('Canvas2D unavailable for text fixture');
+    textContext.font = '32px sans-serif';
+    textContext.fillStyle = 'white';
+    const multilingualText = '한글 日本語 العربية 😀';
+    const textMetrics = textContext.measureText(multilingualText);
+    textContext.fillText(multilingualText, 8, 48);
+    const textPixels = textContext.getImageData(0, 0, 640, 96).data;
+    const textNonZeroPixels = Array.from(textPixels).some((value) => value > 0);
     return {
       type: chunk.type, timestamp: chunk.timestamp, duration: chunk.duration, supported: support.supported,
       annexB: [...annexB],
@@ -463,6 +473,11 @@ try {
       audioDecodeMs,
       streamedVideo: { count: streamedVideo.length, returnValue: streamedVideoResult },
       streamedAudio: { count: streamedAudio.length, returnValue: streamedAudioResult },
+      text: {
+        content: multilingualText,
+        width: textMetrics.width,
+        nonZeroPixels: textNonZeroPixels,
+      },
       webm: {
         container: webmMetadata.container,
         track: webmMetadata.tracks?.[0]?.codec,
@@ -524,6 +539,9 @@ try {
   assert.ok(result.decoded.every(({ timestamp }, index, frames) => index === 0 || timestamp > frames[index - 1].timestamp));
   assert.ok(result.decodedAudio.length > 0);
   assert.ok(result.decodedAudio.every(({ frames }) => frames > 0));
+  assert.equal(result.text.content, '한글 日本語 العربية 😀');
+  assert.ok(result.text.width > 0);
+  assert.equal(result.text.nonZeroPixels, true);
   assert.equal(result.thirtyFrame.decoded, 30);
   assert.ok(result.thirtyFrame.decodeMs > 0);
   assert.ok(result.thirtyFrame.rgbaMs > 0);
