@@ -4,7 +4,7 @@
 import {bundle} from '@remotion/bundler';
 import {openBrowser, renderMedia, selectComposition} from '@remotion/renderer';
 import {execFileSync} from 'node:child_process';
-import {mkdirSync, writeFileSync} from 'node:fs';
+import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {performance} from 'node:perf_hooks';
@@ -60,6 +60,38 @@ try {
   const nativeStats = JSON.parse(rawOutput.trim());
   console.log(`[+] Dioxuscut render completed in ${(dioxuscutProcessMs / 1000).toFixed(2)}s (internal render: ${(nativeStats.render_ms / 1000).toFixed(2)}s)`);
 
+  const nativeOutput = path.join(outputDir, 'dioxuscut-cyberpunk.mp4');
+  const remotionOutput = path.join(outputDir, 'remotion-cyberpunk.mp4');
+  const probe = (file) => JSON.parse(execFileSync('ffprobe', [
+    '-v', 'error', '-count_frames', '-select_streams', 'v:0',
+    '-show_entries', 'stream=width,height,nb_read_frames,r_frame_rate,codec_name,pix_fmt',
+    '-of', 'json', file,
+  ], {encoding: 'utf8'})).streams[0];
+  const probes = {native: probe(nativeOutput), remotion: probe(remotionOutput)};
+  for (const [name, metadata] of Object.entries(probes)) {
+    if (metadata.width !== 1920 || metadata.height !== 1080
+      || metadata.nb_read_frames !== '180' || metadata.r_frame_rate !== '30/1'
+      || metadata.codec_name !== 'h264' || !['yuv420p', 'yuvj420p'].includes(metadata.pix_fmt)) {
+      throw new Error(`Unexpected ${name} output metadata: ${JSON.stringify(metadata)}`);
+    }
+  }
+  const ssimPath = path.join(outputDir, 'cyberpunk-ssim.log');
+  execFileSync('ffmpeg', [
+    '-v', 'error', '-i', nativeOutput, '-i', remotionOutput,
+    '-lavfi', `[0:v]scale=in_range=auto:out_range=tv,format=yuv420p[a];[1:v]scale=in_range=auto:out_range=tv,format=yuv420p[b];[a][b]ssim=stats_file=${ssimPath}`,
+    '-f', 'null', '-',
+  ]);
+  const ssimScores = [...readFileSync(ssimPath, 'utf8').matchAll(/All:([0-9.]+)/g)]
+    .map((match) => Number(match[1]));
+  const decodedSsim = {
+    frames: ssimScores.length,
+    min: Math.min(...ssimScores),
+    mean: ssimScores.reduce((sum, score) => sum + score, 0) / ssimScores.length,
+  };
+  if (decodedSsim.frames !== 180 || decodedSsim.min < 0.995) {
+    throw new Error(`Cyberpunk decoded SSIM gate failed: ${JSON.stringify(decodedSsim)}`);
+  }
+
   const speedup = remotionMs / dioxuscutProcessMs;
   console.log(`\n======================================================`);
   console.log(`🔥 1080p VFX Speedup: Dioxuscut is ${speedup.toFixed(2)}x faster!`);
@@ -83,6 +115,7 @@ try {
       fps: 180 / (dioxuscutProcessMs / 1000),
     },
     speedup,
+    validation: {probes, decoded_ssim: decodedSsim, ffmpeg: execFileSync('ffmpeg', ['-version'], {encoding: 'utf8'}).split('\n')[0]},
   };
 
   const reportPath = path.join(root, 'benchmarks/cyberpunk-bench-result.json');
