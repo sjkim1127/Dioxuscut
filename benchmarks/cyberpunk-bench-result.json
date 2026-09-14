@@ -10,16 +10,60 @@
   "concurrency": 4,
   "platform": "darwin (arm64)",
   "cpu": "Apple M4 Pro",
-  "bundle_ms": 704.6966659999999,
-  "browser_startup_ms": 411.17375000000004,
+  "bundle_ms": 534.4566249999999,
+  "browser_startup_ms": 1671.3005829999997,
   "remotion": {
-    "render_ms": 13587.042375,
-    "fps": 13.247916289066552
+    "render_ms": 13643.199916,
+    "fps": 13.193385797191597
   },
   "dioxuscut": {
-    "process_ms": 8811.264208,
-    "render_ms": 8260.84,
-    "fps": 20.428396624013704
+    "process_ms": 5539.606332999998,
+    "render_ms": 5528.29,
+    "fps": 32.49328367030735
   },
-  "speedup": 1.5420082810210065
+  "speedup": 2.462846472451674,
+  "validation": {
+    "probes": {
+      "native": {
+        "codec_name": "h264",
+        "width": 1920,
+        "height": 1080,
+        "pix_fmt": "yuv420p",
+        "r_frame_rate": "30/1",
+        "nb_read_frames": "180"
+      },
+      "remotion": {
+        "codec_name": "h264",
+        "width": 1920,
+        "height": 1080,
+        "pix_fmt": "yuv420p",
+        "r_frame_rate": "30/1",
+        "nb_read_frames": "180"
+      }
+    },
+    "decoded_ssim": {
+      "frames": 180,
+      "min": 0.968729,
+      "mean": 0.9710139055555544
+    },
+    "parity_gate_passed": false,
+    "crop_ssim": {
+      "title": {
+        "frames": 180,
+        "min": 0.857859,
+        "mean": 0.8715963777777777
+      },
+      "badge": {
+        "frames": 180,
+        "min": 0.811041,
+        "mean": 0.8124618611111115
+      },
+      "background": {
+        "frames": 180,
+        "min": 0.996298,
+        "mean": 0.9974084277777776
+      }
+    },
+    "ffmpeg": "ffmpeg version 8.1.1 Copyright (c) 2000-2026 the FFmpeg developers"
+  }
 }

@@ -88,9 +88,23 @@ try {
     min: Math.min(...ssimScores),
     mean: ssimScores.reduce((sum, score) => sum + score, 0) / ssimScores.length,
   };
-  if (decodedSsim.frames !== 180 || decodedSsim.min < 0.995) {
-    throw new Error(`Cyberpunk decoded SSIM gate failed: ${JSON.stringify(decodedSsim)}`);
-  }
+  const parityGatePassed = decodedSsim.frames === 180 && decodedSsim.min >= 0.995;
+  const cropSsim = (name, x, y, width, height) => {
+    const cropPath = path.join(outputDir, `cyberpunk-ssim-${name}.log`);
+    execFileSync('ffmpeg', [
+      '-v', 'error', '-i', nativeOutput, '-i', remotionOutput,
+      '-lavfi', `[0:v]crop=${width}:${height}:${x}:${y},format=yuv420p[a];[1:v]crop=${width}:${height}:${x}:${y},format=yuv420p[b];[a][b]ssim=stats_file=${cropPath}`,
+      '-f', 'null', '-',
+    ]);
+    const scores = [...readFileSync(cropPath, 'utf8').matchAll(/All:([0-9.]+)/g)]
+      .map((match) => Number(match[1]));
+    return {frames: scores.length, min: Math.min(...scores), mean: scores.reduce((sum, score) => sum + score, 0) / scores.length};
+  };
+  const cropValidation = {
+    title: cropSsim('title', 0, 320, 1100, 330),
+    badge: cropSsim('badge', 160, 700, 450, 130),
+    background: cropSsim('background', 0, 0, 1920, 300),
+  };
 
   const speedup = remotionMs / dioxuscutProcessMs;
   console.log(`\n======================================================`);
@@ -115,12 +129,15 @@ try {
       fps: 180 / (dioxuscutProcessMs / 1000),
     },
     speedup,
-    validation: {probes, decoded_ssim: decodedSsim, ffmpeg: execFileSync('ffmpeg', ['-version'], {encoding: 'utf8'}).split('\n')[0]},
+    validation: {probes, decoded_ssim: decodedSsim, parity_gate_passed: parityGatePassed, crop_ssim: cropValidation, ffmpeg: execFileSync('ffmpeg', ['-version'], {encoding: 'utf8'}).split('\n')[0]},
   };
 
   const reportPath = path.join(root, 'benchmarks/cyberpunk-bench-result.json');
   writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n');
   console.log(`[+] Report saved to ${reportPath}`);
+  if (!parityGatePassed) {
+    throw new Error(`Cyberpunk decoded SSIM gate failed: ${JSON.stringify(decodedSsim)}`);
+  }
 } finally {
   await browser.close({silent: true});
 }
