@@ -1292,6 +1292,8 @@ pub struct WgpuBackend {
     text_atlas_upload_bytes: AtomicU64,
     text_atlas_full_uploads: AtomicU64,
     text_atlas_dirty_uploads: AtomicU64,
+    text_atlas_full_upload_bytes: AtomicU64,
+    text_atlas_dirty_upload_bytes: AtomicU64,
     text_atlas_cache_hits: AtomicU64,
     text_atlas_cache_misses: AtomicU64,
     gpu_texture_uploads: AtomicU64,
@@ -1359,6 +1361,8 @@ impl WgpuBackend {
             text_atlas_upload_bytes: AtomicU64::new(0),
             text_atlas_full_uploads: AtomicU64::new(0),
             text_atlas_dirty_uploads: AtomicU64::new(0),
+            text_atlas_full_upload_bytes: AtomicU64::new(0),
+            text_atlas_dirty_upload_bytes: AtomicU64::new(0),
             text_atlas_cache_hits: AtomicU64::new(0),
             text_atlas_cache_misses: AtomicU64::new(0),
             gpu_texture_uploads: AtomicU64::new(0),
@@ -1597,6 +1601,10 @@ impl WgpuBackend {
                     );
                     self.text_atlas_dirty_uploads
                         .fetch_add(1, Ordering::Relaxed);
+                    self.text_atlas_dirty_upload_bytes.fetch_add(
+                        u64::from(rect.width) * u64::from(rect.height),
+                        Ordering::Relaxed,
+                    );
                     resource
                         .generation
                         .store(snapshot.generation, Ordering::Release);
@@ -1640,6 +1648,10 @@ impl WgpuBackend {
             Ordering::Relaxed,
         );
         self.text_atlas_full_uploads.fetch_add(1, Ordering::Relaxed);
+        self.text_atlas_full_upload_bytes.fetch_add(
+            u64::from(snapshot.width) * u64::from(snapshot.height),
+            Ordering::Relaxed,
+        );
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1735,6 +1747,16 @@ impl WgpuBackend {
     /// Number of dirty-rectangle atlas uploads since backend creation.
     pub fn text_atlas_dirty_uploads(&self) -> u64 {
         self.text_atlas_dirty_uploads.load(Ordering::Relaxed)
+    }
+
+    /// Number of bytes sent by full R8 atlas uploads.
+    pub fn text_atlas_full_upload_bytes(&self) -> u64 {
+        self.text_atlas_full_upload_bytes.load(Ordering::Relaxed)
+    }
+
+    /// Number of bytes sent by dirty-rectangle R8 atlas uploads.
+    pub fn text_atlas_dirty_upload_bytes(&self) -> u64 {
+        self.text_atlas_dirty_upload_bytes.load(Ordering::Relaxed)
     }
 
     /// Render a GPU-compatible scene without scheduling a CPU readback.
@@ -5356,6 +5378,11 @@ mod tests {
         assert_eq!(gpu.render_stats().gpu_frames, 3);
         assert_eq!(gpu.text_atlas_full_uploads(), 1);
         assert!(gpu.text_atlas_dirty_uploads() >= 1);
+        assert_eq!(
+            gpu.text_atlas_upload_bytes(),
+            gpu.text_atlas_full_upload_bytes() + gpu.text_atlas_dirty_upload_bytes()
+        );
+        assert!(gpu.text_atlas_dirty_upload_bytes() < gpu.text_atlas_full_upload_bytes());
         assert!(image.pixels().any(|pixel| pixel[3] > 0));
         assert!(second.pixels().any(|pixel| pixel[3] > 0));
         assert!(gpu.text_atlas_cache_generation().unwrap() > generation.unwrap());
