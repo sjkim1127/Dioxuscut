@@ -167,9 +167,12 @@ fn render_native(
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to initialize runtime: {e}")))?;
 
         rt.block_on(async {
-            let control = dioxuscut_rasterizer::RenderControl::new();
+            let cancellation = dioxuscut_rasterizer::RenderCancellationToken::default();
+            let control =
+                dioxuscut_rasterizer::RenderControl::new().with_cancellation(cancellation.clone());
             let control = if let Some(callback) = progress_callback {
                 let callback_error = Arc::clone(&callback_error_for_render);
+                let cancellation = cancellation.clone();
                 control.with_progress(move |progress| {
                     Python::attach(|py| {
                         let payload = PyDict::new(py);
@@ -182,6 +185,7 @@ fn render_native(
                                     *stored = Some(error.to_string());
                                 }
                             }
+                            cancellation.cancel();
                         }
                     });
                 })
