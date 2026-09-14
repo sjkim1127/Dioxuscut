@@ -44,6 +44,27 @@ function ensureGauntletAssets() {
   }
 }
 
+function measureVideoSourceSsim(outputPath, label) {
+  const statsPath = path.join(outputDir, `${label}-video-source-ssim.log`);
+  execFileSync('ffmpeg', [
+    '-hide_banner', '-loglevel', 'error',
+    '-stream_loop', '-1', '-i', path.join(root, 'target/assets/test_video.mp4'),
+    '-i', outputPath,
+    '-lavfi', '[0:v]scale=600:338:flags=lanczos,crop=580:318:10:10[source];[1:v]crop=580:318:70:90[rendered];[source][rendered]ssim=stats_file=' + statsPath,
+    '-frames:v', '900', '-f', 'null', '-',
+  ], {stdio: 'inherit'});
+  const values = readFileSync(statsPath, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => Number(/All:([0-9.]+)/.exec(line)?.[1]))
+    .filter(Number.isFinite);
+  return {
+    frames: values.length,
+    min: Math.min(...values),
+    mean: values.reduce((sum, value) => sum + value, 0) / values.length,
+  };
+}
+
 ensureGauntletAssets();
 console.log('[*] Bundling Remotion Gauntlet scene...');
 const setupStart = performance.now();
@@ -118,6 +139,12 @@ try {
   };
   console.log(`[+] Frame SSIM: min ${ssim.min.toFixed(6)}, mean ${ssim.mean.toFixed(6)} (${ssim.frames} frames)`);
 
+  const videoSourceSsim = {
+    remotion: measureVideoSourceSsim(path.join(outputDir, 'remotion-gauntlet.mp4'), 'remotion'),
+    dioxuscut: measureVideoSourceSsim(path.join(outputDir, 'dioxuscut-gauntlet.mp4'), 'dioxuscut'),
+  };
+  console.log(`[+] Left video source SSIM: Remotion ${videoSourceSsim.remotion.mean.toFixed(6)}, Dioxuscut ${videoSourceSsim.dioxuscut.mean.toFixed(6)}`);
+
   const speedup = remotionMs / dioxuscutProcessMs;
   console.log(`\n======================================================`);
   console.log(`🔥 THE GAUNTLET RESULT: Dioxuscut is ${speedup.toFixed(2)}x faster!`);
@@ -148,6 +175,7 @@ try {
       fps: 900 / (dioxuscutProcessMs / 1000),
     },
     ssim,
+    video_source_ssim: videoSourceSsim,
     speedup,
   };
 
