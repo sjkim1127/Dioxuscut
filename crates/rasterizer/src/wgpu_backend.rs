@@ -3659,9 +3659,9 @@ fn compile_nodes(
 
             SceneNode::Layer {
                 opacity: layer_opacity,
-                blend_mode: crate::scene::BlendMode::Normal,
                 clip: None,
                 mask: Some(mask_nodes),
+                blend_mode,
                 mask_mode,
                 filters,
                 shadow: None,
@@ -3672,6 +3672,17 @@ fn compile_nodes(
                 && matches!(mask_nodes.first(), Some(SceneNode::Path { .. }))
                 && (*mask_mode == crate::scene::MaskMode::Alpha
                     || *mask_mode == crate::scene::MaskMode::Luminance)
+                && matches!(
+                    blend_mode,
+                    crate::scene::BlendMode::Normal
+                        | crate::scene::BlendMode::Multiply
+                        | crate::scene::BlendMode::Screen
+                        | crate::scene::BlendMode::Darken
+                        | crate::scene::BlendMode::Lighten
+                )
+                && (matches!(blend_mode, crate::scene::BlendMode::Normal)
+                    || gpu_blend_layer_filters_supported(filters))
+                && gpu_blend_children_supported(children)
                 && gpu_layer_effects(filters, *layer_opacity).is_some()
                 && gpu_path_mask_from_node(mask_nodes.first().unwrap(), transform, *mask_mode)
                     .is_some() =>
@@ -3692,6 +3703,14 @@ fn compile_nodes(
                 for command in &mut output[start..] {
                     let instance = command.instance_mut();
                     instance.kind_data[3] = 1;
+                    instance.kind_data[2] = match blend_mode {
+                        crate::scene::BlendMode::Multiply => 1,
+                        crate::scene::BlendMode::Screen => 2,
+                        crate::scene::BlendMode::Darken => 3,
+                        crate::scene::BlendMode::Lighten => 4,
+                        crate::scene::BlendMode::Normal => 0,
+                        _ => return None,
+                    };
                     instance.brightness[0] *= brightness;
                     instance.grayscale[0] = 1.0 - (1.0 - instance.grayscale[0]) * (1.0 - grayscale);
                     instance.contrast[0] *= contrast;
@@ -4658,7 +4677,7 @@ fn gpu_path_mask_from_node(
             return gpu_path_mask_from_tiny_path(
                 &stroked,
                 transform,
-                mask_color(*stroke, mask_mode),
+                path_mask_color(*stroke, mask_mode),
             )
             .map(|mut mask| {
                 mask.instance.params[3] = *opacity;
@@ -4667,15 +4686,21 @@ fn gpu_path_mask_from_node(
         }
         _ => return None,
     };
-    gpu_path_mask_from_tiny_path(mask_path, transform, mask_color(*color_source, mask_mode)).map(
-        |mut mask| {
-            mask.instance.params[3] = *opacity;
-            mask
-        },
+    gpu_path_mask_from_tiny_path(
+        mask_path,
+        transform,
+        path_mask_color(*color_source, mask_mode),
     )
+    .map(|mut mask| {
+        mask.instance.params[3] = *opacity;
+        mask
+    })
 }
 
-fn mask_color(color: Color, mask_mode: crate::scene::MaskMode) -> Color {
+/// Path masks are rendered into an R8 texture through `fs_solid`, whose
+/// output alpha becomes the mask value. Encode luminance in alpha here;
+/// storing it only in RGB would be lost during the path-mask pass.
+fn path_mask_color(color: Color, mask_mode: crate::scene::MaskMode) -> Color {
     match mask_mode {
         crate::scene::MaskMode::Alpha => Color::rgba(255, 255, 255, color.a),
         crate::scene::MaskMode::Luminance => {
@@ -4683,8 +4708,9 @@ fn mask_color(color: Color, mask_mode: crate::scene::MaskMode) -> Color {
                 + 0.7152 * f32::from(color.g)
                 + 0.0722 * f32::from(color.b))
             .round()
-            .clamp(0.0, 255.0) as u8;
-            Color::rgba(luminance, luminance, luminance, color.a)
+            .clamp(0.0, 255.0) as u16;
+            let alpha = (luminance * u16::from(color.a) + 127) / 255;
+            Color::rgba(255, 255, 255, alpha as u8)
         }
     }
 }
@@ -6714,31 +6740,43 @@ mod tests {
             return;
         };
         let scene = Scene {
-            nodes: vec![SceneNode::Layer {
-                opacity: 1.0,
-                blend_mode: crate::scene::BlendMode::Normal,
-                clip: None,
-                mask: Some(vec![SceneNode::Path {
-                    d: "M 4 4 L 28 4 L 16 28 Z".into(),
-                    fill: Some(Color::rgba(255, 255, 255, 128)),
-                    stroke: None,
-                    stroke_width: 0.0,
-                    opacity: 1.0,
-                }]),
-                mask_mode: crate::scene::MaskMode::Alpha,
-                filters: Vec::new(),
-                shadow: None,
-                children: vec![SceneNode::Rect {
+            nodes: vec![
+                SceneNode::Rect {
                     x: 0.0,
                     y: 0.0,
                     w: 32.0,
                     h: 32.0,
-                    fill: Color::rgb(255, 0, 0),
+                    fill: Color::rgb(40, 80, 160),
                     stroke: None,
                     stroke_width: 0.0,
                     corner_radius: 0.0,
-                }],
-            }],
+                },
+                SceneNode::Layer {
+                    opacity: 1.0,
+                    blend_mode: crate::scene::BlendMode::Multiply,
+                    clip: None,
+                    mask: Some(vec![SceneNode::Path {
+                        d: "M 4 4 L 28 4 L 16 28 Z".into(),
+                        fill: Some(Color::rgb(128, 128, 128)),
+                        stroke: None,
+                        stroke_width: 0.0,
+                        opacity: 1.0,
+                    }]),
+                    mask_mode: crate::scene::MaskMode::Luminance,
+                    filters: Vec::new(),
+                    shadow: None,
+                    children: vec![SceneNode::Rect {
+                        x: 0.0,
+                        y: 0.0,
+                        w: 32.0,
+                        h: 32.0,
+                        fill: Color::rgb(255, 0, 0),
+                        stroke: None,
+                        stroke_width: 0.0,
+                        corner_radius: 0.0,
+                    }],
+                },
+            ],
         };
         assert!(gpu_supports_scene(&scene));
         let config = FrameConfig::new(32, 32, 0, 30.0);
@@ -6747,8 +6785,19 @@ mod tests {
             .render_frame(&scene, &config)
             .unwrap();
         for (x, y) in [(16, 10), (16, 20), (2, 2)] {
-            assert_eq!(gpu_image.get_pixel(x, y), cpu_image.get_pixel(x, y));
+            for channel in 0..4 {
+                assert!(
+                    (i16::from(gpu_image.get_pixel(x, y)[channel])
+                        - i16::from(cpu_image.get_pixel(x, y)[channel]))
+                    .abs()
+                        <= 5,
+                    "GPU/CPU path luminance mask mismatch at ({x},{y}) channel {channel}: {:?} vs {:?}",
+                    gpu_image.get_pixel(x, y),
+                    cpu_image.get_pixel(x, y)
+                );
+            }
         }
+        assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
     }
 
     #[test]
