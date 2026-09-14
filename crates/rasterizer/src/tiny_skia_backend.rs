@@ -376,7 +376,7 @@ fn render_node(
                 *looped,
                 resources.security,
             )?;
-            draw_media(
+            draw_video_media(
                 pixmap,
                 &source,
                 src,
@@ -1816,6 +1816,63 @@ fn draw_media(
     opacity: f32,
     transform: Transform,
 ) -> Result<(), RasterError> {
+    draw_media_with_filter(
+        pixmap,
+        source,
+        src,
+        x,
+        y,
+        w,
+        h,
+        fit,
+        opacity,
+        transform,
+        imageops::FilterType::Lanczos3,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_video_media(
+    pixmap: &mut Pixmap,
+    source: &RgbaImage,
+    src: &str,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    fit: ImageFit,
+    opacity: f32,
+    transform: Transform,
+) -> Result<(), RasterError> {
+    draw_media_with_filter(
+        pixmap,
+        source,
+        src,
+        x,
+        y,
+        w,
+        h,
+        fit,
+        opacity,
+        transform,
+        imageops::FilterType::Triangle,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_media_with_filter(
+    pixmap: &mut Pixmap,
+    source: &RgbaImage,
+    src: &str,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    fit: ImageFit,
+    opacity: f32,
+    transform: Transform,
+    resize_filter: imageops::FilterType,
+) -> Result<(), RasterError> {
     let width = rounded_dimension(w);
     let height = rounded_dimension(h);
     if width == 0 || height == 0 {
@@ -1831,7 +1888,7 @@ fn draw_media(
         });
     }
 
-    let fitted = fit_image(source, width, height, fit);
+    let fitted = fit_image_with_filter(source, width, height, fit, resize_filter);
     let media_pixmap = rgba_to_pixmap(fitted).ok_or_else(|| RasterError::MediaAsset {
         path: src.into(),
         reason: "media dimensions are too large for the rasterizer".into(),
@@ -1851,7 +1908,13 @@ fn draw_media(
     Ok(())
 }
 
-fn fit_image(source: &RgbaImage, width: u32, height: u32, fit: ImageFit) -> RgbaImage {
+fn fit_image_with_filter(
+    source: &RgbaImage,
+    width: u32,
+    height: u32,
+    fit: ImageFit,
+    resize_filter: imageops::FilterType,
+) -> RgbaImage {
     let mut output = RgbaImage::new(width, height);
     if source.width() == 0 || source.height() == 0 || width == 0 || height == 0 {
         return output;
@@ -1866,18 +1929,13 @@ fn fit_image(source: &RgbaImage, width: u32, height: u32, fit: ImageFit) -> Rgba
     };
 
     match effective_fit {
-        ImageFit::Fill => imageops::resize(source, width, height, imageops::FilterType::Lanczos3),
+        ImageFit::Fill => imageops::resize(source, width, height, resize_filter),
         ImageFit::Cover => {
             let scale =
                 (width as f64 / source.width() as f64).max(height as f64 / source.height() as f64);
             let scaled_width = ((source.width() as f64 * scale).ceil() as u32).max(width);
             let scaled_height = ((source.height() as f64 * scale).ceil() as u32).max(height);
-            let resized = imageops::resize(
-                source,
-                scaled_width,
-                scaled_height,
-                imageops::FilterType::Lanczos3,
-            );
+            let resized = imageops::resize(source, scaled_width, scaled_height, resize_filter);
             let crop_x = (scaled_width - width) / 2;
             let crop_y = (scaled_height - height) / 2;
             imageops::crop_imm(&resized, crop_x, crop_y, width, height).to_image()
@@ -1887,12 +1945,7 @@ fn fit_image(source: &RgbaImage, width: u32, height: u32, fit: ImageFit) -> Rgba
                 (width as f64 / source.width() as f64).min(height as f64 / source.height() as f64);
             let scaled_width = ((source.width() as f64 * scale).round() as u32).clamp(1, width);
             let scaled_height = ((source.height() as f64 * scale).round() as u32).clamp(1, height);
-            let resized = imageops::resize(
-                source,
-                scaled_width,
-                scaled_height,
-                imageops::FilterType::Lanczos3,
-            );
+            let resized = imageops::resize(source, scaled_width, scaled_height, resize_filter);
             imageops::overlay(
                 &mut output,
                 &resized,

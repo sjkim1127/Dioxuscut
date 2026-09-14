@@ -11,33 +11,33 @@
   "concurrency": 4,
   "platform": "darwin (arm64)",
   "cpu": "Apple M4 Pro",
-  "bundle_ms": 619.8742090000001,
-  "browser_startup_ms": 691.18775,
+  "bundle_ms": 602.568542,
+  "browser_startup_ms": 1019.0847089999999,
   "remotion": {
-    "render_ms": 63718.784208000005,
-    "fps": 14.124563285170206
+    "render_ms": 60636.679208,
+    "fps": 14.842501465371473
   },
   "dioxuscut": {
-    "process_ms": 47792.920834,
-    "render_ms": 47770.43,
-    "fps": 18.831240784089886
+    "process_ms": 44396.485958,
+    "render_ms": 43742.24,
+    "fps": 20.271874689618876
   },
   "ssim": {
     "frames": 900,
-    "min": 0.93921,
-    "mean": 0.9438663055555555
+    "min": 0.939722,
+    "mean": 0.9443372377777773
   },
   "video_source_ssim": {
     "remotion": {
       "frames": 900,
       "min": 0.943378,
-      "mean": 0.9497296944444428
+      "mean": 0.9497296677777761
     },
     "dioxuscut": {
       "frames": 900,
-      "min": 0.971158,
-      "mean": 0.9751481066666664
+      "min": 0.972628,
+      "mean": 0.9766025744444436
     }
   },
-  "speedup": 1.3332264087670136
+  "speedup": 1.3657990694435493
 }

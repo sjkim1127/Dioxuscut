@@ -113,7 +113,7 @@ try {
   const rawOutput = execFileSync(
     nativeBinary,
     [path.join(outputDir, 'dioxuscut-gauntlet.mp4'), '4', '900'],
-    {encoding: 'utf8'}
+    {encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit']}
   );
   const dioxuscutProcessMs = performance.now() - dioxuscutStart;
   const nativeStats = JSON.parse(rawOutput.trim());

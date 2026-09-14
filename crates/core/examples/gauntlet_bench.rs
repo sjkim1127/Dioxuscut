@@ -2,7 +2,7 @@
 #![allow(clippy::manual_is_multiple_of)]
 use dioxuscut_rasterizer::{
     render_to_ffmpeg_pipe, BlendMode, Color, FrameConfig, ImageFit, MaskMode, PipeConfig,
-    RasterizerBackend, Scene, SceneFilter, SceneNode, TinySkiaBackend,
+    RasterizerBackend, RenderControl, Scene, SceneFilter, SceneNode, TinySkiaBackend,
 };
 use std::time::Instant;
 
@@ -196,7 +196,8 @@ fn main() {
 
     let config = PipeConfig::new(1920, 1080, 30.0, total_frames, output_path)
         .with_concurrency(concurrency)
-        .with_quality(18, "fast");
+        .with_quality(18, "fast")
+        .with_control(RenderControl::new().with_stderr_progress());
 
     let start = Instant::now();
     render_to_ffmpeg_pipe(&backend, &config, scene).expect("Render to ffmpeg pipe failed");

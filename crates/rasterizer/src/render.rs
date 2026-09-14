@@ -216,6 +216,29 @@ impl RenderControl {
         self
     }
 
+    /// Report bounded render progress to stderr from the shared render engine.
+    ///
+    /// The callback is invoked for every frame internally, but output is
+    /// throttled to every 30 frames and the final frame so CLI, Python, and
+    /// Tauri callers get useful progress without flooding their terminals.
+    pub fn with_stderr_progress(self) -> Self {
+        self.with_progress(|progress| {
+            if progress.completed_frames == progress.total_frames
+                || progress.completed_frames % 30 == 0
+            {
+                let percent = if progress.total_frames == 0 {
+                    100.0
+                } else {
+                    progress.completed_frames as f64 * 100.0 / progress.total_frames as f64
+                };
+                eprintln!(
+                    "[*] [Dioxuscut Progress] {} / {} frames ({percent:.1}%)...",
+                    progress.completed_frames, progress.total_frames,
+                );
+            }
+        })
+    }
+
     fn check(&self, started: Instant) -> Result<(), RasterError> {
         if self.cancellation.is_cancelled() {
             return Err(RasterError::Cancelled);
