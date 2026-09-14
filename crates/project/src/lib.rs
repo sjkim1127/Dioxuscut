@@ -1340,11 +1340,14 @@ mod tests {
         store.try_update(&id, JobStatus::Preparing, 0).unwrap();
         store.try_update(&id, JobStatus::Rendering, 8).unwrap();
         store.set_render_diagnostics(&id, 8, 0, None).unwrap();
+        store.set_encoding_progress(&id, 6).unwrap();
+        assert_eq!(store.get(&id).unwrap().encoded_frames, 6);
         store.complete_render(&id, 8).unwrap();
 
         let job = store.get(&id).unwrap();
         assert_eq!(job.status, JobStatus::Completed);
         assert_eq!(job.completed_frames, 8);
+        assert_eq!(job.encoded_frames, 8);
         assert_eq!(job.gpu_frames, Some(8));
         assert_eq!(job.cpu_fallback_frames, Some(0));
         assert_eq!(job.gpu_fallback_reason, None);
