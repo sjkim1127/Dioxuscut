@@ -1207,6 +1207,35 @@ mod tests {
     }
 
     #[test]
+    fn cancellation_is_terminal_against_late_worker_updates() {
+        let mut store = JobStore::default();
+        let completed_id = store.submit(project()).unwrap();
+        store.update(&completed_id, JobStatus::Preparing, 0);
+        store.update(&completed_id, JobStatus::Rendering, 4);
+        store.cancel(&completed_id).unwrap();
+        assert!(matches!(
+            store.try_update(&completed_id, JobStatus::Completed, 4),
+            Err(ProjectError::InvalidJobTransition {
+                from: JobStatus::Cancelled,
+                to: JobStatus::Completed,
+            })
+        ));
+
+        let failed_id = store.submit(project()).unwrap();
+        store.update(&failed_id, JobStatus::Preparing, 0);
+        store.update(&failed_id, JobStatus::Rendering, 4);
+        store.cancel(&failed_id).unwrap();
+        assert!(matches!(
+            store.fail(&failed_id, "late worker failure"),
+            Err(ProjectError::InvalidJobTransition {
+                from: JobStatus::Cancelled,
+                to: JobStatus::Failed,
+            })
+        ));
+        assert_eq!(store.get(&failed_id).unwrap().status, JobStatus::Cancelled);
+    }
+
+    #[test]
     fn list_returns_jobs_in_submission_order() {
         let mut store = JobStore::default();
         let first = store.submit(project()).unwrap();
