@@ -1541,6 +1541,8 @@ mod tests {
     }
     use crate::scene::{Color, Scene, SceneNode};
     use crate::tiny_skia_backend::TinySkiaBackend;
+    use crate::{BackendCapabilities, FrameConfig, RasterizerBackend};
+    use image::RgbaImage;
     use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1580,6 +1582,63 @@ mod tests {
             });
             s
         }
+    }
+
+    struct BrowserLikeBackend;
+
+    impl RasterizerBackend for BrowserLikeBackend {
+        fn render_frame(
+            &self,
+            scene: &Scene,
+            config: &FrameConfig,
+        ) -> Result<RgbaImage, RasterError> {
+            TinySkiaBackend::headless().render_frame(scene, config)
+        }
+
+        fn capabilities(&self) -> BackendCapabilities {
+            BackendCapabilities {
+                native_scene: false,
+                browser_runtime: true,
+                gpu_accelerated: true,
+                supports_streaming: false,
+            }
+        }
+    }
+
+    #[test]
+    fn browser_runtime_pipe_uses_sequential_frames_and_reports_both_progresses() {
+        if !ffmpeg_available() {
+            return;
+        }
+        let temp = unique_temp_dir("browser_runtime_pipe");
+        std::fs::create_dir_all(&temp).unwrap();
+        let output = temp.join("browser.mp4");
+        let render_progress = Arc::new(Mutex::new(Vec::new()));
+        let encode_progress = Arc::new(Mutex::new(Vec::new()));
+        let render_capture = Arc::clone(&render_progress);
+        let encode_capture = Arc::clone(&encode_progress);
+        let control = RenderControl::new()
+            .with_progress(move |progress| {
+                render_capture
+                    .lock()
+                    .unwrap()
+                    .push(progress.completed_frames);
+            })
+            .with_encoding_progress(move |progress| {
+                encode_capture.lock().unwrap().push(progress.encoded_frames);
+            });
+        let config = PipeConfig::new(16, 16, 30.0, 3, &output)
+            .with_codec(VideoCodec::H264)
+            .with_hw_accel(HwAccel::Disabled)
+            .with_control(control);
+        render_to_ffmpeg_pipe(&BrowserLikeBackend, &config, |frame| {
+            solid_scene(Color::rgb((frame * 40) as u8, 20, 200))(frame)
+        })
+        .unwrap();
+        assert_eq!(*render_progress.lock().unwrap(), vec![1, 2, 3]);
+        assert_eq!(*encode_progress.lock().unwrap(), vec![1, 2, 3]);
+        assert!(output.is_file());
+        std::fs::remove_dir_all(temp).unwrap();
     }
 
     #[test]
