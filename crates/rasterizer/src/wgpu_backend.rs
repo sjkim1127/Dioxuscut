@@ -5995,6 +5995,16 @@ mod tests {
             image.pixels().collect::<Vec<_>>(),
             second.pixels().collect::<Vec<_>>()
         );
+        let mut next_frame = scene.clone();
+        let SceneNode::Lottie { time, .. } = &mut next_frame.nodes[0] else {
+            unreachable!("Lottie scene lost its root node");
+        };
+        *time = 1.0 / 30.0;
+        let next = gpu
+            .render_frame(&next_frame, &FrameConfig::new(32, 32, 1, 30.0))
+            .unwrap();
+        assert!(next.pixels().any(|pixel| pixel[3] > 0));
+        assert_eq!(gpu.gpu_texture_uploads(), 2);
         let composited = Scene {
             nodes: vec![
                 SceneNode::Rect {
