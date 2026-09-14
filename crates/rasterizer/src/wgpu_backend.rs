@@ -5897,8 +5897,35 @@ mod tests {
         let image = gpu
             .render_frame(&scene, &FrameConfig::new(32, 32, 0, 30.0))
             .unwrap();
+        let cpu = TinySkiaBackend::new()
+            .render_frame(&scene, &FrameConfig::new(32, 32, 0, 30.0))
+            .unwrap();
         assert!(image.pixels().any(|pixel| pixel[3] > 0));
         assert_eq!(gpu.gpu_texture_uploads(), 1);
+        let mean_error = image
+            .pixels()
+            .zip(cpu.pixels())
+            .map(|(gpu, cpu)| {
+                (0..4)
+                    .map(|channel| {
+                        (i16::from(gpu[channel]) - i16::from(cpu[channel])).unsigned_abs() as u64
+                    })
+                    .sum::<u64>()
+            })
+            .sum::<u64>() as f64
+            / (32 * 32 * 4) as f64;
+        assert!(
+            mean_error < 18.0,
+            "Lottie GPU/CPU mean error was {mean_error}"
+        );
+        let second = gpu
+            .render_frame(&scene, &FrameConfig::new(32, 32, 0, 30.0))
+            .unwrap();
+        assert_eq!(gpu.gpu_texture_uploads(), 1);
+        assert_eq!(
+            image.pixels().collect::<Vec<_>>(),
+            second.pixels().collect::<Vec<_>>()
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

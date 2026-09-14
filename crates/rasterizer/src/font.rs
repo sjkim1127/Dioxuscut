@@ -462,6 +462,7 @@ impl FontCache {
     }
 
     /// Rasterize text with ordered explicit local fonts followed by the system fallback.
+    #[allow(dead_code)]
     pub(crate) fn rasterize(
         &self,
         text: &str,
