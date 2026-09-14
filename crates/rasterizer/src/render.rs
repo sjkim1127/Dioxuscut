@@ -784,6 +784,11 @@ where
                 stdin.write_all(&rgba).map_err(|error| {
                     RasterError::ImageEncode(format!("FFmpeg pipe write error: {error}"))
                 })?;
+                tracing::debug!(
+                    frame = composition_frame,
+                    bytes = rgba.len(),
+                    "browser frame written to FFmpeg pipe"
+                );
                 if let Some(callback) = &config.control.progress {
                     callback(RenderProgress {
                         completed_frames: frame + 1,
@@ -849,8 +854,11 @@ where
     };
 
     if render_result.is_ok() {
+        tracing::debug!("flushing FFmpeg stdin after render");
         let _ = stdin.flush();
+        tracing::debug!("FFmpeg stdin flush completed");
     }
+    tracing::debug!("closing FFmpeg stdin to signal EOF");
     drop(stdin); // EOF for FFmpeg
 
     if let Err(error) = render_result {
@@ -861,6 +869,7 @@ where
     }
 
     // ── 4. Wait for FFmpeg to finish ─────────────────────────────────────────
+    tracing::debug!("waiting for FFmpeg process to exit");
     let output = match wait_for_ffmpeg(ffmpeg, &config.control, started) {
         Ok(output) => output,
         Err(error) => {
@@ -1044,14 +1053,17 @@ fn wait_for_ffmpeg(
     control: &RenderControl,
     started: Instant,
 ) -> Result<std::process::Output, RasterError> {
+    tracing::debug!("FFmpeg wait loop started");
     loop {
         if let Err(error) = control.check(started) {
+            tracing::debug!(error = %error, "FFmpeg wait interrupted by render control");
             let _ = child.kill();
             let _ = child.wait();
             return Err(error);
         }
         match child.try_wait() {
             Ok(Some(status)) => {
+                tracing::debug!(?status, "FFmpeg process exited");
                 let mut stderr = Vec::new();
                 if let Some(mut pipe) = child.stderr.take() {
                     pipe.read_to_end(&mut stderr).map_err(|error| {
