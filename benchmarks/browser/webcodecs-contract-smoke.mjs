@@ -488,6 +488,13 @@ try {
   assert.ok(result.thirtyFrame.decodeMs > 0);
   assert.ok(result.thirtyFrame.rgbaMs > 0);
   assert.equal(result.thirtyFrame.rgbaBytes, 30 * 1920 * 1080 * 4);
+  if (result.thirtyFrame.webgpu) {
+    assert.deepEqual(Object.keys(result.thirtyFrame.webgpu.fitCompositeReadbackMs).sort(), [
+      'contain', 'cover', 'fill', 'none', 'scaleDown',
+    ]);
+    assert.ok(Object.values(result.thirtyFrame.webgpu.fitCompositeReadbackMs)
+      .every((milliseconds) => milliseconds > 0));
+  }
   assert.equal(result.streamedVideo.count, 3);
   assert.equal(result.streamedVideo.returnValue, null);
   assert.ok(result.streamedAudio.count > 0);
