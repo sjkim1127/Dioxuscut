@@ -300,7 +300,7 @@ try {
           scaleDown: [0, 0, 1, 1, 1, 0.5625, 0, 0],
         };
         const fitTimings = {};
-        let fillGpuPixels = null;
+        const fitGpuPixels = {};
         for (const [fit, geometry] of Object.entries(fitParams)) {
           device.queue.writeBuffer(paramsBuffer, 0, new Float32Array([
             ...geometry.slice(0, 4), ...geometry.slice(4), 0.75, 0, 0, 0,
@@ -333,8 +333,8 @@ try {
             device.queue.submit([encoder.finish()]);
             await device.queue.onSubmittedWorkDone();
             await readback.mapAsync(GPUMapMode.READ);
-            if (fit === 'fill' && frameIndex === 0) {
-              fillGpuPixels = new Uint8Array(readback.getMappedRange()).slice();
+            if (frameIndex === 0) {
+              fitGpuPixels[fit] = new Uint8Array(readback.getMappedRange()).slice();
             }
             readback.unmap();
           }
@@ -344,20 +344,42 @@ try {
           frames: thirtyFrameVideo.length,
           uploadReadbackMs: performance.now() - gpuStarted,
           fitCompositeReadbackMs: fitTimings,
-          fillParityMeanError: (() => {
-            if (!fillGpuPixels) return null;
+          fitParityMeanError: (() => {
+            if (Object.keys(fitGpuPixels).length !== Object.keys(fitParams).length) return null;
             const canvas = new OffscreenCanvas(width, height);
             const context = canvas.getContext('2d', { willReadFrequently: true });
             if (!context) throw new Error('Canvas2D unavailable for video parity');
-            context.globalAlpha = 0.75;
-            context.drawImage(thirtyFrameVideo[0], 0, 0, width, height);
-            const expected = context.getImageData(0, 0, width, height).data;
-            let totalError = 0;
-            for (let index = 0; index < expected.length; index += 1) {
-              const error = Math.abs(fillGpuPixels[index] - expected[index]);
-              totalError += error;
+            const parity = {};
+            for (const fit of Object.keys(fitParams)) {
+              context.clearRect(0, 0, width, height);
+              context.globalAlpha = 1;
+              context.fillStyle = 'black';
+              context.fillRect(0, 0, width, height);
+              if (fit === 'cover') {
+                context.drawImage(thirtyFrameVideo[0], width * 0.21875, 0, width * 0.5625, height,
+                  0, 0, width, height);
+              } else if (fit === 'contain' || fit === 'scaleDown') {
+                const destinationHeight = height * 0.5625;
+                context.drawImage(thirtyFrameVideo[0], 0, 0, width, height,
+                  0, (height - destinationHeight) / 2, width, destinationHeight);
+              } else {
+                context.drawImage(thirtyFrameVideo[0], 0, 0, width, height);
+              }
+              const expected = context.getImageData(0, 0, width, height).data;
+              const contentTop = (fit === 'contain' || fit === 'scaleDown') ? height * 0.21875 : 0;
+              const contentBottom = (fit === 'contain' || fit === 'scaleDown') ? height * 0.78125 : height;
+              for (let y = Math.ceil(contentTop); y < Math.floor(contentBottom); y += 1) {
+                for (let x = 0; x < width; x += 1) {
+                  expected[(y * width + x) * 4 + 3] = 191;
+                }
+              }
+              let totalError = 0;
+              for (let index = 0; index < expected.length; index += 1) {
+                totalError += Math.abs(fitGpuPixels[fit][index] - expected[index]);
+              }
+              parity[fit] = totalError / expected.length;
             }
-            return totalError / expected.length;
+            return parity;
           })(),
           bytes: bytesPerRow * height * thirtyFrameVideo.length,
         };
@@ -512,9 +534,12 @@ try {
     ]);
     assert.ok(Object.values(result.thirtyFrame.webgpu.fitCompositeReadbackMs)
       .every((milliseconds) => milliseconds > 0));
-    assert.ok(Number.isFinite(result.thirtyFrame.webgpu.fillParityMeanError));
-    assert.ok(result.thirtyFrame.webgpu.fillParityMeanError < 35,
-      `Fill pixel parity error too high: ${result.thirtyFrame.webgpu.fillParityMeanError}`);
+    assert.deepEqual(Object.keys(result.thirtyFrame.webgpu.fitParityMeanError).sort(), [
+      'contain', 'cover', 'fill', 'none', 'scaleDown',
+    ]);
+    assert.ok(Object.values(result.thirtyFrame.webgpu.fitParityMeanError)
+      .every((error) => Number.isFinite(error) && error < 35),
+      `Video fit pixel parity error too high: ${JSON.stringify(result.thirtyFrame.webgpu.fitParityMeanError)}`);
   }
   assert.equal(result.streamedVideo.count, 3);
   assert.equal(result.streamedVideo.returnValue, null);
