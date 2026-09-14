@@ -5622,6 +5622,47 @@ mod tests {
         let lighten_image = gpu.render_frame(&scene, &config).unwrap();
         assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
         assert_ne!(darken_image.get_pixel(8, 8), lighten_image.get_pixel(8, 8));
+
+        let SceneNode::Layer {
+            blend_mode,
+            mask,
+            filters,
+            ..
+        } = &mut scene.nodes[1]
+        else {
+            unreachable!("blend test scene lost its layer");
+        };
+        *blend_mode = crate::scene::BlendMode::Multiply;
+        *filters = vec![crate::scene::SceneFilter::Opacity { amount: 0.75 }];
+        *mask = Some(vec![SceneNode::Rect {
+            x: 2.0,
+            y: 2.0,
+            w: 12.0,
+            h: 12.0,
+            fill: Color::WHITE,
+            stroke: None,
+            stroke_width: 0.0,
+            corner_radius: 0.0,
+        }]);
+        assert!(gpu_supports_scene(&scene));
+        let gpu_masked = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_masked = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
+        for &(x, y) in &[(8, 8), (1, 1), (14, 14)] {
+            for channel in 0..4 {
+                assert!(
+                    (i16::from(gpu_masked.get_pixel(x, y)[channel])
+                        - i16::from(cpu_masked.get_pixel(x, y)[channel]))
+                    .abs()
+                        <= 5,
+                    "masked blend mismatch at ({x},{y}) channel {channel}: GPU {:?}, CPU {:?}",
+                    gpu_masked.get_pixel(x, y),
+                    cpu_masked.get_pixel(x, y)
+                );
+            }
+        }
     }
 
     #[test]
