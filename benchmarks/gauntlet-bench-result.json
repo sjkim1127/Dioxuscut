@@ -11,21 +11,21 @@
   "concurrency": 4,
   "platform": "darwin (arm64)",
   "cpu": "Apple M4 Pro",
-  "bundle_ms": 785.10675,
-  "browser_startup_ms": 510.506167,
+  "bundle_ms": 832.409667,
+  "browser_startup_ms": 2007.898458,
   "remotion": {
-    "render_ms": 60442.54075,
-    "fps": 14.890174847588616
+    "render_ms": 62751.813417,
+    "fps": 14.342215005314609
   },
   "dioxuscut": {
-    "process_ms": 51313.527708,
-    "render_ms": 51298.69,
-    "fps": 17.539234587835328
+    "process_ms": 49446.379875,
+    "render_ms": 49428.14,
+    "fps": 18.20153471852119
   },
   "ssim": {
     "frames": 900,
-    "min": 0.928941,
-    "mean": 0.9325405700000008
+    "min": 0.93921,
+    "mean": 0.9438664944444446
   },
-  "speedup": 1.1779065569989402
+  "speedup": 1.2690881228440993
 }

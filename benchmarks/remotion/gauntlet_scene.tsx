@@ -1,5 +1,5 @@
 import React from 'react';
-import {AbsoluteFill, Composition, registerRoot, useCurrentFrame, OffthreadVideo} from 'remotion';
+import {AbsoluteFill, Composition, registerRoot, useCurrentFrame, OffthreadVideo, Loop} from 'remotion';
 
 // Import assets
 // @ts-ignore
@@ -52,11 +52,12 @@ export const GauntletScene: React.FC = () => {
           boxSizing: 'border-box',
         }}
       >
-        <OffthreadVideo
-          src={testVideo}
-          loop
-          style={{width: '100%', height: '100%', objectFit: 'cover'}}
-        />
+        <Loop durationInFrames={60}>
+          <OffthreadVideo
+            src={testVideo}
+            style={{width: '100%', height: '100%', objectFit: 'cover'}}
+          />
+        </Loop>
       </div>
 
       {/* Right Video PiP */}
@@ -74,12 +75,13 @@ export const GauntletScene: React.FC = () => {
           opacity: 0.9,
         }}
       >
-        <OffthreadVideo
-          src={testVideo}
-          loop
-          style={{width: '100%', height: '100%', objectFit: 'cover'}}
-          playbackRate={1.5}
-        />
+        <Loop durationInFrames={60}>
+          <OffthreadVideo
+            src={testVideo}
+            style={{width: '100%', height: '100%', objectFit: 'cover'}}
+            playbackRate={1.5}
+          />
+        </Loop>
       </div>
 
       {/* 2. 20 High-Res Image Tiles with Floating Motion */}
