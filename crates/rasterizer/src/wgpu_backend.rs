@@ -3483,12 +3483,13 @@ fn compile_nodes(
                 font_size,
                 color,
                 font_sources,
-                ..
+                font_weight,
             } => {
                 if ![*x, *y, *font_size].iter().all(|v| v.is_finite()) || *font_size <= 0.0 {
                     return None;
                 }
-                let rendered = font.rasterize_text(content, *font_size, font_sources)?;
+                let rendered =
+                    font.rasterize_text(content, *font_size, *font_weight, font_sources)?;
                 let mut instance = GpuInstance::solid(*color, opacity, transform);
                 instance.kind_data[0] = 6;
                 instance.bounds = [
@@ -3498,7 +3499,13 @@ fn compile_nodes(
                     rendered.height as f32,
                 ];
                 instance.shape_bounds = instance.bounds;
-                let key = format!("{}:{}:{:?}", content, font_size.to_bits(), font_sources);
+                let key = format!(
+                    "{}:{}:{}:{:?}",
+                    content,
+                    font_size.to_bits(),
+                    font_weight,
+                    font_sources
+                );
                 let entry = font.text_atlas_entry(&key)?;
                 output.push(DrawCommand::Text { instance, entry });
             }

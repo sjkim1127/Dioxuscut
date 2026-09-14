@@ -267,6 +267,7 @@ pub struct FontCache {
 struct TextRasterKey {
     text: String,
     font_size_bits: u32,
+    font_weight: u16,
     sources: Vec<String>,
 }
 
@@ -278,6 +279,24 @@ pub(crate) struct LoadedFont {
 struct ShapedGlyph {
     font: Arc<LoadedFont>,
     glyph: ab_glyph::Glyph,
+}
+
+fn apply_synthetic_bold(pixels: &mut [u8], width: u32, height: u32, weight: u16) {
+    let radius = ((u32::from(weight).saturating_sub(400) + 199) / 200).clamp(1, 3);
+    let original = pixels.to_vec();
+    for y in 0..height {
+        for x in 0..width {
+            let mut coverage = 0u8;
+            for dy in 0..=radius {
+                for dx in 0..=radius {
+                    let sx = x.saturating_sub(dx);
+                    let sy = y.saturating_sub(dy);
+                    coverage = coverage.max(original[(sy * width + sx) as usize]);
+                }
+            }
+            pixels[(y * width + x) as usize] = coverage;
+        }
+    }
 }
 
 impl LoadedFont {
@@ -449,9 +468,26 @@ impl FontCache {
         font_size: f32,
         sources: &[String],
     ) -> Result<Option<RenderedText>, FontLoadError> {
+        self.rasterize_with_weight(text, font_size, 400, sources)
+    }
+
+    /// Rasterize text using a CSS-like numeric font weight.
+    ///
+    /// Font assets are not variable-font aware yet, so weights heavier than
+    /// regular use deterministic synthetic coverage expansion. Keeping the
+    /// weight in both caches is important: regular and bold text must never
+    /// alias the same atlas entry.
+    pub(crate) fn rasterize_with_weight(
+        &self,
+        text: &str,
+        font_size: f32,
+        font_weight: u16,
+        sources: &[String],
+    ) -> Result<Option<RenderedText>, FontLoadError> {
         let key = TextRasterKey {
             text: text.to_string(),
             font_size_bits: font_size.to_bits(),
+            font_weight,
             sources: sources.to_vec(),
         };
         if let Some(cached) = self
@@ -462,7 +498,10 @@ impl FontCache {
             .cloned()
         {
             let rendered = (*cached).clone();
-            let atlas_key = format!("{}:{}:{:?}", key.text, key.font_size_bits, key.sources);
+            let atlas_key = format!(
+                "{}:{}:{}:{:?}",
+                key.text, key.font_size_bits, key.font_weight, key.sources
+            );
             let mut atlas = self.atlas.lock().expect("text atlas lock poisoned");
             if atlas.entry(&atlas_key).is_none() {
                 let _ = atlas.insert(
@@ -475,9 +514,12 @@ impl FontCache {
             }
             return Ok(Some(rendered));
         }
-        let rendered = self.rasterize_uncached(text, font_size, sources)?;
+        let rendered = self.rasterize_uncached(text, font_size, font_weight, sources)?;
         if let Some(rendered) = rendered.as_ref() {
-            let atlas_key = format!("{}:{}:{:?}", key.text, key.font_size_bits, key.sources);
+            let atlas_key = format!(
+                "{}:{}:{}:{:?}",
+                key.text, key.font_size_bits, key.font_weight, key.sources
+            );
             let _ = self.atlas.lock().expect("text atlas lock poisoned").insert(
                 atlas_key,
                 &rendered.pixels,
@@ -497,6 +539,7 @@ impl FontCache {
         &self,
         text: &str,
         font_size: f32,
+        font_weight: u16,
         sources: &[String],
     ) -> Result<Option<RenderedText>, FontLoadError> {
         let fonts = self.font_chain(sources)?;
@@ -569,6 +612,10 @@ impl FontCache {
                     }
                 });
             }
+        }
+
+        if font_weight > 400 {
+            apply_synthetic_bold(&mut pixels, total_width, total_height, font_weight);
         }
 
         Ok(Some(RenderedText {
@@ -1701,6 +1748,31 @@ mod tests {
         assert_eq!(atlas.width, 2048);
         assert_eq!(atlas.height, 2048);
         assert!(atlas.pixels.iter().any(|&coverage| coverage > 0));
+    }
+
+    #[test]
+    fn synthetic_bold_is_cached_separately_and_adds_coverage() {
+        let cache = FontCache::bundled();
+        let regular = cache
+            .rasterize_with_weight("Weight", 28.0, 400, &[])
+            .unwrap()
+            .unwrap();
+        let bold = cache
+            .rasterize_with_weight("Weight", 28.0, 700, &[])
+            .unwrap()
+            .unwrap();
+        assert_ne!(regular.pixels, bold.pixels);
+        let regular_coverage: u32 = regular.pixels.iter().map(|pixel| u32::from(*pixel)).sum();
+        let bold_coverage: u32 = bold.pixels.iter().map(|pixel| u32::from(*pixel)).sum();
+        assert!(bold_coverage >= regular_coverage);
+        assert_eq!(
+            cache
+                .rasterized
+                .lock()
+                .expect("font raster cache lock poisoned")
+                .len(),
+            2
+        );
     }
 
     #[test]

@@ -102,10 +102,11 @@ impl TinySkiaBackend {
         &self,
         content: &str,
         font_size: f32,
+        font_weight: u16,
         font_sources: &[String],
     ) -> Option<crate::font::RenderedText> {
         self.font
-            .rasterize(content, font_size, font_sources)
+            .rasterize_with_weight(content, font_size, font_weight, font_sources)
             .ok()
             .flatten()
     }
@@ -756,7 +757,7 @@ fn render_node(
 
             if let Some(rendered) = resources
                 .font
-                .rasterize(content, *font_size, font_sources)
+                .rasterize_with_weight(content, *font_size, *font_weight, font_sources)
                 .map_err(|error| RasterError::FontAsset {
                     path: error.path,
                     reason: error.reason,
