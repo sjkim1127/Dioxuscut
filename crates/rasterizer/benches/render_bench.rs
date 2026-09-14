@@ -209,6 +209,16 @@ fn scene_text_heavy() -> Scene {
     Scene { nodes }
 }
 
+fn scene_text_variant(variant: u32) -> Scene {
+    let mut scene = scene_text_heavy();
+    for (index, node) in scene.nodes.iter_mut().enumerate() {
+        if let SceneNode::Text { content, .. } = node {
+            *content = format!("Atlas text {variant:04} {index:02} 한글 日本語 العربية 😀");
+        }
+    }
+    scene
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Bench groups
 // ─────────────────────────────────────────────────────────────────
@@ -673,6 +683,14 @@ fn bench_gpu_text_atlas(c: &mut Criterion) {
                     |_frame, _view, _width, _height| {},
                 )
                 .unwrap();
+        })
+    });
+    let mut variant = 0u32;
+    group.bench_function("80_text_nodes_dirty_rect_churn", |b| {
+        b.iter(|| {
+            variant = variant.wrapping_add(1);
+            let scene = scene_text_variant(variant);
+            backend.render_frame(&scene, &config).unwrap()
         })
     });
     eprintln!(
