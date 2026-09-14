@@ -1137,6 +1137,22 @@ pub fn default_render_control(request: &RenderRequest) -> dioxuscut_rasterizer::
     control
 }
 
+#[cfg(feature = "gpu")]
+fn report_gpu_fallback_diagnostics(rasterizer: &dioxuscut_rasterizer::WgpuBackend) {
+    let stats = rasterizer.render_stats();
+    if stats.cpu_fallback_frames > 0 {
+        tracing::warn!(
+            gpu_frames = stats.gpu_frames,
+            cpu_fallback_frames = stats.cpu_fallback_frames,
+            reason = rasterizer
+                .last_cpu_fallback_reason()
+                .as_deref()
+                .unwrap_or("unknown"),
+            "GPU render used CPU fallback"
+        );
+    }
+}
+
 /// Execute a render with caller-owned progress, cancellation, and timeout controls.
 pub async fn execute_render_command_with_control(
     request: &RenderRequest,
@@ -1474,6 +1490,7 @@ pub async fn execute_render_command_with_registry_and_control(
                             prepared.render(frame)
                         },
                     )?;
+                    report_gpu_fallback_diagnostics(&rasterizer);
                 } else {
                     let first_scene = std::sync::Arc::clone(&first_scene_cache);
                     let pipe_config = PipeConfig::new(
@@ -1510,6 +1527,7 @@ pub async fn execute_render_command_with_registry_and_control(
                         }
                         prepared.render(frame)
                     })?;
+                    report_gpu_fallback_diagnostics(&rasterizer);
                 }
             }
         }
