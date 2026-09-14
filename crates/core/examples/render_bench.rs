@@ -62,7 +62,8 @@ fn main() {
     let concurrency: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(4);
     let config = PipeConfig::new(1280, 720, 30.0, 180, &args[1])
         .with_concurrency(concurrency)
-        .with_quality(18, "fast");
+        .with_quality(18, "fast")
+        .with_control(dioxuscut_rasterizer::RenderControl::new().with_stderr_render_stats());
     let start = Instant::now();
     render_to_ffmpeg_pipe(&backend, &config, scene).unwrap();
     println!(

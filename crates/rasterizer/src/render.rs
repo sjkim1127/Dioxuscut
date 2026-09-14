@@ -158,12 +158,18 @@ pub struct EncodingProgress {
 }
 
 /// Backend-level counters reported after a render path has finished.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RenderDiagnostics {
     pub backend: &'static str,
     pub gpu_frames: u64,
     pub cpu_fallback_frames: u64,
     pub fallback_reason: Option<String>,
+    /// Wall-clock time for the complete render, including FFmpeg encoding.
+    pub elapsed_ms: f64,
+    pub encoded_frames: u32,
+    pub output_width: u32,
+    pub output_height: u32,
+    pub fps: f64,
 }
 
 #[derive(Clone, Default)]
@@ -275,6 +281,33 @@ impl RenderControl {
     ) -> Self {
         self.diagnostics = Some(Arc::new(callback));
         self
+    }
+
+    /// Print one machine-readable completion record from the render engine.
+    ///
+    /// The record covers the complete native pipeline, including frame
+    /// scheduling, RGBA delivery to FFmpeg, and encoder completion. This is
+    /// intentionally available through the engine control object so callers do
+    /// not need a benchmark harness to observe production render performance.
+    pub fn with_stderr_render_stats(self) -> Self {
+        self.with_diagnostics(|diagnostics| {
+            eprintln!(
+                "{{\"dioxuscut_render\":true,\"backend\":\"{}\",\"elapsed_ms\":{:.3},\"encoded_frames\":{},\"encoded_fps\":{:.3},\"resolution\":\"{}x{}\",\"gpu_frames\":{},\"cpu_fallback_frames\":{},\"fallback_reason\":{}}}",
+                diagnostics.backend,
+                diagnostics.elapsed_ms,
+                diagnostics.encoded_frames,
+                if diagnostics.elapsed_ms > 0.0 {
+                    diagnostics.encoded_frames as f64 * 1000.0 / diagnostics.elapsed_ms
+                } else {
+                    0.0
+                },
+                diagnostics.output_width,
+                diagnostics.output_height,
+                diagnostics.gpu_frames,
+                diagnostics.cpu_fallback_frames,
+                serde_json::to_string(&diagnostics.fallback_reason).unwrap_or_else(|_| "null".into()),
+            );
+        })
     }
 
     pub fn report_diagnostics(&self, diagnostics: RenderDiagnostics) {
@@ -887,6 +920,25 @@ where
             stderr.trim()
         )));
     }
+
+    let capabilities = backend.capabilities();
+    config.control.report_diagnostics(RenderDiagnostics {
+        backend: if capabilities.browser_runtime {
+            "browser"
+        } else if capabilities.gpu_accelerated {
+            "gpu"
+        } else {
+            "native"
+        },
+        gpu_frames: 0,
+        cpu_fallback_frames: 0,
+        fallback_reason: None,
+        elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
+        encoded_frames: total,
+        output_width,
+        output_height,
+        fps,
+    });
 
     Ok(())
 }
@@ -1540,6 +1592,11 @@ mod tests {
             gpu_frames: 9,
             cpu_fallback_frames: 1,
             fallback_reason: Some("unsupported node".into()),
+            elapsed_ms: 12.5,
+            encoded_frames: 10,
+            output_width: 1280,
+            output_height: 720,
+            fps: 30.0,
         });
         assert_eq!(
             received.lock().unwrap().as_slice(),
@@ -1548,6 +1605,11 @@ mod tests {
                 gpu_frames: 9,
                 cpu_fallback_frames: 1,
                 fallback_reason: Some("unsupported node".into()),
+                elapsed_ms: 12.5,
+                encoded_frames: 10,
+                output_width: 1280,
+                output_height: 720,
+                fps: 30.0,
             }]
         );
     }
