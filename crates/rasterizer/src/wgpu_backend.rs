@@ -7152,6 +7152,56 @@ mod tests {
         assert_eq!(gpu.gpu_texture_cache_misses(), 1);
         assert_eq!(gpu.gpu_texture_cache_hits(), 1);
         assert_eq!(gpu.gpu_frame_count.load(Ordering::Relaxed), 2);
+
+        let composited = Scene {
+            nodes: vec![
+                SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 16.0,
+                    h: 16.0,
+                    fill: Color::rgb(0, 0, 255),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                },
+                SceneNode::Layer {
+                    opacity: 0.5,
+                    blend_mode: crate::scene::BlendMode::Normal,
+                    clip: None,
+                    mask: None,
+                    mask_mode: crate::scene::MaskMode::Alpha,
+                    filters: Vec::new(),
+                    shadow: None,
+                    children: vec![SceneNode::Video {
+                        src: source.display().to_string(),
+                        time: 0.0,
+                        looped: false,
+                        x: 0.0,
+                        y: 0.0,
+                        w: 16.0,
+                        h: 16.0,
+                        fit: ImageFit::Fill,
+                        opacity: 1.0,
+                    }],
+                },
+            ],
+        };
+        let composited_gpu = gpu
+            .render_frame(&composited, &FrameConfig::new(16, 16, 0, 2.0))
+            .unwrap();
+        let composited_cpu = TinySkiaBackend::new()
+            .render_frame(&composited, &FrameConfig::new(16, 16, 0, 2.0))
+            .unwrap();
+        assert_eq!(
+            composited_gpu.get_pixel(8, 8),
+            composited_cpu.get_pixel(8, 8)
+        );
+        let composite_pixel = composited_gpu.get_pixel(8, 8);
+        assert!(composite_pixel[0] >= 127 && composite_pixel[0] <= 128);
+        assert_eq!(composite_pixel[1], 0);
+        assert_eq!(composite_pixel[2], 128);
+        assert_eq!(composite_pixel[3], 255);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
