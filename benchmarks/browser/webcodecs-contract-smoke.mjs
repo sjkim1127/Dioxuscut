@@ -207,7 +207,48 @@ try {
         const texture = device.createTexture({
           size: { width, height, depthOrArrayLayers: 1 },
           format: 'rgba8unorm',
-          usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC,
+          usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.TEXTURE_BINDING,
+        });
+        const output = device.createTexture({
+          size: { width, height, depthOrArrayLayers: 1 },
+          format: 'rgba8unorm',
+          usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+        });
+        const shader = device.createShaderModule({ code: `
+          @group(0) @binding(0) var video_texture: texture_2d<f32>;
+          @group(0) @binding(1) var video_sampler: sampler;
+          struct VertexOutput { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f32> };
+          @vertex fn vs(@builtin(vertex_index) index: u32) -> VertexOutput {
+            var positions = array<vec2<f32>, 3>(
+              vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));
+            var uvs = array<vec2<f32>, 3>(
+              vec2<f32>(0.0, 1.0), vec2<f32>(2.0, 1.0), vec2<f32>(0.0, -1.0));
+            var out: VertexOutput;
+            out.position = vec4<f32>(positions[index], 0.0, 1.0);
+            out.uv = uvs[index];
+            return out;
+          }
+          @fragment fn fs(in: VertexOutput) -> @location(0) vec4<f32> {
+            return textureSample(video_texture, video_sampler, in.uv);
+          }
+        ` });
+        const bindGroupLayout = device.createBindGroupLayout({ entries: [
+          { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: {} },
+          { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
+        ] });
+        const pipeline = device.createRenderPipeline({
+          layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
+          vertex: { module: shader, entryPoint: 'vs' },
+          fragment: { module: shader, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] },
+          primitive: { topology: 'triangle-list' },
+        });
+        const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+        const bindGroup = device.createBindGroup({
+          layout: bindGroupLayout,
+          entries: [
+            { binding: 0, resource: texture.createView() },
+            { binding: 1, resource: sampler },
+          ],
         });
         const bytesPerRow = width * 4;
         const readback = device.createBuffer({
@@ -233,12 +274,45 @@ try {
           readback.getMappedRange().slice(0, 4);
           readback.unmap();
         }
+        const compositeStarted = performance.now();
+        for (const frame of thirtyFrameVideo) {
+          device.queue.copyExternalImageToTexture(
+            { source: frame },
+            { texture },
+            { width, height, depthOrArrayLayers: 1 },
+          );
+          const encoder = device.createCommandEncoder();
+          const pass = encoder.beginRenderPass({
+            colorAttachments: [{
+              view: output.createView(),
+              clearValue: { r: 0, g: 0, b: 0, a: 1 },
+              loadOp: 'clear',
+              storeOp: 'store',
+            }],
+          });
+          pass.setPipeline(pipeline);
+          pass.setBindGroup(0, bindGroup);
+          pass.draw(3);
+          pass.end();
+          encoder.copyTextureToBuffer(
+            { texture: output },
+            { buffer: readback, bytesPerRow, rowsPerImage: height },
+            { width, height, depthOrArrayLayers: 1 },
+          );
+          device.queue.submit([encoder.finish()]);
+          await device.queue.onSubmittedWorkDone();
+          await readback.mapAsync(GPUMapMode.READ);
+          readback.getMappedRange().slice(0, 4);
+          readback.unmap();
+        }
         webgpuVideo = {
           frames: thirtyFrameVideo.length,
           uploadReadbackMs: performance.now() - gpuStarted,
+          uploadCompositeReadbackMs: performance.now() - compositeStarted,
           bytes: bytesPerRow * height * thirtyFrameVideo.length,
         };
         readback.destroy();
+        output.destroy();
         texture.destroy();
         device.destroy();
       }
