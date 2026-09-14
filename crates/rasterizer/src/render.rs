@@ -148,6 +148,15 @@ pub struct RenderProgress {
     pub frame: u32,
 }
 
+/// Progress reported after a rendered frame has been accepted by the encoder.
+/// This is intentionally separate from [`RenderProgress`]: rendering can run
+/// ahead of the ordered FFmpeg pipe when concurrency is greater than one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EncodingProgress {
+    pub encoded_frames: u32,
+    pub total_frames: u32,
+}
+
 /// Backend-level counters reported after a render path has finished.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderDiagnostics {
@@ -185,6 +194,7 @@ pub struct RenderControl {
     cancellation: RenderCancellationToken,
     timeout: Option<Duration>,
     progress: Option<Arc<dyn Fn(RenderProgress) + Send + Sync>>,
+    encoding_progress: Option<Arc<dyn Fn(EncodingProgress) + Send + Sync>>,
     diagnostics: Option<Arc<dyn Fn(RenderDiagnostics) + Send + Sync>>,
 }
 
@@ -195,6 +205,10 @@ impl fmt::Debug for RenderControl {
             .field("cancelled", &self.cancellation.is_cancelled())
             .field("timeout", &self.timeout)
             .field("has_progress_callback", &self.progress.is_some())
+            .field(
+                "has_encoding_progress_callback",
+                &self.encoding_progress.is_some(),
+            )
             .field("has_diagnostics_callback", &self.diagnostics.is_some())
             .finish()
     }
@@ -234,6 +248,27 @@ impl RenderControl {
         self
     }
 
+    pub fn with_encoding_progress(
+        mut self,
+        callback: impl Fn(EncodingProgress) + Send + Sync + 'static,
+    ) -> Self {
+        let callback = Arc::new(callback);
+        let previous = self.encoding_progress.take();
+        self.encoding_progress = Some(Arc::new(move |progress| {
+            if let Some(previous) = &previous {
+                previous(progress);
+            }
+            callback(progress);
+        }));
+        self
+    }
+
+    pub fn report_encoding_progress(&self, progress: EncodingProgress) {
+        if let Some(callback) = &self.encoding_progress {
+            callback(progress);
+        }
+    }
+
     pub fn with_diagnostics(
         mut self,
         callback: impl Fn(RenderDiagnostics) + Send + Sync + 'static,
@@ -254,7 +289,7 @@ impl RenderControl {
     /// throttled to every 30 frames and the final frame so CLI, Python, and
     /// Tauri callers get useful progress without flooding their terminals.
     pub fn with_stderr_progress(self) -> Self {
-        self.with_progress(|progress| {
+        let control = self.with_progress(|progress| {
             if progress.completed_frames == progress.total_frames
                 || progress.completed_frames % 30 == 0
             {
@@ -266,6 +301,20 @@ impl RenderControl {
                 eprintln!(
                     "[*] [Dioxuscut Progress] {} / {} frames ({percent:.1}%)...",
                     progress.completed_frames, progress.total_frames,
+                );
+            }
+        });
+        control.with_encoding_progress(|progress| {
+            if progress.encoded_frames == progress.total_frames || progress.encoded_frames % 30 == 0
+            {
+                let percent = if progress.total_frames == 0 {
+                    100.0
+                } else {
+                    progress.encoded_frames as f64 * 100.0 / progress.total_frames as f64
+                };
+                eprintln!(
+                    "[*] [Dioxuscut Encoding] {} / {} frames ({percent:.1}%)...",
+                    progress.encoded_frames, progress.total_frames,
                 );
             }
         })
@@ -757,6 +806,10 @@ where
                         frame: config.start_frame + frame,
                     });
                 }
+                config.control.report_encoding_progress(EncodingProgress {
+                    encoded_frames: frame + 1,
+                    total_frames: total,
+                });
                 Ok(())
             },
         )
@@ -1911,6 +1964,33 @@ mod tests {
         }
 
         assert_eq!(*calls.lock().unwrap(), vec!["first", "second"]);
+    }
+
+    #[test]
+    fn encoding_progress_callbacks_compose() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let first = Arc::clone(&calls);
+        let second = Arc::clone(&calls);
+        let control = RenderControl::new()
+            .with_encoding_progress(move |progress| {
+                first
+                    .lock()
+                    .unwrap()
+                    .push(("first", progress.encoded_frames));
+            })
+            .with_encoding_progress(move |progress| {
+                second
+                    .lock()
+                    .unwrap()
+                    .push(("second", progress.encoded_frames));
+            });
+
+        control.report_encoding_progress(EncodingProgress {
+            encoded_frames: 2,
+            total_frames: 3,
+        });
+
+        assert_eq!(*calls.lock().unwrap(), vec![("first", 2), ("second", 2)]);
     }
 
     #[test]
