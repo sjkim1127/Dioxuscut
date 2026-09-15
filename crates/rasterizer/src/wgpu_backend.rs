@@ -3011,6 +3011,12 @@ impl RasterizerBackend for WgpuBackend {
                 return Ok(image);
             }
         }
+        if config.width > self.ctx.max_texture_dimension_2d
+            || config.height > self.ctx.max_texture_dimension_2d
+        {
+            self.record_cpu_fallback("frame dimensions exceed the GPU texture limit");
+            return self.fallback.render_frame(scene, config);
+        }
         if let Some((base_scene, layer_scene, layer_opacity)) =
             trailing_overlap_texture_layer(scene)
         {
@@ -3061,13 +3067,6 @@ impl RasterizerBackend for WgpuBackend {
             self.record_cpu_fallback(reason);
             return self.fallback.render_frame(scene, config);
         };
-
-        if config.width > self.ctx.max_texture_dimension_2d
-            || config.height > self.ctx.max_texture_dimension_2d
-        {
-            self.record_cpu_fallback("frame dimensions exceed the GPU texture limit");
-            return self.fallback.render_frame(scene, config);
-        }
 
         let width = config.width;
         let height = config.height;
