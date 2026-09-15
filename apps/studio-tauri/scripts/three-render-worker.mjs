@@ -117,12 +117,37 @@ rl.on('line', (line) => { queue = queue.then(async () => {
     const rgbaTransport = request.transport === 'rgba';
     const rgbaFileTransport = request.transport === 'rgba_file';
     if (rgbaTransport || rgbaFileTransport) {
-      const directRgba = await page.evaluate(() => {
+      const directRgba = await page.evaluate(async () => {
         const canvas = [...document.querySelectorAll('canvas')]
           .sort((a, b) => (b.width * b.height) - (a.width * a.height))[0];
         if (!canvas || canvas.width <= 0 || canvas.height <= 0) return null;
         const width = canvas.width;
         const height = canvas.height;
+        if (typeof VideoFrame === 'function') {
+          const frame = new VideoFrame(canvas, { timestamp: 0 });
+          try {
+            const displayWidth = frame.displayWidth;
+            const displayHeight = frame.displayHeight;
+            const pixels = new Uint8Array(displayWidth * displayHeight * 4);
+            await frame.copyTo(pixels, {
+              format: 'RGBA',
+              layout: [{ offset: 0, stride: displayWidth * 4 }],
+            });
+            let binary = '';
+            const chunkSize = 0x8000;
+            for (let offset = 0; offset < pixels.length; offset += chunkSize) {
+              binary += String.fromCharCode(...pixels.subarray(offset, offset + chunkSize));
+            }
+            return {
+              width: displayWidth,
+              height: displayHeight,
+              rgba_base64: btoa(binary),
+              transport: 'webcodecs',
+            };
+          } finally {
+            frame.close();
+          }
+        }
         let pixels;
         const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
         if (gl) {
@@ -157,6 +182,7 @@ rl.on('line', (line) => { queue = queue.then(async () => {
           videoFrame = {width: directRgba.width, height: directRgba.height, file_path: path};
         }
         write({ type: 'frame', frame: request.frame, width: directRgba.width, height: directRgba.height,
+          transport: directRgba.transport ?? 'canvas-readback',
           video_frame: {
             ...videoFrame,
             timestamp_us: Math.round((request.frame / Math.max(request.fps ?? 30, 1)) * 1_000_000),
