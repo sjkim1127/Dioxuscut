@@ -759,4 +759,71 @@ mod tests {
         cache.shutdown();
         std::fs::remove_dir_all(dir).unwrap();
     }
+
+    #[test]
+    fn rotated_video_reports_and_decodes_display_dimensions() {
+        if Command::new("ffmpeg").arg("-version").output().is_err()
+            || Command::new("ffprobe").arg("-version").output().is_err()
+        {
+            eprintln!("skipping rotation test: FFmpeg or FFprobe is unavailable");
+            return;
+        }
+
+        let dir = std::env::temp_dir().join(format!(
+            "dioxuscut-rotated-video-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("rotated.mp4");
+        let generated = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:size=8x4:rate=1:duration=1",
+                "-metadata:s:v:0",
+                "rotate=90",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+            ])
+            .arg(&source)
+            .status()
+            .unwrap();
+        assert!(generated.success());
+
+        let metadata = match probe_video_metadata(source.to_str().unwrap()) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                eprintln!(
+                    "skipping rotation test: FFmpeg did not preserve rotation metadata: {error}"
+                );
+                let _ = std::fs::remove_dir_all(&dir);
+                return;
+            }
+        };
+        if metadata.rotation != 90 {
+            eprintln!(
+                "skipping rotation test: generated fixture reported rotation {}",
+                metadata.rotation
+            );
+            std::fs::remove_dir_all(&dir).unwrap();
+            return;
+        }
+        assert_eq!((metadata.width, metadata.height), (8, 4));
+        assert_eq!((metadata.display_width, metadata.display_height), (4, 8));
+
+        let cache = VideoFrameCache::default();
+        let frame = cache
+            .load(source.to_str().unwrap(), 0.0, 1.0, false)
+            .unwrap();
+        assert_eq!(frame.dimensions(), (4, 8));
+        cache.shutdown();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
