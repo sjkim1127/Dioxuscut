@@ -4232,18 +4232,40 @@ fn gpu_blend_children_supported(nodes: &[SceneNode]) -> bool {
     })
 }
 
-/// A single texture child can carry the layer opacity directly on its GPU
-/// instance without changing the result of sibling-group compositing. More
-/// than one texture child still needs an offscreen layer so overlap is
-/// composited before the layer opacity is applied.
+/// Texture children can carry the layer opacity directly on their GPU
+/// instances when their axis-aligned bounds do not overlap. In that case the
+/// group opacity cannot change a pixel more than once, so this is equivalent
+/// to compositing the group into an offscreen surface first. Overlapping or
+/// transformed children still require an offscreen layer.
 fn gpu_normal_texture_layer_supported(nodes: &[SceneNode]) -> bool {
-    if nodes.len() != 1 {
+    let mut bounds = Vec::with_capacity(nodes.len());
+    for node in nodes {
+        let rect = match node {
+            SceneNode::Image { x, y, w, h, .. }
+            | SceneNode::Video { x, y, w, h, .. }
+            | SceneNode::Lottie { x, y, w, h, .. } => [*x, *y, *w, *h],
+            _ => return false,
+        };
+        if !rect.iter().all(|value| value.is_finite()) || rect[2] <= 0.0 || rect[3] <= 0.0 {
+            return false;
+        }
+        bounds.push(rect);
+    }
+    if bounds.is_empty() {
         return false;
     }
-    matches!(
-        nodes.first(),
-        Some(SceneNode::Image { .. } | SceneNode::Video { .. } | SceneNode::Lottie { .. })
-    )
+    for (index, first) in bounds.iter().enumerate() {
+        for second in &bounds[index + 1..] {
+            let separated = first[0] + first[2] <= second[0]
+                || second[0] + second[2] <= first[0]
+                || first[1] + first[3] <= second[1]
+                || second[1] + second[3] <= first[1];
+            if !separated {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 fn gpu_vignette(filters: &[crate::scene::SceneFilter]) -> Option<[f32; 4]> {
@@ -5124,6 +5146,46 @@ mod support_tests {
                 .abs()
                 < f32::EPSILON
         );
+    }
+
+    #[test]
+    fn disjoint_texture_layers_compile_as_gpu_opacity_groups() {
+        let source = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+        let layer = |second_x| SceneNode::Layer {
+            opacity: 0.5,
+            blend_mode: crate::scene::BlendMode::Normal,
+            clip: None,
+            mask: None,
+            mask_mode: crate::scene::MaskMode::Alpha,
+            filters: Vec::new(),
+            shadow: None,
+            children: vec![
+                SceneNode::Image {
+                    src: source.into(),
+                    x: 0.0,
+                    y: 0.0,
+                    w: 10.0,
+                    h: 10.0,
+                    fit: ImageFit::Fill,
+                    opacity: 1.0,
+                },
+                SceneNode::Image {
+                    src: source.into(),
+                    x: second_x,
+                    y: 0.0,
+                    w: 10.0,
+                    h: 10.0,
+                    fit: ImageFit::Fill,
+                    opacity: 1.0,
+                },
+            ],
+        };
+        assert!(gpu_supports_scene(&Scene {
+            nodes: vec![layer(12.0)],
+        }));
+        assert!(!gpu_supports_scene(&Scene {
+            nodes: vec![layer(8.0)],
+        }));
     }
 
     #[test]
