@@ -3818,7 +3818,7 @@ fn compile_nodes(
                 )
                 && ((matches!(blend_mode, crate::scene::BlendMode::Normal)
                     && (*layer_opacity >= 1.0
-                        || gpu_normal_texture_layer_supported(children)
+                        || gpu_normal_texture_layer_supported(children, transform)
                         || gpu_blend_children_supported(children)))
                     || (!matches!(blend_mode, crate::scene::BlendMode::Normal)
                         && gpu_blend_layer_filters_supported(filters)
@@ -4237,19 +4237,73 @@ fn gpu_blend_children_supported(nodes: &[SceneNode]) -> bool {
 /// group opacity cannot change a pixel more than once, so this is equivalent
 /// to compositing the group into an offscreen surface first. Overlapping or
 /// transformed children still require an offscreen layer.
-fn gpu_normal_texture_layer_supported(nodes: &[SceneNode]) -> bool {
+fn gpu_normal_texture_layer_supported(nodes: &[SceneNode], parent: Transform) -> bool {
     let mut bounds = Vec::with_capacity(nodes.len());
-    for node in nodes {
-        let rect = match node {
-            SceneNode::Image { x, y, w, h, .. }
-            | SceneNode::Video { x, y, w, h, .. }
-            | SceneNode::Lottie { x, y, w, h, .. } => [*x, *y, *w, *h],
-            _ => return false,
-        };
-        if !rect.iter().all(|value| value.is_finite()) || rect[2] <= 0.0 || rect[3] <= 0.0 {
-            return false;
+    fn collect(nodes: &[SceneNode], transform: Transform, bounds: &mut Vec<[f32; 4]>) -> bool {
+        for node in nodes {
+            match node {
+                SceneNode::Image { x, y, w, h, .. }
+                | SceneNode::Video { x, y, w, h, .. }
+                | SceneNode::Lottie { x, y, w, h, .. } => {
+                    if ![*x, *y, *w, *h].iter().all(|value| value.is_finite())
+                        || *w <= 0.0
+                        || *h <= 0.0
+                    {
+                        return false;
+                    }
+                    let mut corners = [
+                        tiny_skia::Point::from_xy(*x, *y),
+                        tiny_skia::Point::from_xy(*x + *w, *y),
+                        tiny_skia::Point::from_xy(*x, *y + *h),
+                        tiny_skia::Point::from_xy(*x + *w, *y + *h),
+                    ];
+                    for corner in &mut corners {
+                        transform.map_point(corner);
+                    }
+                    let min_x = corners
+                        .iter()
+                        .map(|point| point.x)
+                        .fold(f32::INFINITY, f32::min);
+                    let min_y = corners
+                        .iter()
+                        .map(|point| point.y)
+                        .fold(f32::INFINITY, f32::min);
+                    let max_x = corners
+                        .iter()
+                        .map(|point| point.x)
+                        .fold(f32::NEG_INFINITY, f32::max);
+                    let max_y = corners
+                        .iter()
+                        .map(|point| point.y)
+                        .fold(f32::NEG_INFINITY, f32::max);
+                    if ![min_x, min_y, max_x, max_y]
+                        .iter()
+                        .all(|value| value.is_finite())
+                    {
+                        return false;
+                    }
+                    bounds.push([min_x, min_y, max_x - min_x, max_y - min_y]);
+                }
+                SceneNode::Group {
+                    transform: group_transform,
+                    children,
+                    ..
+                } => {
+                    if !collect(
+                        children,
+                        transform.post_concat(group_transform.to_tiny_skia()),
+                        bounds,
+                    ) {
+                        return false;
+                    }
+                }
+                _ => return false,
+            }
         }
-        bounds.push(rect);
+        true
+    }
+    if !collect(nodes, parent, &mut bounds) {
+        return false;
     }
     if bounds.is_empty() {
         return false;
@@ -5186,6 +5240,46 @@ mod support_tests {
         assert!(!gpu_supports_scene(&Scene {
             nodes: vec![layer(8.0)],
         }));
+        let transformed = Scene {
+            nodes: vec![SceneNode::Layer {
+                opacity: 0.5,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: None,
+                mask: None,
+                mask_mode: crate::scene::MaskMode::Alpha,
+                filters: Vec::new(),
+                shadow: None,
+                children: vec![
+                    SceneNode::Group {
+                        transform: crate::scene::Transform2D::translate(0.0, 0.0),
+                        opacity: 1.0,
+                        children: vec![SceneNode::Image {
+                            src: source.into(),
+                            x: 0.0,
+                            y: 0.0,
+                            w: 10.0,
+                            h: 10.0,
+                            fit: ImageFit::Fill,
+                            opacity: 1.0,
+                        }],
+                    },
+                    SceneNode::Group {
+                        transform: crate::scene::Transform2D::translate(12.0, 0.0).with_rotate(5.0),
+                        opacity: 1.0,
+                        children: vec![SceneNode::Image {
+                            src: source.into(),
+                            x: 0.0,
+                            y: 0.0,
+                            w: 10.0,
+                            h: 10.0,
+                            fit: ImageFit::Fill,
+                            opacity: 1.0,
+                        }],
+                    },
+                ],
+            }],
+        };
+        assert!(gpu_supports_scene(&transformed));
     }
 
     #[test]
