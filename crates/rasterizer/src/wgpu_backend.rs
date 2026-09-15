@@ -3788,8 +3788,10 @@ fn compile_nodes(
                         | crate::scene::BlendMode::Darken
                         | crate::scene::BlendMode::Lighten
                 )
-                && (matches!(blend_mode, crate::scene::BlendMode::Normal)
-                    || (gpu_blend_layer_filters_supported(filters)
+                && ((matches!(blend_mode, crate::scene::BlendMode::Normal)
+                    && (*layer_opacity >= 1.0 || gpu_blend_children_supported(children)))
+                    || (!matches!(blend_mode, crate::scene::BlendMode::Normal)
+                        && gpu_blend_layer_filters_supported(filters)
                         && gpu_blend_children_supported(children)))
                 && (*mask_mode == crate::scene::MaskMode::Alpha
                     || *mask_mode == crate::scene::MaskMode::Luminance)
