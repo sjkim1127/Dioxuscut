@@ -1547,6 +1547,7 @@ impl WgpuBackend {
         width: u32,
         height: u32,
         opacity: f32,
+        brightness: f32,
     ) -> Result<wgpu::SubmissionIndex, RasterError> {
         if !opacity.is_finite() || !(0.0..=1.0).contains(&opacity) {
             return Err(RasterError::Scene("invalid offscreen layer opacity".into()));
@@ -1567,6 +1568,7 @@ impl WgpuBackend {
         });
         let mut instance = GpuInstance::solid(Color::WHITE, opacity, Transform::identity());
         instance.kind_data[0] = 5;
+        instance.brightness[0] = brightness;
         instance.bounds = [0.0, 0.0, width as f32, height as f32];
         instance.shape_bounds = instance.bounds;
         instance.params = [0.0, 0.0, 1.0, 1.0];
@@ -1698,6 +1700,7 @@ impl WgpuBackend {
         base_scene: &Scene,
         layer_scene: &Scene,
         layer_opacity: f32,
+        layer_brightness: f32,
         config: &FrameConfig,
     ) -> Result<RgbaImage, RasterError> {
         let Some((base_commands, base_mask)) =
@@ -1776,6 +1779,7 @@ impl WgpuBackend {
             config.width,
             config.height,
             layer_opacity,
+            layer_brightness,
         )?;
         self.ctx
             .device
@@ -3011,12 +3015,16 @@ impl RasterizerBackend for WgpuBackend {
                 return Ok(image);
             }
         }
-        if let Some((base_scene, layer_scene, layer_opacity)) =
+        if let Some((base_scene, layer_scene, layer_opacity, layer_brightness)) =
             trailing_overlap_texture_layer(scene)
         {
-            if let Ok(image) =
-                self.render_trailing_overlap_layer(&base_scene, &layer_scene, layer_opacity, config)
-            {
+            if let Ok(image) = self.render_trailing_overlap_layer(
+                &base_scene,
+                &layer_scene,
+                layer_opacity,
+                layer_brightness,
+                config,
+            ) {
                 return Ok(image);
             }
         }
@@ -4694,7 +4702,7 @@ fn gpu_normal_texture_layer_supported(nodes: &[SceneNode], parent: Transform) ->
 /// Return the narrow overlap case that can be rendered with one offscreen
 /// texture and one explicit composite pass. More complex layer semantics stay
 /// on the CPU path until their ordering and masking rules are implemented.
-fn trailing_overlap_texture_layer(scene: &Scene) -> Option<(Scene, Scene, f32)> {
+fn trailing_overlap_texture_layer(scene: &Scene) -> Option<(Scene, Scene, f32, f32)> {
     let SceneNode::Layer {
         opacity,
         blend_mode: crate::scene::BlendMode::Normal,
@@ -4710,12 +4718,14 @@ fn trailing_overlap_texture_layer(scene: &Scene) -> Option<(Scene, Scene, f32)> 
     };
     if *opacity >= 1.0
         || !opacity.is_finite()
-        || !filters.iter().all(|filter| {
-            matches!(
-                filter,
-                crate::scene::SceneFilter::Opacity { amount }
-                    if amount.is_finite() && (0.0..=1.0).contains(amount)
-            )
+        || !filters.iter().all(|filter| match filter {
+            crate::scene::SceneFilter::Opacity { amount } => {
+                amount.is_finite() && (0.0..=1.0).contains(amount)
+            }
+            crate::scene::SceneFilter::Brightness { amount } => {
+                amount.is_finite() && (0.0..=10.0).contains(amount)
+            }
+            _ => false,
         })
         || children.len() < 2
         || gpu_normal_texture_layer_supported(children, Transform::identity())
@@ -4746,6 +4756,10 @@ fn trailing_overlap_texture_layer(scene: &Scene) -> Option<(Scene, Scene, f32)> 
                 crate::scene::SceneFilter::Opacity { amount } => opacity * amount,
                 _ => opacity,
             }),
+        filters.iter().fold(1.0, |brightness, filter| match filter {
+            crate::scene::SceneFilter::Brightness { amount } => brightness * amount,
+            _ => brightness,
+        }),
     ))
 }
 
@@ -5748,7 +5762,7 @@ mod support_tests {
         );
         let mut filtered = scene.clone();
         if let Some(SceneNode::Layer { filters, .. }) = filtered.nodes.first_mut() {
-            filters.push(crate::scene::SceneFilter::Brightness { amount: 0.8 });
+            filters.push(crate::scene::SceneFilter::Blur { sigma: 2.0 });
         }
         assert!(trailing_overlap_texture_layer(&filtered).is_none());
 
@@ -5759,7 +5773,7 @@ mod support_tests {
                 crate::scene::SceneFilter::Opacity { amount: 0.5 },
             ]);
         }
-        let (_, _, effective_opacity) = trailing_overlap_texture_layer(&opacity_chain)
+        let (_, _, effective_opacity, _) = trailing_overlap_texture_layer(&opacity_chain)
             .expect("opacity-only overlap layer should use GPU compositing");
         assert!((effective_opacity - 0.2).abs() < f32::EPSILON);
     }
@@ -5831,7 +5845,7 @@ mod tests {
         let _binding = backend.offscreen_layer_binding(&slot);
         let destination = GpuFrameSlot::new(&backend.ctx.device, 64, 32);
         let submission = backend
-            .composite_external_texture(&slot, &destination, 64, 32, 0.5)
+            .composite_external_texture(&slot, &destination, 64, 32, 0.5, 1.0)
             .expect("offscreen composite submission failed");
         backend
             .ctx
@@ -7093,7 +7107,7 @@ mod tests {
                     clip: None,
                     mask: None,
                     mask_mode: crate::scene::MaskMode::Alpha,
-                    filters: Vec::new(),
+                    filters: vec![crate::scene::SceneFilter::Brightness { amount: 0.8 }],
                     shadow: None,
                     children: vec![SceneNode::Lottie {
                         src: source.display().to_string(),
