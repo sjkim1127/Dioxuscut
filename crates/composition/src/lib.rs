@@ -17,6 +17,7 @@ pub use scene_emitter::{
     SceneTrailOpacity, SceneTransitionSeries, TransitionKind, TransitionTiming,
 };
 
+use dioxuscut_animation::{spring_with_options, SpringConfig, SpringOptions};
 use dioxuscut_rasterizer::{
     AudioTrack, BlendMode, Color, GradientStop, MaskMode, Scene, SceneFilter, SceneNode,
     SceneShadow, Transform2D,
@@ -198,6 +199,9 @@ pub fn built_in_registry() -> CompositionRegistry {
         .register(HelloWorldComposition)
         .expect("built-in composition IDs must be unique");
     registry
+        .register(SpringRectsComposition)
+        .expect("built-in composition IDs must be unique");
+    registry
         .register(ShapesAndFiltersComposition)
         .expect("built-in composition IDs must be unique");
     registry
@@ -223,6 +227,65 @@ pub fn built_in_registry() -> CompositionRegistry {
 
 /// Built-in native composition used by the quickstart and acceptance tests.
 pub struct HelloWorldComposition;
+
+/// Deterministic 2D parity fixture shared with the browser `SpringRects`
+/// composition. It deliberately uses only opaque rectangles so CPU, WGPU,
+/// and Chromium can be compared without font or antialiasing differences.
+pub struct SpringRectsComposition;
+
+impl NativeComposition for SpringRectsComposition {
+    fn id(&self) -> &str {
+        "SpringRects"
+    }
+
+    fn render(
+        &self,
+        frame: u32,
+        _props: &Value,
+        context: NativeCompositionContext,
+    ) -> Result<Scene, CompositionError> {
+        let scale_x = context.width as f32 / 1280.0;
+        let scale_y = context.height as f32 / 720.0;
+        let mut scene = Scene::new();
+        scene.push(SceneNode::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: context.width as f32,
+            h: context.height as f32,
+            fill: Color::rgb(15, 23, 42),
+            stroke: None,
+            stroke_width: 0.0,
+            corner_radius: 0.0,
+        });
+        for index in 0..32_u32 {
+            let progress = spring_with_options(
+                f64::from(frame % 60),
+                context.fps,
+                SpringConfig::default(),
+                SpringOptions {
+                    duration_in_frames: Some(24.0),
+                    delay: f64::from(index % 8) * 2.0,
+                    ..Default::default()
+                },
+            )
+            .map_err(|error| CompositionError::render(frame, error.to_string()))?;
+            let x =
+                (60.0 + f64::from(index % 8) * 145.0 + progress * 40.0).round() as f32 * scale_x;
+            let y = (80.0 + (index / 8) as f32 * 140.0) * scale_y;
+            scene.push(SceneNode::Rect {
+                x,
+                y,
+                w: 64.0 * scale_x,
+                h: 64.0 * scale_y,
+                fill: Color::rgb(80 + (index * 4) as u8, 160, 220),
+                stroke: None,
+                stroke_width: 0.0,
+                corner_radius: 0.0,
+            });
+        }
+        Ok(scene)
+    }
+}
 
 impl NativeComposition for HelloWorldComposition {
     fn id(&self) -> &str {
@@ -1539,6 +1602,7 @@ mod tests {
         let registry = built_in_registry();
         let expected_ids = [
             "HelloWorld",
+            "SpringRects",
             "ShapesAndFilters",
             "CyberpunkGrid",
             "ComplexGradients",
@@ -1562,6 +1626,14 @@ mod tests {
             duration_in_frames: 60,
         };
         let props = serde_json::json!({});
+
+        let spring_rects = registry.get("SpringRects").unwrap();
+        let spring_scene = spring_rects
+            .prepare(&props, context)
+            .unwrap()
+            .render(15)
+            .unwrap();
+        assert_eq!(spring_scene.nodes.len(), 33);
 
         // Test PodcastWaveform
         let podcast = registry.get("PodcastWaveform").unwrap();

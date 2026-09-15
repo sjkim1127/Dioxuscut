@@ -1947,6 +1947,7 @@ dependencies = [
 name = "dioxuscut-composition"
 version = "0.2.0-alpha.1"
 dependencies = [
+ "dioxuscut-animation",
  "dioxuscut-rasterizer",
  "serde",
  "serde_json",
