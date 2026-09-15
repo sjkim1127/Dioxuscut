@@ -4,7 +4,7 @@
     <canvas id="render-target" width="4" height="2"></canvas>
     <script>
       window.dioxuscut = {
-        renderFrame(request) {
+        async renderFrame(request) {
           const canvas = document.querySelector('#render-target');
           canvas.width = request.width;
           canvas.height = request.height;
@@ -20,6 +20,39 @@
             }
           }
           context.putImageData(image, 0, 0);
+          if (typeof VideoEncoder !== 'function' || typeof VideoDecoder !== 'function') return;
+          const encoded = [];
+          const encoder = new VideoEncoder({
+            output(chunk) {
+              const data = new Uint8Array(chunk.byteLength);
+              chunk.copyTo(data);
+              encoded.push({ data, timestamp: chunk.timestamp, type: chunk.type });
+            },
+            error(error) { throw error; },
+          });
+          encoder.configure({ codec: 'vp8', width: canvas.width, height: canvas.height, framerate: 30 });
+          const input = new VideoFrame(canvas, { timestamp: request.frame * 33333 });
+          encoder.encode(input, { keyFrame: true });
+          input.close();
+          await encoder.flush();
+          encoder.close();
+          await new Promise((resolve, reject) => {
+            const decoder = new VideoDecoder({
+              output(frame) {
+                try {
+                  context.drawImage(frame, 0, 0, canvas.width, canvas.height);
+                  frame.close();
+                  resolve();
+                } catch (error) { reject(error); }
+              },
+              error: reject,
+            });
+            decoder.configure({ codec: 'vp8', codedWidth: canvas.width, codedHeight: canvas.height });
+            for (const chunk of encoded) {
+              decoder.decode(new EncodedVideoChunk(chunk));
+            }
+            decoder.flush().then(() => decoder.close(), reject);
+          });
         },
         listCompositions() { return ['roundtrip']; },
       };
