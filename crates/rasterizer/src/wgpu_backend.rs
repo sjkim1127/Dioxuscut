@@ -5281,6 +5281,80 @@ mod tests {
     }
 
     #[test]
+    fn gpu_disjoint_texture_layer_matches_cpu_pixels() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping disjoint texture parity test");
+            return;
+        };
+        let red_path =
+            std::env::temp_dir().join(format!("dioxuscut-disjoint-red-{}.png", std::process::id()));
+        let blue_path = std::env::temp_dir().join(format!(
+            "dioxuscut-disjoint-blue-{}.png",
+            std::process::id()
+        ));
+        image::RgbaImage::from_pixel(2, 2, image::Rgba([240, 32, 24, 255]))
+            .save(&red_path)
+            .unwrap();
+        image::RgbaImage::from_pixel(2, 2, image::Rgba([24, 64, 240, 255]))
+            .save(&blue_path)
+            .unwrap();
+        let scene = Scene {
+            nodes: vec![
+                SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 64.0,
+                    h: 32.0,
+                    fill: Color::rgb(12, 18, 28),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                },
+                SceneNode::Layer {
+                    opacity: 0.5,
+                    blend_mode: crate::scene::BlendMode::Normal,
+                    clip: None,
+                    mask: None,
+                    mask_mode: crate::scene::MaskMode::Alpha,
+                    filters: Vec::new(),
+                    shadow: None,
+                    children: vec![
+                        SceneNode::Image {
+                            src: red_path.to_string_lossy().into_owned(),
+                            x: 4.0,
+                            y: 4.0,
+                            w: 20.0,
+                            h: 20.0,
+                            fit: ImageFit::Fill,
+                            opacity: 1.0,
+                        },
+                        SceneNode::Image {
+                            src: blue_path.to_string_lossy().into_owned(),
+                            x: 36.0,
+                            y: 4.0,
+                            w: 20.0,
+                            h: 20.0,
+                            fit: ImageFit::Fill,
+                            opacity: 1.0,
+                        },
+                    ],
+                },
+            ],
+        };
+        let config = FrameConfig::new(64, 32, 0, 30.0);
+        assert!(gpu_supports_scene(&scene));
+        let cpu = TinySkiaBackend::headless()
+            .render_frame(&scene, &config)
+            .expect("CPU render failed");
+        let gpu_image = gpu
+            .render_frame(&scene, &config)
+            .expect("GPU render failed");
+        assert_eq!(gpu_image.as_raw(), cpu.as_raw());
+        let _ = std::fs::remove_file(red_path);
+        let _ = std::fs::remove_file(blue_path);
+    }
+
+    #[test]
     fn render_stats_distinguish_gpu_and_cpu_fallback_frames() {
         let Ok(backend) = WgpuBackend::new() else {
             println!("GPU backend unavailable; skipping render stats test");
