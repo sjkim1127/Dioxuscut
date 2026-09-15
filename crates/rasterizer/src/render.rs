@@ -285,7 +285,14 @@ impl RenderControl {
         mut self,
         callback: impl Fn(RenderDiagnostics) + Send + Sync + 'static,
     ) -> Self {
-        self.diagnostics = Some(Arc::new(callback));
+        let callback = Arc::new(callback);
+        let previous = self.diagnostics.take();
+        self.diagnostics = Some(Arc::new(move |diagnostics| {
+            if let Some(previous) = &previous {
+                previous(diagnostics.clone());
+            }
+            callback(diagnostics);
+        }));
         self
     }
 
@@ -2186,6 +2193,46 @@ mod tests {
         control.report_encoding_progress(EncodingProgress {
             encoded_frames: 2,
             total_frames: 3,
+        });
+
+        assert_eq!(*calls.lock().unwrap(), vec![("first", 2), ("second", 2)]);
+    }
+
+    #[test]
+    fn diagnostics_callbacks_compose() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let first = Arc::clone(&calls);
+        let second = Arc::clone(&calls);
+        let control = RenderControl::new()
+            .with_diagnostics(move |diagnostics| {
+                first
+                    .lock()
+                    .unwrap()
+                    .push(("first", diagnostics.encoded_frames));
+            })
+            .with_diagnostics(move |diagnostics| {
+                second
+                    .lock()
+                    .unwrap()
+                    .push(("second", diagnostics.encoded_frames));
+            });
+
+        control.report_diagnostics(RenderDiagnostics {
+            backend: "test",
+            gpu_frames: 1,
+            cpu_fallback_frames: 0,
+            fallback_reason: None,
+            elapsed_ms: 2.0,
+            encoded_frames: 2,
+            output_width: 16,
+            output_height: 16,
+            fps: 30.0,
+            texture_cache_hits: 0,
+            texture_cache_misses: 0,
+            video_decode_ms: 0.0,
+            texture_upload_ms: 0.0,
+            gpu_submit_readback_ms: 0.0,
+            browser_frame_ms: 0.0,
         });
 
         assert_eq!(*calls.lock().unwrap(), vec![("first", 2), ("second", 2)]);
