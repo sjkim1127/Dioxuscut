@@ -7,7 +7,8 @@
     "build": "vite build",
     "tauri": "tauri",
     "worker": "node scripts/three-render-worker.mjs",
-    "test:webcodecs": "node scripts/test-webcodecs-roundtrip.mjs"
+    "test:webcodecs": "node scripts/test-webcodecs-roundtrip.mjs",
+    "test:webm-webcodecs": "node scripts/test-webm-webcodecs.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.5.0",
