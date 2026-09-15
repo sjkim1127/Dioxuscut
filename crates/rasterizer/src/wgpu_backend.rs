@@ -3817,7 +3817,9 @@ fn compile_nodes(
                         | crate::scene::BlendMode::Lighten
                 )
                 && ((matches!(blend_mode, crate::scene::BlendMode::Normal)
-                    && (*layer_opacity >= 1.0 || gpu_blend_children_supported(children)))
+                    && (*layer_opacity >= 1.0
+                        || gpu_normal_texture_layer_supported(children)
+                        || gpu_blend_children_supported(children)))
                     || (!matches!(blend_mode, crate::scene::BlendMode::Normal)
                         && gpu_blend_layer_filters_supported(filters)
                         && gpu_blend_children_supported(children)))
@@ -4228,6 +4230,20 @@ fn gpu_blend_children_supported(nodes: &[SceneNode]) -> bool {
         | SceneNode::AudioVisualizer { .. }
         | SceneNode::Shader { .. } => false,
     })
+}
+
+/// A single texture child can carry the layer opacity directly on its GPU
+/// instance without changing the result of sibling-group compositing. More
+/// than one texture child still needs an offscreen layer so overlap is
+/// composited before the layer opacity is applied.
+fn gpu_normal_texture_layer_supported(nodes: &[SceneNode]) -> bool {
+    if nodes.len() != 1 {
+        return false;
+    }
+    matches!(
+        nodes.first(),
+        Some(SceneNode::Image { .. } | SceneNode::Video { .. } | SceneNode::Lottie { .. })
+    )
 }
 
 fn gpu_vignette(filters: &[crate::scene::SceneFilter]) -> Option<[f32; 4]> {
