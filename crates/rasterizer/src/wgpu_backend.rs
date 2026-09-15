@@ -701,6 +701,10 @@ struct GpuContext {
     pipeline: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
     image_pipeline: wgpu::RenderPipeline,
+    /// Single-sample pipeline used when compositing a resolved offscreen
+    /// layer texture into the resolved frame target.
+    #[allow(dead_code)]
+    image_composite_pipeline: wgpu::RenderPipeline,
     path_mask_pipeline: wgpu::RenderPipeline,
     text_pipeline: wgpu::RenderPipeline,
     multiply_pipeline: wgpu::RenderPipeline,
@@ -1081,6 +1085,33 @@ impl GpuContext {
             cache: None,
         });
 
+        let image_composite_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("dioxuscut_image_composite_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_image",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: RENDER_FORMAT,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            });
+
         let path_mask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("dioxuscut_path_mask_pipeline"),
             layout: Some(&pipeline_layout),
@@ -1149,6 +1180,7 @@ impl GpuContext {
             pipeline,
             mesh_pipeline,
             image_pipeline,
+            image_composite_pipeline,
             path_mask_pipeline,
             text_pipeline,
             multiply_pipeline,
