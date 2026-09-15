@@ -53,6 +53,7 @@ pub struct BrowserFrameBackend {
     cache: FrameCacheManager,
     timing_cache: Mutex<HashMap<FrameCacheKey, WebFrameTiming>>,
     browser_frame_ns: AtomicU64,
+    webcodecs_frame_count: AtomicU64,
 }
 
 impl BrowserFrameBackend {
@@ -122,6 +123,7 @@ impl BrowserFrameBackend {
             cache: FrameCacheManager::default(),
             timing_cache: Mutex::new(HashMap::new()),
             browser_frame_ns: AtomicU64::new(0),
+            webcodecs_frame_count: AtomicU64::new(0),
         })
     }
 }
@@ -405,6 +407,11 @@ impl BrowserFrameBackend {
     pub fn cache_metrics(&self) -> CacheMetrics {
         self.cache.metrics()
     }
+
+    /// Number of uncached frames produced by the browser's WebCodecs path.
+    pub fn webcodecs_frame_count(&self) -> u64 {
+        self.webcodecs_frame_count.load(Ordering::Relaxed)
+    }
     pub fn render_web_frame(&self, request: &WebFrameRequest) -> Result<RgbaImage, RasterError> {
         Ok(self.render_web_frame_with_timing(request)?.0)
     }
@@ -577,6 +584,9 @@ impl BrowserFrameBackend {
                     }
                     Ok(image.into_rgba8())
                 } else if let Some(video_frame) = video_frame {
+                    if video_frame.transport.as_deref() == Some("webcodecs") {
+                        self.webcodecs_frame_count.fetch_add(1, Ordering::Relaxed);
+                    }
                     let expected =
                         video_frame
                             .expected_rgba_bytes()
@@ -843,7 +853,7 @@ mod tests {
         let script = root.join("worker.sh");
         fs::write(
             &script,
-            "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"ready\",\"protocol\":1}'\nread request\nprintf '%s\\n' '{\"type\":\"frame\",\"frame\":3,\"width\":1,\"height\":1,\"video_frame\":{\"width\":1,\"height\":1,\"timestamp_us\":1250000,\"rgba_base64\":\"AQIDBA==\"}}'\n",
+            "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"ready\",\"protocol\":1}'\nread request\nprintf '%s\\n' '{\"type\":\"frame\",\"frame\":3,\"width\":1,\"height\":1,\"video_frame\":{\"width\":1,\"height\":1,\"timestamp_us\":1250000,\"rgba_base64\":\"AQIDBA==\",\"transport\":\"webcodecs\"}}'\n",
         )
         .unwrap();
         let backend = BrowserFrameBackend::new("/bin/sh", &script, "http://unused").unwrap();
@@ -870,6 +880,7 @@ mod tests {
                 timeline_frame: 37.5,
             })
         );
+        assert_eq!(backend.webcodecs_frame_count(), 1);
         let raw_path = root.join("frame.rgba");
         fs::write(&raw_path, [5_u8, 6, 7, 8]).unwrap();
         let file_script = root.join("worker-file.sh");
@@ -894,6 +905,7 @@ mod tests {
         let (cached_image, cached_timing) = backend.render_web_frame_with_timing(&request).unwrap();
         assert_eq!(cached_image.as_raw(), image.as_raw());
         assert_eq!(cached_timing, timing);
+        assert_eq!(backend.webcodecs_frame_count(), 1);
         drop(backend);
         let _ = fs::remove_dir_all(root);
     }
