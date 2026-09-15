@@ -4710,7 +4710,13 @@ fn trailing_overlap_texture_layer(scene: &Scene) -> Option<(Scene, Scene, f32)> 
     };
     if *opacity >= 1.0
         || !opacity.is_finite()
-        || !filters.is_empty()
+        || !filters.iter().all(|filter| {
+            matches!(
+                filter,
+                crate::scene::SceneFilter::Opacity { amount }
+                    if amount.is_finite() && (0.0..=1.0).contains(amount)
+            )
+        })
         || children.len() < 2
         || gpu_normal_texture_layer_supported(children, Transform::identity())
     {
@@ -4734,7 +4740,12 @@ fn trailing_overlap_texture_layer(scene: &Scene) -> Option<(Scene, Scene, f32)> 
         Scene {
             nodes: children.clone(),
         },
-        *opacity,
+        filters
+            .iter()
+            .fold(*opacity, |opacity, filter| match filter {
+                crate::scene::SceneFilter::Opacity { amount } => opacity * amount,
+                _ => opacity,
+            }),
     ))
 }
 
@@ -5973,7 +5984,7 @@ mod tests {
                     clip: None,
                     mask: None,
                     mask_mode: crate::scene::MaskMode::Alpha,
-                    filters: Vec::new(),
+                    filters: vec![crate::scene::SceneFilter::Opacity { amount: 0.8 }],
                     shadow: None,
                     children: vec![
                         SceneNode::Group {
