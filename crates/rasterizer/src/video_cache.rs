@@ -784,7 +784,9 @@ mod tests {
                 "-f",
                 "lavfi",
                 "-i",
-                "color=c=red:size=8x4:rate=1:duration=1",
+                "color=c=black:size=8x4:rate=1:duration=1",
+                "-vf",
+                "drawbox=x=0:y=0:w=4:h=2:color=red:t=fill,drawbox=x=4:y=0:w=4:h=2:color=green:t=fill,drawbox=x=0:y=2:w=4:h=2:color=blue:t=fill,drawbox=x=4:y=2:w=4:h=2:color=white:t=fill",
                 "-metadata:s:v:0",
                 "rotate=90",
                 "-c:v",
@@ -823,6 +825,15 @@ mod tests {
             .load(source.to_str().unwrap(), 0.0, 1.0, false)
             .unwrap();
         assert_eq!(frame.dimensions(), (4, 8));
+        let corner = |x: u32, y: u32| frame.get_pixel(x, y).0;
+        let is_red = |pixel: [u8; 4]| pixel[0] > 150 && pixel[1] < 100 && pixel[2] < 100;
+        let is_green = |pixel: [u8; 4]| pixel[1] > 100 && pixel[0] < 100 && pixel[2] < 100;
+        let is_blue = |pixel: [u8; 4]| pixel[2] > 100 && pixel[0] < 100 && pixel[1] < 100;
+        let is_white = |pixel: [u8; 4]| pixel[0] > 150 && pixel[1] > 150 && pixel[2] > 150;
+        assert!(is_blue(corner(0, 0)));
+        assert!(is_red(corner(3, 0)));
+        assert!(is_white(corner(0, 7)));
+        assert!(is_green(corner(3, 7)));
         cache.shutdown();
         std::fs::remove_dir_all(dir).unwrap();
     }
