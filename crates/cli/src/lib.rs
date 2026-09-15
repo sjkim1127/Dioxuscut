@@ -1549,7 +1549,6 @@ pub async fn execute_render_command_with_registry_and_control(
                         }
                         prepared.render(frame)
                     })?;
-                    report_gpu_fallback_diagnostics(&rasterizer, &control);
                 }
             }
         }
