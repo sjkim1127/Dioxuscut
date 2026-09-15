@@ -57,6 +57,10 @@ pub struct WebVideoFrame {
     /// Optional process-local raw RGBA file used by the `rgba_file` transport.
     #[serde(default)]
     pub file_path: Option<String>,
+    /// Actual browser-side producer, for example `webcodecs` or
+    /// `canvas-readback`. Optional for compatibility with older workers.
+    #[serde(default)]
+    pub transport: Option<String>,
 }
 
 /// Timing metadata attached to a browser-produced WebCodecs frame.
@@ -266,10 +270,11 @@ mod tests {
 
     #[test]
     fn frame_response_accepts_webcodecs_video_frame_transport() {
-        let message = r#"{"type":"frame","frame":3,"width":1,"height":1,"video_frame":{"width":1,"height":1,"timestamp_us":1250000,"rgba_base64":"AQIDBA=="}}"#;
+        let message = r#"{"type":"frame","frame":3,"width":1,"height":1,"video_frame":{"width":1,"height":1,"timestamp_us":1250000,"rgba_base64":"AQIDBA==","transport":"webcodecs"}}"#;
         let parsed: WebWorkerMessage = serde_json::from_str(message).unwrap();
         assert!(matches!(parsed, WebWorkerMessage::Frame(response)
-            if response.video_frame.as_ref().is_some_and(|frame| frame.timestamp_us == 1_250_000)));
+            if response.video_frame.as_ref().is_some_and(|frame| frame.timestamp_us == 1_250_000
+                && frame.transport.as_deref() == Some("webcodecs"))));
     }
 
     #[test]
@@ -280,6 +285,7 @@ mod tests {
             timestamp_us: 1_250_000,
             rgba_base64: String::new(),
             file_path: None,
+            transport: None,
         };
         assert_eq!(frame.timestamp_seconds(), 1.25);
         assert_eq!(frame.timeline_frame(30.0), Some(37.5));
@@ -299,6 +305,7 @@ mod tests {
             timestamp_us: 1_000_000,
             rgba_base64: String::new(),
             file_path: None,
+            transport: None,
         };
         assert_eq!(frame.timeline_frame(0.0), None);
         assert_eq!(frame.timeline_frame(f64::NAN), None);
@@ -336,6 +343,7 @@ mod tests {
             timestamp_us: 0,
             rgba_base64: String::new(),
             file_path: None,
+            transport: None,
         };
         assert_eq!(frame.expected_rgba_bytes(), Some(512));
         let overflowing = WebVideoFrame {
@@ -344,6 +352,7 @@ mod tests {
             timestamp_us: 0,
             rgba_base64: String::new(),
             file_path: None,
+            transport: None,
         };
         assert_eq!(overflowing.expected_rgba_bytes(), None);
     }
