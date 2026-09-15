@@ -1271,6 +1271,7 @@ struct InFlight {
 }
 
 type GpuResourcePool = Mutex<HashMap<(u32, u32), std::sync::Arc<Mutex<GpuFrameResources>>>>;
+type GpuLayerResourcePool = Mutex<HashMap<(u32, u32), std::sync::Arc<Mutex<GpuFrameSlot>>>>;
 
 struct GpuImageResource {
     _texture: wgpu::Texture,
@@ -1328,6 +1329,10 @@ pub struct WgpuBackend {
     shader_runner: crate::shader::WgpuShaderRunner,
     /// Per-resolution GPU resource pool.  Key = `(width, height)`.
     frame_resources: GpuResourcePool,
+    /// Reusable single-target slots for layer offscreen passes. These are
+    /// intentionally separate from the frame readback ring so a future layer
+    /// pass cannot stall the ordered output slots.
+    layer_resources: GpuLayerResourcePool,
     fallback: TinySkiaBackend,
     /// Decoded image ownership for the future GPU texture cache. Keeping this
     /// separate from the CPU backend prevents a GPU render from depending on
@@ -1405,6 +1410,7 @@ impl WgpuBackend {
             ctx,
             shader_runner,
             frame_resources: Mutex::new(HashMap::new()),
+            layer_resources: Mutex::new(HashMap::new()),
             fallback: TinySkiaBackend::new(),
             image_cache: ImageCache::default(),
             video_cache: VideoFrameCache::default(),
@@ -1428,6 +1434,22 @@ impl WgpuBackend {
             cpu_fallback_frame_count: AtomicU64::new(0),
             last_cpu_fallback_reason: Mutex::new(None),
         })
+    }
+
+    fn offscreen_layer_slot(&self, width: u32, height: u32) -> Arc<Mutex<GpuFrameSlot>> {
+        let mut pool = self
+            .layer_resources
+            .lock()
+            .expect("GPU layer resource pool mutex poisoned");
+        pool.entry((width, height))
+            .or_insert_with(|| {
+                Arc::new(Mutex::new(GpuFrameSlot::new(
+                    &self.ctx.device,
+                    width,
+                    height,
+                )))
+            })
+            .clone()
     }
 
     /// Return the number of frames rendered by WGPU and by the CPU fallback.
@@ -2714,7 +2736,13 @@ impl RasterizerBackend for WgpuBackend {
         let gpu_scene = gpu_base_scene.as_ref().unwrap_or(scene);
         let Some((commands, path_mask)) = compile_scene_with_path_mask(gpu_scene, &self.fallback)
         else {
-            self.record_cpu_fallback(gpu_fallback_reason(gpu_scene));
+            let reason = gpu_fallback_reason(gpu_scene);
+            if reason == "overlapping texture layer requires offscreen compositing" {
+                // Allocate/reuse the layer target now so the eventual child
+                // pass does not compete with the ordered output ring.
+                let _ = self.offscreen_layer_slot(config.width, config.height);
+            }
+            self.record_cpu_fallback(reason);
             return self.fallback.render_frame(scene, config);
         };
 
@@ -5396,6 +5424,19 @@ mod tests {
                 println!("GPU backend unavailable (expected in headless CI): {e}");
             }
         }
+    }
+
+    #[test]
+    fn offscreen_layer_pool_reuses_resolution_slots() {
+        let Ok(backend) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping offscreen pool test");
+            return;
+        };
+        let first = backend.offscreen_layer_slot(64, 32);
+        let second = backend.offscreen_layer_slot(64, 32);
+        let different = backend.offscreen_layer_slot(32, 32);
+        assert!(Arc::ptr_eq(&first, &second));
+        assert!(!Arc::ptr_eq(&first, &different));
     }
 
     #[test]
