@@ -32,11 +32,10 @@
 //!
 //! # Colour Pipeline
 //!
-//! All internal rendering uses `Rgba8Unorm` (linear light, **not** sRGB) to
-//! avoid the double-gamma problem that would arise if the fragment shader
-//! received sRGB-pre-linearised colour values and wrote them into an sRGB
-//! framebuffer. Input `Color` values (u8 sRGB) are converted to linear float
-//! via [`srgb_to_linear`] before being stored in GPU uniforms.
+//! Analytic input colours are converted from the CPU's u8 sRGB representation
+//! to linear floats, then stored through an sRGB render target so the
+//! readback matches the CPU `RgbaImage` byte semantics. Texture samples are
+//! linearized in the image fragment path before filtering and compositing.
 //!
 //! # Resource Pool
 //!
@@ -69,7 +68,10 @@ use wgpu::util::DeviceExt;
 const MAX_GRADIENT_STOPS: usize = 16;
 const SAMPLE_COUNT: u32 = 4;
 /// Internal linear-light render format. **Not** sRGB to avoid double-gamma.
-const RENDER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+// Keep the render target in the same sRGB encoding as the CPU `Color` and
+// `RgbaImage` APIs. Analytic uniforms are linearized before shading and the
+// hardware performs the final linear -> sRGB conversion on store.
+const RENDER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const MESH_ATTRIBUTES: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![0 => Float32x2];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -314,6 +316,13 @@ fn linear_to_srgb(channel: f32) -> f32 {
     return 1.055 * pow(channel, 1.0 / 2.4) - 0.055;
 }
 
+fn srgb_to_linear(channel: f32) -> f32 {
+    if channel <= 0.04045 {
+        return channel / 12.92;
+    }
+    return pow((channel + 0.055) / 1.055, 2.4);
+}
+
 fn apply_color_filters(color: vec4<f32>, instance: InstanceData) -> vec4<f32> {
     if instance.brightness.x == 1.0
         && instance.grayscale.x == 0.0
@@ -529,7 +538,12 @@ fn fs_image(in: VertexOutput) -> @location(0) vec4<f32> {
     let local = (in.local_position - bounds.xy) / max(bounds.zw, vec2<f32>(0.000001));
     let uv = mix(instance.params.xy, instance.params.zw, clamp(local, vec2<f32>(0.0), vec2<f32>(1.0)));
     let sampled = textureSample(image_texture, image_sampler, uv);
-    let color = apply_color_filters(vec4<f32>(sampled.rgb, instance.color.a), instance);
+    let sampled_linear = vec3<f32>(
+        srgb_to_linear(sampled.r),
+        srgb_to_linear(sampled.g),
+        srgb_to_linear(sampled.b),
+    );
+    let color = apply_color_filters(vec4<f32>(sampled_linear, instance.color.a), instance);
     let vignette = vignette_factor(in.local_position, instance.shape_bounds, instance.vignette);
     let alpha = sampled.a * instance.color.a * instance.opacity.x * mask_coverage_value;
     return composited_color(color.rgb * vignette, alpha, instance);
@@ -4798,8 +4812,8 @@ fn transform_rows(transform: Transform) -> ([f32; 4], [f32; 4]) {
 
 /// Convert a u8 sRGB channel value (0–255) to linear float (0.0–1.0).
 ///
-/// The render target is `Rgba8Unorm` (linear), so fragment colour uniforms
-/// must be in linear light to avoid the double-gamma problem.
+/// Fragment colour uniforms are converted to linear light before writing to
+/// the sRGB render target, matching the CPU renderer's byte-level colour API.
 #[inline]
 fn srgb_to_linear(channel: u8) -> f32 {
     let s = channel as f32 / 255.0;
