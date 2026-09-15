@@ -1484,6 +1484,33 @@ impl WgpuBackend {
             .clone()
     }
 
+    /// Create the shared texture bind group used by image, video, text-atlas,
+    /// and future resolved offscreen-layer inputs. The texture view remains
+    /// owned by the caller, which is required for layer-slot ownership.
+    fn image_bind_group(
+        &self,
+        view: &wgpu::TextureView,
+        sampler: &wgpu::Sampler,
+        label: &'static str,
+    ) -> wgpu::BindGroup {
+        self.ctx
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label),
+                layout: &self.ctx.image_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(sampler),
+                    },
+                ],
+            })
+    }
+
     /// Return the number of frames rendered by WGPU and by the CPU fallback.
     pub fn render_stats(&self) -> WgpuRenderStats {
         WgpuRenderStats {
@@ -1605,20 +1632,7 @@ impl WgpuBackend {
         );
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("image_bg"),
-            layout: &self.ctx.image_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-            ],
-        });
+        let bind_group = self.image_bind_group(&view, &sampler, "image_bg");
         let resource = Arc::new(GpuImageResource {
             _texture: texture,
             _view: view,
@@ -1779,20 +1793,7 @@ impl WgpuBackend {
         );
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("text_atlas_bg"),
-            layout: &self.ctx.image_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-            ],
-        });
+        let bind_group = self.image_bind_group(&view, &sampler, "text_atlas_bg");
         let resource = Arc::new(GpuTextAtlasResource {
             _texture: texture,
             _view: view,
