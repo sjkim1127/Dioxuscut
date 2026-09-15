@@ -5751,6 +5751,17 @@ mod support_tests {
             filters.push(crate::scene::SceneFilter::Brightness { amount: 0.8 });
         }
         assert!(trailing_overlap_texture_layer(&filtered).is_none());
+
+        let mut opacity_chain = scene.clone();
+        if let Some(SceneNode::Layer { filters, .. }) = opacity_chain.nodes.first_mut() {
+            filters.extend([
+                crate::scene::SceneFilter::Opacity { amount: 0.8 },
+                crate::scene::SceneFilter::Opacity { amount: 0.5 },
+            ]);
+        }
+        let (_, _, effective_opacity) = trailing_overlap_texture_layer(&opacity_chain)
+            .expect("opacity-only overlap layer should use GPU compositing");
+        assert!((effective_opacity - 0.2).abs() < f32::EPSILON);
     }
 
     #[test]
