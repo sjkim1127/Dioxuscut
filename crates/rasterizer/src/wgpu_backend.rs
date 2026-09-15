@@ -1640,6 +1640,151 @@ impl WgpuBackend {
         Ok(self.ctx.queue.submit(Some(encoder.finish())))
     }
 
+    fn readback_resolved_slot(
+        &self,
+        slot: &GpuFrameSlot,
+        width: u32,
+        height: u32,
+    ) -> Result<RgbaImage, RasterError> {
+        let mut encoder = self
+            .ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("layer_composite_readback_encoder"),
+            });
+        encoder.copy_texture_to_buffer(
+            slot.texture.as_image_copy(),
+            wgpu::ImageCopyBuffer {
+                buffer: &slot.readback,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(slot.bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let submission = self.ctx.queue.submit(Some(encoder.finish()));
+        let (tx, rx) = std::sync::mpsc::channel();
+        slot.readback
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = tx.send(result);
+            });
+        let _ = submission;
+        self.ctx.device.poll(wgpu::Maintain::Wait);
+        rx.recv()
+            .map_err(|error| RasterError::Scene(format!("layer readback channel failed: {error}")))?
+            .map_err(|error| RasterError::Scene(format!("layer readback map failed: {error}")))?;
+        let slice = slot.readback.slice(..);
+        let mapped = slice.get_mapped_range();
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+        for row in 0..height {
+            let start = (row * slot.bytes_per_row) as usize;
+            pixels.extend_from_slice(&mapped[start..start + (width * 4) as usize]);
+        }
+        drop(mapped);
+        slot.readback.unmap();
+        RgbaImage::from_raw(width, height, pixels)
+            .ok_or_else(|| RasterError::ImageEncode("Invalid layer composite readback".into()))
+    }
+
+    fn render_trailing_overlap_layer(
+        &self,
+        base_scene: &Scene,
+        layer_scene: &Scene,
+        layer_opacity: f32,
+        config: &FrameConfig,
+    ) -> Result<RgbaImage, RasterError> {
+        let Some((base_commands, base_mask)) =
+            compile_scene_with_path_mask(base_scene, &self.fallback)
+        else {
+            return Err(RasterError::Scene(
+                "overlap base scene requires CPU fallback".into(),
+            ));
+        };
+        let Some((layer_commands, layer_mask)) =
+            compile_scene_with_path_mask(layer_scene, &self.fallback)
+        else {
+            return Err(RasterError::Scene(
+                "overlap layer requires CPU fallback".into(),
+            ));
+        };
+        if base_mask.is_some() || layer_mask.is_some() {
+            return Err(RasterError::Scene(
+                "overlap layer path masks are not yet supported".into(),
+            ));
+        }
+        let resource = {
+            let mut pool = self
+                .frame_resources
+                .lock()
+                .map_err(|_| RasterError::Init("GPU resource pool mutex poisoned".into()))?;
+            pool.entry((config.width, config.height))
+                .or_insert_with(|| {
+                    Arc::new(Mutex::new(GpuFrameResources::new(
+                        &self.ctx.device,
+                        config.width,
+                        config.height,
+                    )))
+                })
+                .clone()
+        };
+        let mut resources = resource
+            .lock()
+            .map_err(|_| RasterError::Init("GPU frame resource mutex poisoned".into()))?;
+        let output_index = resources.active_index % RING_BUFFER_SIZE;
+        resources.active_index = resources.active_index.wrapping_add(1);
+        let layer_slot = self.offscreen_layer_slot(config.width, config.height);
+        let layer_slot = layer_slot
+            .lock()
+            .map_err(|_| RasterError::Init("GPU layer resource mutex poisoned".into()))?;
+        let output_slot = &resources.slots[output_index];
+        let (base_submission, _) = self.submit_frame_to_slot(
+            &base_commands,
+            None,
+            config.width,
+            config.height,
+            config.fps,
+            output_slot,
+            None,
+            false,
+        )?;
+        let (layer_submission, _) = self.submit_frame_to_slot(
+            &layer_commands,
+            None,
+            config.width,
+            config.height,
+            config.fps,
+            &layer_slot,
+            None,
+            false,
+        )?;
+        self.ctx
+            .device
+            .poll(wgpu::Maintain::wait_for(base_submission));
+        self.ctx
+            .device
+            .poll(wgpu::Maintain::wait_for(layer_submission));
+        let composite_submission = self.composite_external_texture(
+            &layer_slot,
+            output_slot,
+            config.width,
+            config.height,
+            layer_opacity,
+        )?;
+        self.ctx
+            .device
+            .poll(wgpu::Maintain::wait_for(composite_submission));
+        let image = self.readback_resolved_slot(output_slot, config.width, config.height)?;
+        self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
+        Ok(image)
+    }
+
     /// Return the number of frames rendered by WGPU and by the CPU fallback.
     pub fn render_stats(&self) -> WgpuRenderStats {
         WgpuRenderStats {
@@ -2863,6 +3008,15 @@ impl RasterizerBackend for WgpuBackend {
                 .all(|node| matches!(node, SceneNode::Shader { .. }));
             if !trailing_shader_only {
                 let image = self.render_interleaved_shader_scene(scene, config)?;
+                return Ok(image);
+            }
+        }
+        if let Some((base_scene, layer_scene, layer_opacity)) =
+            trailing_overlap_texture_layer(scene)
+        {
+            if let Ok(image) =
+                self.render_trailing_overlap_layer(&base_scene, &layer_scene, layer_opacity, config)
+            {
                 return Ok(image);
             }
         }
@@ -4537,6 +4691,53 @@ fn gpu_normal_texture_layer_supported(nodes: &[SceneNode], parent: Transform) ->
     true
 }
 
+/// Return the narrow overlap case that can be rendered with one offscreen
+/// texture and one explicit composite pass. More complex layer semantics stay
+/// on the CPU path until their ordering and masking rules are implemented.
+fn trailing_overlap_texture_layer(scene: &Scene) -> Option<(Scene, Scene, f32)> {
+    let SceneNode::Layer {
+        opacity,
+        blend_mode: crate::scene::BlendMode::Normal,
+        clip: None,
+        mask: None,
+        filters,
+        shadow: None,
+        children,
+        ..
+    } = scene.nodes.last()?
+    else {
+        return None;
+    };
+    if *opacity >= 1.0
+        || !opacity.is_finite()
+        || !filters.is_empty()
+        || children.len() < 2
+        || gpu_normal_texture_layer_supported(children, Transform::identity())
+    {
+        return None;
+    }
+    if !children.iter().any(|node| {
+        matches!(
+            node,
+            SceneNode::Image { .. }
+                | SceneNode::Video { .. }
+                | SceneNode::Lottie { .. }
+                | SceneNode::Group { .. }
+        )
+    }) {
+        return None;
+    }
+    Some((
+        Scene {
+            nodes: scene.nodes[..scene.nodes.len() - 1].to_vec(),
+        },
+        Scene {
+            nodes: children.clone(),
+        },
+        *opacity,
+    ))
+}
+
 fn gpu_vignette(filters: &[crate::scene::SceneFilter]) -> Option<[f32; 4]> {
     let mut result = None;
     for filter in filters {
@@ -5729,6 +5930,88 @@ mod tests {
             .render_frame(&scene, &config)
             .expect("GPU render failed");
         assert_eq!(gpu_image.as_raw(), cpu.as_raw());
+        let _ = std::fs::remove_file(red_path);
+        let _ = std::fs::remove_file(blue_path);
+    }
+
+    #[test]
+    fn gpu_overlapping_texture_layer_composites_on_gpu() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping overlapping texture parity test");
+            return;
+        };
+        let red_path =
+            std::env::temp_dir().join(format!("dioxuscut-overlap-red-{}.png", std::process::id()));
+        let blue_path =
+            std::env::temp_dir().join(format!("dioxuscut-overlap-blue-{}.png", std::process::id()));
+        image::RgbaImage::from_pixel(2, 2, image::Rgba([240, 32, 24, 255]))
+            .save(&red_path)
+            .unwrap();
+        image::RgbaImage::from_pixel(2, 2, image::Rgba([24, 64, 240, 255]))
+            .save(&blue_path)
+            .unwrap();
+        let scene = Scene {
+            nodes: vec![
+                SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 64.0,
+                    h: 32.0,
+                    fill: Color::rgb(12, 18, 28),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                },
+                SceneNode::Layer {
+                    opacity: 0.5,
+                    blend_mode: crate::scene::BlendMode::Normal,
+                    clip: None,
+                    mask: None,
+                    mask_mode: crate::scene::MaskMode::Alpha,
+                    filters: Vec::new(),
+                    shadow: None,
+                    children: vec![
+                        SceneNode::Group {
+                            transform: crate::scene::Transform2D::translate(4.0, 4.0),
+                            opacity: 1.0,
+                            children: vec![SceneNode::Image {
+                                src: red_path.to_string_lossy().into_owned(),
+                                x: 0.0,
+                                y: 0.0,
+                                w: 20.0,
+                                h: 20.0,
+                                fit: ImageFit::Fill,
+                                opacity: 1.0,
+                            }],
+                        },
+                        SceneNode::Group {
+                            transform: crate::scene::Transform2D::translate(12.0, 4.0),
+                            opacity: 1.0,
+                            children: vec![SceneNode::Image {
+                                src: blue_path.to_string_lossy().into_owned(),
+                                x: 0.0,
+                                y: 0.0,
+                                w: 20.0,
+                                h: 20.0,
+                                fit: ImageFit::Fill,
+                                opacity: 1.0,
+                            }],
+                        },
+                    ],
+                },
+            ],
+        };
+        let config = FrameConfig::new(64, 32, 0, 30.0);
+        let cpu = TinySkiaBackend::headless()
+            .render_frame(&scene, &config)
+            .expect("CPU render failed");
+        let gpu_image = gpu
+            .render_frame(&scene, &config)
+            .expect("GPU render failed");
+        assert_eq!(gpu_image.as_raw(), cpu.as_raw());
+        let stats = gpu.render_stats();
+        assert_eq!(stats.gpu_frames, 1);
+        assert_eq!(stats.cpu_fallback_frames, 0);
         let _ = std::fs::remove_file(red_path);
         let _ = std::fs::remove_file(blue_path);
     }
