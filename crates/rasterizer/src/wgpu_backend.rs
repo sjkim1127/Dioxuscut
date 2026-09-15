@@ -462,11 +462,18 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let half = shape.zw * 0.5;
         let center = shape.xy + half;
         let corner_r = clamp(instance.params.x, 0.0, min(half.x, half.y));
+        let stroke_width = instance.params.y;
         let p = in.local_position - center;
         let q = abs(p) - half + vec2<f32>(corner_r);
         let distance = length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - corner_r;
-        coverage = 1.0 - smoothstep(-0.75, 0.75, distance);
-        let stroke_width = instance.params.y;
+        if corner_r <= 0.0 && stroke_width <= 0.0 {
+            // TinySkia's plain axis-aligned rectangles have hard edges. The
+            // analytic SDF smoothing is reserved for rounded/stroked shapes;
+            // applying it to opaque fills creates an avoidable CPU/GPU fringe.
+            coverage = 1.0;
+        } else {
+            coverage = 1.0 - smoothstep(-0.75, 0.75, distance);
+        }
         if stroke_width > 0.0 {
             let stroke_coverage = 1.0 - smoothstep(
                 stroke_width * 0.5 - 0.75,
@@ -5123,6 +5130,46 @@ mod tests {
                 println!("GPU backend unavailable (expected in headless CI): {e}");
             }
         }
+    }
+
+    #[test]
+    fn gpu_plain_rects_match_cpu_pixels_exactly() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping exact plain-rect parity test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![
+                SceneNode::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 128.0,
+                    h: 96.0,
+                    fill: Color::rgb(15, 23, 42),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                },
+                SceneNode::Rect {
+                    x: 16.0,
+                    y: 12.0,
+                    w: 48.0,
+                    h: 32.0,
+                    fill: Color::rgb(80, 160, 220),
+                    stroke: None,
+                    stroke_width: 0.0,
+                    corner_radius: 0.0,
+                },
+            ],
+        };
+        let config = FrameConfig::new(128, 96, 0, 30.0);
+        let cpu = TinySkiaBackend::headless()
+            .render_frame(&scene, &config)
+            .expect("CPU render failed");
+        let gpu = gpu
+            .render_frame(&scene, &config)
+            .expect("GPU render failed");
+        assert_eq!(gpu.as_raw(), cpu.as_raw());
     }
 
     #[test]
