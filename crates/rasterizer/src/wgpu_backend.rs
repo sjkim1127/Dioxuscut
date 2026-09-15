@@ -33,9 +33,9 @@
 //! # Colour Pipeline
 //!
 //! Analytic input colours are converted from the CPU's u8 sRGB representation
-//! to linear floats, then stored through an sRGB render target so the
-//! readback matches the CPU `RgbaImage` byte semantics. Texture samples are
-//! linearized in the image fragment path before filtering and compositing.
+//! to linear floats. The internal target is Unorm and shader output performs
+//! the explicit linear-to-sRGB conversion so fixed-function blending stays in
+//! the same byte-domain semantics as the CPU renderer.
 //!
 //! # Resource Pool
 //!
@@ -71,7 +71,7 @@ const SAMPLE_COUNT: u32 = 4;
 // Keep the render target in the same sRGB encoding as the CPU `Color` and
 // `RgbaImage` APIs. Analytic uniforms are linearized before shading and the
 // hardware performs the final linear -> sRGB conversion on store.
-const RENDER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+const RENDER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const MESH_ATTRIBUTES: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![0 => Float32x2];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -336,14 +336,15 @@ fn apply_color_filters(color: vec4<f32>, instance: InstanceData) -> vec4<f32> {
     {
         return color;
     }
-    var srgb = color.rgb;
-    if instance.kind_data.x != 5u {
-        srgb = vec3<f32>(
-            linear_to_srgb(clamp(color.r, 0.0, 1.0)),
-            linear_to_srgb(clamp(color.g, 0.0, 1.0)),
-            linear_to_srgb(clamp(color.b, 0.0, 1.0)),
-        );
-    }
+    // Filter math follows TinySkia's sRGB byte-domain behaviour. All regular
+    // GPU inputs (including image/video samples) arrive here in linear light,
+    // so convert them to sRGB for the filter operations and convert the
+    // result back before storing into the sRGB render target.
+    var srgb = vec3<f32>(
+        linear_to_srgb(clamp(color.r, 0.0, 1.0)),
+        linear_to_srgb(clamp(color.g, 0.0, 1.0)),
+        linear_to_srgb(clamp(color.b, 0.0, 1.0)),
+    );
     srgb = srgb * instance.brightness.x;
     let luma = dot(srgb, vec3<f32>(0.299, 0.587, 0.114));
     srgb = luma + (srgb - vec3<f32>(luma)) * instance.saturation.x;
@@ -403,7 +404,12 @@ fn apply_color_filters(color: vec4<f32>, instance: InstanceData) -> vec4<f32> {
         srgb = grading_luma + (srgb - vec3<f32>(grading_luma)) * instance.grading.y;
         srgb = mix(srgb, instance.grading_tint.rgb, clamp(instance.grading_tint.w, 0.0, 1.0));
     }
-    return vec4<f32>(clamp(srgb, vec3<f32>(0.0), vec3<f32>(1.0)), color.a);
+    let linear = vec3<f32>(
+        srgb_to_linear(clamp(srgb.r, 0.0, 1.0)),
+        srgb_to_linear(clamp(srgb.g, 0.0, 1.0)),
+        srgb_to_linear(clamp(srgb.b, 0.0, 1.0)),
+    );
+    return vec4<f32>(linear, color.a);
 }
 
 fn vignette_factor(position: vec2<f32>, bounds: vec4<f32>, settings: vec4<f32>) -> f32 {
@@ -424,6 +430,19 @@ fn vignette_factor(position: vec2<f32>, bounds: vec4<f32>, settings: vec4<f32>) 
     return 1.0 - darkness * smooth_factor;
 }
 
+fn apply_srgb_vignette(rgb: vec3<f32>, factor: f32) -> vec3<f32> {
+    let srgb = vec3<f32>(
+        linear_to_srgb(clamp(rgb.r, 0.0, 1.0)),
+        linear_to_srgb(clamp(rgb.g, 0.0, 1.0)),
+        linear_to_srgb(clamp(rgb.b, 0.0, 1.0)),
+    ) * factor;
+    return vec3<f32>(
+        srgb_to_linear(clamp(srgb.r, 0.0, 1.0)),
+        srgb_to_linear(clamp(srgb.g, 0.0, 1.0)),
+        srgb_to_linear(clamp(srgb.b, 0.0, 1.0)),
+    );
+}
+
 fn composited_color(rgb: vec3<f32>, alpha: f32, instance: InstanceData) -> vec4<f32> {
     var output_rgb = rgb;
     // A frame containing fixed-function blend operations must keep every
@@ -431,17 +450,26 @@ fn composited_color(rgb: vec3<f32>, alpha: f32, instance: InstanceData) -> vec4<
     // remains linear-light for compatibility with its existing path.
     // Image/video/Lottie samples are already stored as normalized sRGB
     // texels; analytic colors are stored in linear space.
+    var output_is_srgb = false;
     if (instance.kind_data.w & 2u) != 0u && instance.kind_data.x != 5u {
         output_rgb = vec3<f32>(
             linear_to_srgb(clamp(rgb.r, 0.0, 1.0)),
             linear_to_srgb(clamp(rgb.g, 0.0, 1.0)),
             linear_to_srgb(clamp(rgb.b, 0.0, 1.0)),
         );
+        output_is_srgb = true;
     }
     // Multiply/Screen/Darken/Lighten blend factors require premultiplied
     // source RGB.
     if instance.kind_data.z != 0u {
         return vec4<f32>(output_rgb * alpha, alpha);
+    }
+    if !output_is_srgb {
+        output_rgb = vec3<f32>(
+            linear_to_srgb(clamp(output_rgb.r, 0.0, 1.0)),
+            linear_to_srgb(clamp(output_rgb.g, 0.0, 1.0)),
+            linear_to_srgb(clamp(output_rgb.b, 0.0, 1.0)),
+        );
     }
     return vec4<f32>(output_rgb, alpha);
 }
@@ -518,7 +546,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     col = apply_color_filters(col, instance);
     let vignette = vignette_factor(in.local_position, instance.shape_bounds, instance.vignette);
     let alpha = col.a * instance.opacity.x * coverage * mask_coverage_value;
-    return composited_color(col.rgb * vignette, alpha, instance);
+    return composited_color(apply_srgb_vignette(col.rgb, vignette), alpha, instance);
 }
 
 @fragment
@@ -531,7 +559,7 @@ fn fs_solid(in: VertexOutput) -> @location(0) vec4<f32> {
     let color = apply_color_filters(instance.color, instance);
     let vignette = vignette_factor(in.local_position, instance.shape_bounds, instance.vignette);
     let alpha = color.a * instance.opacity.x * mask_coverage_value;
-    return composited_color(color.rgb * vignette, alpha, instance);
+    return composited_color(apply_srgb_vignette(color.rgb, vignette), alpha, instance);
 }
 
 @fragment
@@ -553,7 +581,7 @@ fn fs_image(in: VertexOutput) -> @location(0) vec4<f32> {
     let color = apply_color_filters(vec4<f32>(sampled_linear, instance.color.a), instance);
     let vignette = vignette_factor(in.local_position, instance.shape_bounds, instance.vignette);
     let alpha = sampled.a * instance.color.a * instance.opacity.x * mask_coverage_value;
-    return composited_color(color.rgb * vignette, alpha, instance);
+    return composited_color(apply_srgb_vignette(color.rgb, vignette), alpha, instance);
 }
 
 @fragment
@@ -570,7 +598,7 @@ fn fs_text(in: VertexOutput) -> @location(0) vec4<f32> {
     let color = apply_color_filters(instance.color, instance);
     let vignette = vignette_factor(in.local_position, instance.shape_bounds, instance.vignette);
     let alpha = coverage * color.a * instance.opacity.x * mask_coverage_value;
-    return composited_color(color.rgb * vignette, alpha, instance);
+    return composited_color(apply_srgb_vignette(color.rgb, vignette), alpha, instance);
 }
 
 fn mask_coverage(position: vec2<f32>, instance: InstanceData) -> f32 {
@@ -1503,7 +1531,7 @@ impl WgpuBackend {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
+            format: RENDER_FORMAT,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
