@@ -5735,6 +5735,11 @@ mod support_tests {
             gpu_fallback_reason(&scene),
             "overlapping texture layer requires offscreen compositing"
         );
+        let mut filtered = scene.clone();
+        if let Some(SceneNode::Layer { filters, .. }) = filtered.nodes.first_mut() {
+            filters.push(crate::scene::SceneFilter::Brightness { amount: 0.8 });
+        }
+        assert!(trailing_overlap_texture_layer(&filtered).is_none());
     }
 
     #[test]
