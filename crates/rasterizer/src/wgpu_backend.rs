@@ -2714,7 +2714,7 @@ impl RasterizerBackend for WgpuBackend {
         let gpu_scene = gpu_base_scene.as_ref().unwrap_or(scene);
         let Some((commands, path_mask)) = compile_scene_with_path_mask(gpu_scene, &self.fallback)
         else {
-            self.record_cpu_fallback("scene contains GPU-unsupported nodes or effects");
+            self.record_cpu_fallback(gpu_fallback_reason(gpu_scene));
             return self.fallback.render_frame(scene, config);
         };
 
@@ -3952,6 +3952,31 @@ fn compile_nodes(
         }
     }
     Some(())
+}
+
+fn gpu_fallback_reason(scene: &Scene) -> &'static str {
+    if scene.nodes.iter().any(|node| {
+        matches!(
+            node,
+            SceneNode::Layer {
+                opacity,
+                blend_mode: crate::scene::BlendMode::Normal,
+                children,
+                ..
+            } if *opacity < 1.0
+                && !gpu_normal_texture_layer_supported(children, Transform::identity())
+                && children.iter().any(|child| matches!(
+                    child,
+                    SceneNode::Image { .. }
+                        | SceneNode::Video { .. }
+                        | SceneNode::Lottie { .. }
+                        | SceneNode::Group { .. }
+                ))
+        )
+    }) {
+        return "overlapping texture layer requires offscreen compositing";
+    }
+    "scene contains GPU-unsupported nodes or effects"
 }
 
 fn gpu_layer_effects(
@@ -5280,6 +5305,45 @@ mod support_tests {
             }],
         };
         assert!(gpu_supports_scene(&transformed));
+    }
+
+    #[test]
+    fn overlapping_texture_layer_reports_offscreen_fallback_reason() {
+        let scene = Scene {
+            nodes: vec![SceneNode::Layer {
+                opacity: 0.5,
+                blend_mode: crate::scene::BlendMode::Normal,
+                clip: None,
+                mask: None,
+                mask_mode: crate::scene::MaskMode::Alpha,
+                filters: Vec::new(),
+                shadow: None,
+                children: vec![
+                    SceneNode::Image {
+                        src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=".into(),
+                        x: 0.0,
+                        y: 0.0,
+                        w: 10.0,
+                        h: 10.0,
+                        fit: ImageFit::Fill,
+                        opacity: 1.0,
+                    },
+                    SceneNode::Image {
+                        src: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=".into(),
+                        x: 8.0,
+                        y: 0.0,
+                        w: 10.0,
+                        h: 10.0,
+                        fit: ImageFit::Fill,
+                        opacity: 1.0,
+                    },
+                ],
+            }],
+        };
+        assert_eq!(
+            gpu_fallback_reason(&scene),
+            "overlapping texture layer requires offscreen compositing"
+        );
     }
 
     #[test]
