@@ -837,4 +837,57 @@ mod tests {
         cache.shutdown();
         std::fs::remove_dir_all(dir).unwrap();
     }
+
+    #[test]
+    fn variable_frame_rate_display_rotation_preserves_orientation() {
+        if Command::new("ffmpeg").arg("-version").output().is_err()
+            || Command::new("ffprobe").arg("-version").output().is_err()
+        {
+            eprintln!("skipping VFR rotation test: FFmpeg or FFprobe is unavailable");
+            return;
+        }
+
+        let dir = std::env::temp_dir().join(format!(
+            "dioxuscut-vfr-display-rotation-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("vfr-rotated.mp4");
+        let generated = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-loglevel",
+                "error",
+                "-display_rotation:v:0",
+                "90",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=16x8:rate=10:duration=1",
+                "-vf",
+                "select=eq(n\\,0)+eq(n\\,1)+eq(n\\,4)+eq(n\\,9)",
+                "-fps_mode",
+                "vfr",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+            ])
+            .arg(&source)
+            .status()
+            .unwrap();
+        assert!(generated.success());
+
+        let cache = VideoFrameCache::default();
+        for time in [0.0, 0.2, 0.4, 0.6, 0.8] {
+            let frame = cache
+                .load(source.to_str().unwrap(), time, 5.0, false)
+                .unwrap();
+            assert_eq!(frame.dimensions(), (8, 16));
+        }
+        assert_eq!(cache.spawn_count(), 1);
+        cache.shutdown();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
