@@ -8573,6 +8573,93 @@ mod tests {
     }
 
     #[test]
+    fn gpu_vfr_video_rotation_matches_cpu_across_timeline() {
+        if std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .is_err()
+        {
+            println!("FFmpeg unavailable; skipping GPU VFR rotation test");
+            return;
+        }
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping GPU VFR rotation test");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!(
+            "dioxuscut-wgpu-vfr-rotation-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("vfr-rotated.mp4");
+        let generated = std::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-loglevel",
+                "error",
+                "-display_rotation:v:0",
+                "90",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=16x8:rate=10:duration=1",
+                "-vf",
+                "select=eq(n\\,0)+eq(n\\,1)+eq(n\\,4)+eq(n\\,9)",
+                "-fps_mode",
+                "vfr",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+            ])
+            .arg(&source)
+            .status()
+            .unwrap();
+        assert!(generated.success());
+
+        let config = FrameConfig::new(8, 16, 0, 5.0);
+        for time in [0.0, 0.2, 0.4, 0.6, 0.8] {
+            let scene = Scene {
+                nodes: vec![SceneNode::Video {
+                    src: source.display().to_string(),
+                    time,
+                    looped: false,
+                    x: 0.0,
+                    y: 0.0,
+                    w: 8.0,
+                    h: 16.0,
+                    fit: ImageFit::Fill,
+                    opacity: 1.0,
+                }],
+            };
+            let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+            let cpu_image = TinySkiaBackend::new()
+                .render_frame(&scene, &config)
+                .unwrap();
+            assert_eq!(gpu_image.dimensions(), (8, 16));
+            let mean_error = gpu_image
+                .pixels()
+                .zip(cpu_image.pixels())
+                .map(|(gpu, cpu)| {
+                    (0..4)
+                        .map(|channel| {
+                            (i16::from(gpu[channel]) - i16::from(cpu[channel])).unsigned_abs()
+                                as u64
+                        })
+                        .sum::<u64>()
+                })
+                .sum::<u64>() as f64
+                / (8 * 16 * 4) as f64;
+            assert!(
+                mean_error < 20.0,
+                "GPU/CPU VFR rotation mean error at {time}s was {mean_error}"
+            );
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn gpu_renders_transformed_path_stroke_and_three_stop_gradient() {
         let Ok(gpu) = WgpuBackend::new() else {
             println!("GPU backend unavailable; skipping render comparison");
