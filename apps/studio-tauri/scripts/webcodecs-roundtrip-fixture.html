@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+  <body>
+    <canvas id="render-target" width="4" height="2"></canvas>
+    <script>
+      window.dioxuscut = {
+        renderFrame(request) {
+          const canvas = document.querySelector('#render-target');
+          canvas.width = request.width;
+          canvas.height = request.height;
+          const context = canvas.getContext('2d');
+          const image = context.createImageData(canvas.width, canvas.height);
+          for (let y = 0; y < canvas.height; y += 1) {
+            for (let x = 0; x < canvas.width; x += 1) {
+              const offset = (y * canvas.width + x) * 4;
+              image.data[offset] = x < canvas.width / 2 ? 255 : 0;
+              image.data[offset + 1] = y < canvas.height / 2 ? 255 : 0;
+              image.data[offset + 2] = request.frame & 1 ? 255 : 0;
+              image.data[offset + 3] = 255;
+            }
+          }
+          context.putImageData(image, 0, 0);
+        },
+        listCompositions() { return ['roundtrip']; },
+      };
+    </script>
+  </body>
+</html>
