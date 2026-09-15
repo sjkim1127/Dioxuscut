@@ -2859,7 +2859,7 @@ impl RasterizerBackend for WgpuBackend {
                 while let Some(prev) = in_flight.pop_front() {
                     self.drain_slot(prev, &res, width, height, &mut scratch, sink)?;
                 }
-                self.record_cpu_fallback("stream scene contains GPU-unsupported nodes or effects");
+                self.record_cpu_fallback(gpu_fallback_reason(&scene));
                 let img = self.fallback.render_frame(&scene, &cfg)?;
                 sink.consume(frame, img.as_raw())?;
                 continue;
