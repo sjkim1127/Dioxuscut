@@ -1235,7 +1235,9 @@ impl GpuFrameSlot {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: RENDER_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -1312,6 +1314,15 @@ struct GpuImageResource {
     bind_group: wgpu::BindGroup,
     width: u32,
     height: u32,
+}
+
+/// A bind group for a texture owned by another GPU resource, such as an
+/// offscreen layer slot. The sampler and bind group deliberately do not own
+/// the source texture; the caller must keep the slot alive for the draw.
+#[allow(dead_code)]
+struct GpuExternalTexture {
+    _sampler: wgpu::Sampler,
+    bind_group: wgpu::BindGroup,
 }
 
 struct GpuImageCacheState {
@@ -1509,6 +1520,20 @@ impl WgpuBackend {
                     },
                 ],
             })
+    }
+
+    #[allow(dead_code)]
+    fn offscreen_layer_binding(&self, slot: &GpuFrameSlot) -> GpuExternalTexture {
+        let sampler = self.ctx.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("offscreen_layer_sampler"),
+            ..Default::default()
+        });
+        let bind_group =
+            self.image_bind_group(&slot.texture_view, &sampler, "offscreen_layer_texture_bg");
+        GpuExternalTexture {
+            _sampler: sampler,
+            bind_group,
+        }
     }
 
     /// Return the number of frames rendered by WGPU and by the CPU fallback.
@@ -5470,6 +5495,8 @@ mod tests {
         let different = backend.offscreen_layer_slot(32, 32);
         assert!(Arc::ptr_eq(&first, &second));
         assert!(!Arc::ptr_eq(&first, &different));
+        let slot = first.lock().expect("offscreen layer slot lock poisoned");
+        let _binding = backend.offscreen_layer_binding(&slot);
     }
 
     #[test]
