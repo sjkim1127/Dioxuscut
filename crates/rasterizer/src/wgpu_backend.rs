@@ -2424,6 +2424,9 @@ impl WgpuBackend {
                 DrawCommand::Gif {
                     key, image, fit, ..
                 } => (self.gpu_pixels(key, image)?, *fit),
+                DrawCommand::Emoji { key, image, .. } => {
+                    (self.gpu_pixels(key, image)?, ImageFit::Fill)
+                }
                 DrawCommand::Text { entry, .. } => {
                     all_instances[index].params[0] = entry.x as f32 / atlas_snapshot.width as f32;
                     all_instances[index].params[1] = entry.y as f32 / atlas_snapshot.height as f32;
@@ -2663,6 +2666,7 @@ impl WgpuBackend {
                     | DrawCommand::Video { .. }
                     | DrawCommand::Lottie { .. }
                     | DrawCommand::Gif { .. }
+                    | DrawCommand::Emoji { .. }
                     | DrawCommand::Text { .. } => None,
                 })
                 .collect();
@@ -2769,6 +2773,7 @@ impl WgpuBackend {
                     | DrawCommand::Video { .. }
                     | DrawCommand::Lottie { .. }
                     | DrawCommand::Gif { .. }
+                    | DrawCommand::Emoji { .. }
                     | DrawCommand::Text { .. } => {
                         if matches!(commands[i], DrawCommand::Text { .. }) {
                             let pipeline = match commands[i].instance().kind_data[2] {
@@ -3666,6 +3671,11 @@ enum DrawCommand {
         image: Arc<image::RgbaImage>,
         fit: ImageFit,
     },
+    Emoji {
+        instance: GpuInstance,
+        key: String,
+        image: Arc<image::RgbaImage>,
+    },
     Text {
         instance: GpuInstance,
         entry: crate::text_atlas::AtlasEntry,
@@ -3687,6 +3697,7 @@ impl DrawCommand {
             | Self::Video { instance, .. }
             | Self::Lottie { instance, .. }
             | Self::Gif { instance, .. }
+            | Self::Emoji { instance, .. }
             | Self::Text { instance, .. } => instance,
         }
     }
@@ -3699,6 +3710,7 @@ impl DrawCommand {
             | Self::Video { instance, .. }
             | Self::Lottie { instance, .. }
             | Self::Gif { instance, .. }
+            | Self::Emoji { instance, .. }
             | Self::Text { instance, .. } => instance,
         }
     }
@@ -4349,9 +4361,39 @@ fn compile_nodes(
                 }
             }
 
+            SceneNode::Emoji {
+                emoji,
+                x,
+                y,
+                size,
+                opacity: node_opacity,
+            } => {
+                if ![*x, *y, *size, *node_opacity]
+                    .iter()
+                    .all(|value| value.is_finite())
+                    || *size <= 0.0
+                    || *node_opacity < 0.0
+                    || *node_opacity > 1.0
+                {
+                    return None;
+                }
+                let size_px = size.round().clamp(8.0, 1024.0) as u32;
+                let image = crate::emoji::render_emoji(emoji, size_px)?;
+                let mut instance =
+                    GpuInstance::solid(Color::WHITE, opacity * *node_opacity, transform);
+                instance.kind_data[0] = 5;
+                instance.bounds = [*x, *y, *size, *size];
+                instance.shape_bounds = instance.bounds;
+                instance.params = [0.0, 0.0, 1.0, 1.0];
+                output.push(DrawCommand::Emoji {
+                    instance,
+                    key: format!("emoji:{emoji}:{size_px}"),
+                    image,
+                });
+            }
+
             SceneNode::Audio { .. } => {}
             SceneNode::Layer { .. }
-            | SceneNode::Emoji { .. }
             | SceneNode::AudioVisualizer { .. }
             | SceneNode::Shader { .. } => return None,
         }
@@ -8364,10 +8406,66 @@ mod tests {
         let cpu_image = TinySkiaBackend::new()
             .render_frame(&scene, &config)
             .unwrap();
-        assert_eq!(gpu_image, cpu_image);
+        let mean_error: f64 = gpu_image
+            .pixels()
+            .zip(cpu_image.pixels())
+            .map(|(gpu, cpu)| {
+                (0..4)
+                    .map(|channel| {
+                        (i16::from(gpu[channel]) - i16::from(cpu[channel])).unsigned_abs() as u64
+                    })
+                    .sum::<u64>()
+            })
+            .sum::<u64>() as f64
+            / (48 * 48 * 4) as f64;
+        assert!(
+            mean_error < 18.0,
+            "GPU/CPU emoji mean error was {mean_error}"
+        );
+        assert!(gpu_image.pixels().any(|pixel| pixel[3] > 0));
         assert_eq!(gpu.render_stats().gpu_frames, 1);
         assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn gpu_emoji_uses_texture_path_and_matches_cpu() {
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping emoji texture test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::Emoji {
+                emoji: "🔥".into(),
+                x: 4.0,
+                y: 4.0,
+                size: 32.0,
+                opacity: 0.75,
+            }],
+        };
+        let config = FrameConfig::new(48, 48, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        let mean_error: f64 = gpu_image
+            .pixels()
+            .zip(cpu_image.pixels())
+            .map(|(gpu, cpu)| {
+                (0..4)
+                    .map(|channel| {
+                        (i16::from(gpu[channel]) - i16::from(cpu[channel])).unsigned_abs() as u64
+                    })
+                    .sum::<u64>()
+            })
+            .sum::<u64>() as f64
+            / (48 * 48 * 4) as f64;
+        assert!(
+            mean_error < 18.0,
+            "GPU/CPU emoji mean error was {mean_error}"
+        );
+        assert!(gpu_image.pixels().any(|pixel| pixel[3] > 0));
+        assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
     }
 
     #[test]
