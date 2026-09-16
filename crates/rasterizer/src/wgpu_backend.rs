@@ -9251,7 +9251,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(callback_dimensions, Some((16, 16)));
-        assert_eq!(gpu.video_timing_stats().gpu_submit_readback_ns, 0);
+        let timing = gpu.video_timing_stats();
+        assert_eq!(timing.gpu_submit_readback_ns, 0);
+        assert!(timing.gpu_submit_no_readback_ns > 0);
     }
 
     #[test]
@@ -9282,6 +9284,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(delivered, vec![(0, 16, 16), (1, 16, 16), (2, 16, 16)]);
-        assert_eq!(gpu.video_timing_stats().gpu_submit_readback_ns, 0);
+        let timing = gpu.video_timing_stats();
+        assert_eq!(timing.gpu_submit_readback_ns, 0);
+        assert!(timing.gpu_submit_no_readback_ns > 0);
     }
 }
