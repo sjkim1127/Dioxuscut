@@ -139,6 +139,24 @@ impl TinySkiaBackend {
             &crate::security::MediaSecurityPolicy::default(),
         )
     }
+
+    #[cfg(feature = "gpu")]
+    pub(crate) fn gif_frame(
+        &self,
+        src: &str,
+        time_secs: f64,
+        loop_behavior: crate::gif_cache::LoopBehavior,
+    ) -> Result<Option<Arc<image::RgbaImage>>, RasterError> {
+        let frames = self
+            .gifs
+            .load_frames_with_policy(src, &crate::security::MediaSecurityPolicy::default())?;
+        Ok(crate::gif_cache::GifFrameCache::frame_at_time_ms(
+            &frames,
+            time_secs * 1000.0,
+            loop_behavior,
+        )
+        .map(|image| Arc::new(image.clone())))
+    }
 }
 
 impl Default for TinySkiaBackend {

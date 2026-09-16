@@ -1351,6 +1351,19 @@ impl GpuImageCacheState {
             max_bytes: max_bytes.max(1),
         }
     }
+
+    fn trim_to_budget(&mut self) {
+        while self.bytes > self.max_bytes {
+            let Some(oldest) = self.lru.pop_front() else {
+                break;
+            };
+            if let Some(evicted) = self.images.remove(&oldest) {
+                self.bytes = self
+                    .bytes
+                    .saturating_sub(evicted.width as usize * evicted.height as usize * 4);
+            }
+        }
+    }
 }
 
 type GpuImageCache = Mutex<GpuImageCacheState>;
@@ -1847,10 +1860,14 @@ impl WgpuBackend {
     pub fn with_image_cache_bytes(mut self, max_bytes: usize) -> Self {
         self.fallback = self.fallback.with_image_cache_bytes(max_bytes);
         self.image_cache = ImageCache::with_max_bytes(max_bytes);
-        self.gpu_images
-            .lock()
-            .expect("GPU image cache lock poisoned")
-            .max_bytes = max_bytes.max(1);
+        {
+            let mut gpu_images = self
+                .gpu_images
+                .lock()
+                .expect("GPU image cache lock poisoned");
+            gpu_images.max_bytes = max_bytes.max(1);
+            gpu_images.trim_to_budget();
+        }
         self
     }
 
@@ -1935,16 +1952,7 @@ impl WgpuBackend {
         cache.images.insert(key.to_string(), Arc::clone(&resource));
         cache.lru.push_back(key.to_string());
         cache.bytes = cache.bytes.saturating_add(bytes);
-        while cache.bytes > cache.max_bytes {
-            let Some(oldest) = cache.lru.pop_front() else {
-                break;
-            };
-            if let Some(evicted) = cache.images.remove(&oldest) {
-                cache.bytes = cache
-                    .bytes
-                    .saturating_sub(evicted.width as usize * evicted.height as usize * 4);
-            }
-        }
+        cache.trim_to_budget();
         Ok(resource)
     }
 
@@ -2413,6 +2421,9 @@ impl WgpuBackend {
                 DrawCommand::Lottie { key, image, .. } => {
                     (self.gpu_pixels(key, image)?, ImageFit::Contain)
                 }
+                DrawCommand::Gif {
+                    key, image, fit, ..
+                } => (self.gpu_pixels(key, image)?, *fit),
                 DrawCommand::Text { entry, .. } => {
                     all_instances[index].params[0] = entry.x as f32 / atlas_snapshot.width as f32;
                     all_instances[index].params[1] = entry.y as f32 / atlas_snapshot.height as f32;
@@ -2651,6 +2662,7 @@ impl WgpuBackend {
                     | DrawCommand::Image { .. }
                     | DrawCommand::Video { .. }
                     | DrawCommand::Lottie { .. }
+                    | DrawCommand::Gif { .. }
                     | DrawCommand::Text { .. } => None,
                 })
                 .collect();
@@ -2756,6 +2768,7 @@ impl WgpuBackend {
                     DrawCommand::Image { .. }
                     | DrawCommand::Video { .. }
                     | DrawCommand::Lottie { .. }
+                    | DrawCommand::Gif { .. }
                     | DrawCommand::Text { .. } => {
                         if matches!(commands[i], DrawCommand::Text { .. }) {
                             let pipeline = match commands[i].instance().kind_data[2] {
@@ -3647,6 +3660,12 @@ enum DrawCommand {
         key: String,
         image: Arc<image::RgbaImage>,
     },
+    Gif {
+        instance: GpuInstance,
+        key: String,
+        image: Arc<image::RgbaImage>,
+        fit: ImageFit,
+    },
     Text {
         instance: GpuInstance,
         entry: crate::text_atlas::AtlasEntry,
@@ -3667,6 +3686,7 @@ impl DrawCommand {
             | Self::Image { instance, .. }
             | Self::Video { instance, .. }
             | Self::Lottie { instance, .. }
+            | Self::Gif { instance, .. }
             | Self::Text { instance, .. } => instance,
         }
     }
@@ -3678,6 +3698,7 @@ impl DrawCommand {
             | Self::Image { instance, .. }
             | Self::Video { instance, .. }
             | Self::Lottie { instance, .. }
+            | Self::Gif { instance, .. }
             | Self::Text { instance, .. } => instance,
         }
     }
@@ -3958,6 +3979,48 @@ fn compile_nodes(
                     instance,
                     key,
                     image,
+                });
+            }
+
+            SceneNode::Gif {
+                src,
+                time,
+                x,
+                y,
+                w,
+                h,
+                loop_behavior,
+                fit,
+                opacity: node_opacity,
+                ..
+            } => {
+                if ![*x, *y, *w, *h, *node_opacity]
+                    .iter()
+                    .all(|value| value.is_finite())
+                    || *w <= 0.0
+                    || *h <= 0.0
+                    || !time.is_finite()
+                    || *time < 0.0
+                    || *node_opacity < 0.0
+                    || *node_opacity > 1.0
+                {
+                    return None;
+                }
+                let Some(image) = font.gif_frame(src, *time, *loop_behavior).ok().flatten() else {
+                    return None;
+                };
+                let mut instance =
+                    GpuInstance::solid(Color::WHITE, opacity * *node_opacity, transform);
+                instance.kind_data[0] = 5;
+                instance.bounds = [*x, *y, *w, *h];
+                instance.shape_bounds = instance.bounds;
+                instance.params = [0.0, 0.0, 1.0, 1.0];
+                let key = format!("gif:{src}:{time:.9}");
+                output.push(DrawCommand::Gif {
+                    instance,
+                    key,
+                    image,
+                    fit: *fit,
                 });
             }
 
@@ -4287,8 +4350,7 @@ fn compile_nodes(
             }
 
             SceneNode::Audio { .. } => {}
-            SceneNode::Gif { .. }
-            | SceneNode::Layer { .. }
+            SceneNode::Layer { .. }
             | SceneNode::Emoji { .. }
             | SceneNode::AudioVisualizer { .. }
             | SceneNode::Shader { .. } => return None,
@@ -8228,6 +8290,84 @@ mod tests {
         gpu.render_frame(&scene, &FrameConfig::new(16, 8, 0, 30.0))
             .unwrap();
         assert_eq!(gpu.gpu_image_cache_len(), 1);
+    }
+
+    #[test]
+    fn gpu_image_cache_reconfiguration_trims_existing_textures() {
+        let Ok(gpu) = WgpuBackend::new().map(|backend| backend.with_image_cache_bytes(8)) else {
+            println!("GPU backend unavailable; skipping image cache reconfiguration test");
+            return;
+        };
+        let red = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221%22%20height%3D%221%22%3E%3Crect%20width%3D%221%22%20height%3D%221%22%20fill%3D%22%23f00%22%2F%3E%3C%2Fsvg%3E";
+        let blue = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221%22%20height%3D%221%22%3E%3Crect%20width%3D%221%22%20height%3D%221%22%20fill%3D%22%2300f%22%2F%3E%3C%2Fsvg%3E";
+        for src in [red, blue] {
+            let scene = Scene {
+                nodes: vec![SceneNode::Image {
+                    src: src.into(),
+                    x: 0.0,
+                    y: 0.0,
+                    w: 8.0,
+                    h: 8.0,
+                    fit: ImageFit::Fill,
+                    opacity: 1.0,
+                }],
+            };
+            gpu.render_frame(&scene, &FrameConfig::new(8, 8, 0, 30.0))
+                .unwrap();
+        }
+        assert_eq!(gpu.gpu_image_cache_len(), 2);
+        let gpu = gpu.with_image_cache_bytes(4);
+        assert_eq!(gpu.gpu_image_cache_len(), 1);
+    }
+
+    #[test]
+    fn gpu_gif_frame_uses_texture_path_and_matches_cpu() {
+        use image::codecs::gif::{GifEncoder, Repeat};
+        use image::{Delay, Frame, RgbaImage};
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping GIF texture test");
+            return;
+        };
+        let path =
+            std::env::temp_dir().join(format!("dioxuscut-wgpu-gif-{}.gif", std::process::id()));
+        let file = std::fs::File::create(&path).unwrap();
+        let mut encoder = GifEncoder::new(file);
+        encoder.set_repeat(Repeat::Infinite).unwrap();
+        for color in [[255, 0, 0, 255], [0, 0, 255, 255]] {
+            let image = RgbaImage::from_pixel(2, 2, image::Rgba(color));
+            encoder
+                .encode_frame(Frame::from_parts(
+                    image,
+                    0,
+                    0,
+                    Delay::from_numer_denom_ms(100, 1),
+                ))
+                .unwrap();
+        }
+        drop(encoder);
+        let scene = Scene {
+            nodes: vec![SceneNode::Gif {
+                src: path.to_string_lossy().into_owned(),
+                time: 0.0,
+                x: 0.0,
+                y: 0.0,
+                w: 16.0,
+                h: 16.0,
+                playback_rate: 1.0,
+                loop_behavior: crate::gif_cache::LoopBehavior::Loop,
+                fit: ImageFit::Fill,
+                opacity: 1.0,
+            }],
+        };
+        let config = FrameConfig::new(16, 16, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        assert_eq!(gpu_image, cpu_image);
+        assert_eq!(gpu.render_stats().gpu_frames, 1);
+        assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
