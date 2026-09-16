@@ -1415,6 +1415,7 @@ pub struct WgpuBackend {
     video_decode_ns: AtomicU64,
     texture_upload_ns: AtomicU64,
     gpu_submit_readback_ns: AtomicU64,
+    gpu_submit_no_readback_ns: AtomicU64,
     gpu_frame_count: AtomicU64,
     cpu_fallback_frame_count: AtomicU64,
     last_cpu_fallback_reason: Mutex<Option<String>>,
@@ -1436,13 +1437,16 @@ pub struct WgpuRenderStats {
 /// `video_decode_ns` covers decoded-frame cache lookup and FFmpeg decode;
 /// `texture_upload_ns` covers creation/upload of a cache-miss texture;
 /// `gpu_submit_readback_ns` covers command submission through CPU readback
-/// after texture preparation. These are cumulative counters, not per-frame
-/// averages, and therefore remain meaningful across streaming renders.
+/// after texture preparation. `gpu_submit_no_readback_ns` covers GPU-native
+/// submission and synchronization without a CPU readback. These are cumulative
+/// counters, not per-frame averages, and therefore remain meaningful across
+/// streaming renders.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct WgpuVideoTimingStats {
     pub video_decode_ns: u64,
     pub texture_upload_ns: u64,
     pub gpu_submit_readback_ns: u64,
+    pub gpu_submit_no_readback_ns: u64,
 }
 
 impl WgpuRenderStats {
@@ -1486,6 +1490,7 @@ impl WgpuBackend {
             video_decode_ns: AtomicU64::new(0),
             texture_upload_ns: AtomicU64::new(0),
             gpu_submit_readback_ns: AtomicU64::new(0),
+            gpu_submit_no_readback_ns: AtomicU64::new(0),
             gpu_frame_count: AtomicU64::new(0),
             cpu_fallback_frame_count: AtomicU64::new(0),
             last_cpu_fallback_reason: Mutex::new(None),
@@ -1853,6 +1858,7 @@ impl WgpuBackend {
             video_decode_ns: self.video_decode_ns.load(Ordering::Relaxed),
             texture_upload_ns: self.texture_upload_ns.load(Ordering::Relaxed),
             gpu_submit_readback_ns: self.gpu_submit_readback_ns.load(Ordering::Relaxed),
+            gpu_submit_no_readback_ns: self.gpu_submit_no_readback_ns.load(Ordering::Relaxed),
         }
     }
 
@@ -2236,9 +2242,14 @@ impl WgpuBackend {
             false,
         )?;
         debug_assert!(rx.is_none());
+        let gpu_submit_start = Instant::now();
         self.ctx
             .device
             .poll(wgpu::Maintain::wait_for(submission_index));
+        self.gpu_submit_no_readback_ns.fetch_add(
+            gpu_submit_start.elapsed().as_nanos() as u64,
+            Ordering::Relaxed,
+        );
         consume(
             &resources.slots[slot_idx].texture_view,
             config.width,
@@ -2324,9 +2335,14 @@ impl WgpuBackend {
                 let (queued_frame, queued_slot, submission_index) = in_flight
                     .pop_front()
                     .expect("GPU-native in-flight ring length was checked");
+                let gpu_submit_start = Instant::now();
                 self.ctx
                     .device
                     .poll(wgpu::Maintain::wait_for(submission_index));
+                self.gpu_submit_no_readback_ns.fetch_add(
+                    gpu_submit_start.elapsed().as_nanos() as u64,
+                    Ordering::Relaxed,
+                );
                 consume(
                     queued_frame,
                     &resources.slots[queued_slot].texture_view,
@@ -2351,9 +2367,14 @@ impl WgpuBackend {
             self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
         }
         while let Some((queued_frame, queued_slot, submission_index)) = in_flight.pop_front() {
+            let gpu_submit_start = Instant::now();
             self.ctx
                 .device
                 .poll(wgpu::Maintain::wait_for(submission_index));
+            self.gpu_submit_no_readback_ns.fetch_add(
+                gpu_submit_start.elapsed().as_nanos() as u64,
+                Ordering::Relaxed,
+            );
             consume(
                 queued_frame,
                 &resources.slots[queued_slot].texture_view,
