@@ -157,6 +157,46 @@ impl TinySkiaBackend {
         )
         .map(|image| Arc::new(image.clone())))
     }
+
+    #[cfg(feature = "gpu")]
+    pub(crate) fn audio_visualizer_frame(
+        &self,
+        src: &str,
+        width: u32,
+        height: u32,
+        color: Color,
+        style: &crate::scene::VisualizerStyle,
+        time: f64,
+    ) -> Result<Arc<image::RgbaImage>, RasterError> {
+        let mut pixmap = Pixmap::new(width.max(1), height.max(1))
+            .ok_or_else(|| RasterError::Init("invalid audio visualizer dimensions".into()))?;
+        let resources = RenderResources {
+            font: &self.font,
+            images: &self.images,
+            videos: &self.videos,
+            gifs: &self.gifs,
+            lotties: &self.lotties,
+            audios: &self.audios,
+            sampling_fps: 30.0,
+            security: &self.security,
+        };
+        render_audio_visualizer(
+            &mut pixmap,
+            &resources,
+            src,
+            0.0,
+            0.0,
+            width.max(1) as f32,
+            height.max(1) as f32,
+            color,
+            style,
+            time,
+            Transform::identity(),
+        )?;
+        let image = RgbaImage::from_raw(width.max(1), height.max(1), pixmap.take())
+            .ok_or_else(|| RasterError::ImageEncode("invalid visualizer pixels".into()))?;
+        Ok(Arc::new(image))
+    }
 }
 
 impl Default for TinySkiaBackend {

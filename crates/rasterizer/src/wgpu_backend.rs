@@ -2427,6 +2427,9 @@ impl WgpuBackend {
                 DrawCommand::Emoji { key, image, .. } => {
                     (self.gpu_pixels(key, image)?, ImageFit::Fill)
                 }
+                DrawCommand::AudioVisualizer { key, image, .. } => {
+                    (self.gpu_pixels(key, image)?, ImageFit::Fill)
+                }
                 DrawCommand::Text { entry, .. } => {
                     all_instances[index].params[0] = entry.x as f32 / atlas_snapshot.width as f32;
                     all_instances[index].params[1] = entry.y as f32 / atlas_snapshot.height as f32;
@@ -2667,6 +2670,7 @@ impl WgpuBackend {
                     | DrawCommand::Lottie { .. }
                     | DrawCommand::Gif { .. }
                     | DrawCommand::Emoji { .. }
+                    | DrawCommand::AudioVisualizer { .. }
                     | DrawCommand::Text { .. } => None,
                 })
                 .collect();
@@ -2774,6 +2778,7 @@ impl WgpuBackend {
                     | DrawCommand::Lottie { .. }
                     | DrawCommand::Gif { .. }
                     | DrawCommand::Emoji { .. }
+                    | DrawCommand::AudioVisualizer { .. }
                     | DrawCommand::Text { .. } => {
                         if matches!(commands[i], DrawCommand::Text { .. }) {
                             let pipeline = match commands[i].instance().kind_data[2] {
@@ -3676,6 +3681,11 @@ enum DrawCommand {
         key: String,
         image: Arc<image::RgbaImage>,
     },
+    AudioVisualizer {
+        instance: GpuInstance,
+        key: String,
+        image: Arc<image::RgbaImage>,
+    },
     Text {
         instance: GpuInstance,
         entry: crate::text_atlas::AtlasEntry,
@@ -3698,6 +3708,7 @@ impl DrawCommand {
             | Self::Lottie { instance, .. }
             | Self::Gif { instance, .. }
             | Self::Emoji { instance, .. }
+            | Self::AudioVisualizer { instance, .. }
             | Self::Text { instance, .. } => instance,
         }
     }
@@ -3711,6 +3722,7 @@ impl DrawCommand {
             | Self::Lottie { instance, .. }
             | Self::Gif { instance, .. }
             | Self::Emoji { instance, .. }
+            | Self::AudioVisualizer { instance, .. }
             | Self::Text { instance, .. } => instance,
         }
     }
@@ -4392,10 +4404,49 @@ fn compile_nodes(
                 });
             }
 
+            SceneNode::AudioVisualizer {
+                src,
+                x,
+                y,
+                width,
+                height,
+                color,
+                style,
+                time,
+                opacity: node_opacity,
+            } => {
+                if ![*x, *y, *width, *height, *node_opacity]
+                    .iter()
+                    .all(|value| value.is_finite())
+                    || *width <= 0.0
+                    || *height <= 0.0
+                    || !time.is_finite()
+                    || *time < 0.0
+                    || *node_opacity < 0.0
+                    || *node_opacity > 1.0
+                {
+                    return None;
+                }
+                let target_w = width.round().max(1.0) as u32;
+                let target_h = height.round().max(1.0) as u32;
+                let image = font
+                    .audio_visualizer_frame(src, target_w, target_h, *color, style, *time)
+                    .ok()?;
+                let mut instance =
+                    GpuInstance::solid(Color::WHITE, opacity * *node_opacity, transform);
+                instance.kind_data[0] = 5;
+                instance.bounds = [*x, *y, *width, *height];
+                instance.shape_bounds = instance.bounds;
+                instance.params = [0.0, 0.0, 1.0, 1.0];
+                output.push(DrawCommand::AudioVisualizer {
+                    instance,
+                    key: format!("audio-visualizer:{src}:{time:.9}:{target_w}x{target_h}"),
+                    image,
+                });
+            }
+
             SceneNode::Audio { .. } => {}
-            SceneNode::Layer { .. }
-            | SceneNode::AudioVisualizer { .. }
-            | SceneNode::Shader { .. } => return None,
+            SceneNode::Layer { .. } | SceneNode::Shader { .. } => return None,
         }
     }
     Some(())
@@ -8460,6 +8511,55 @@ mod tests {
         assert!(
             mean_error < 18.0,
             "GPU/CPU emoji mean error was {mean_error}"
+        );
+        assert!(gpu_image.pixels().any(|pixel| pixel[3] > 0));
+        assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
+    }
+
+    #[test]
+    fn gpu_audio_visualizer_uses_texture_path() {
+        let audio = "/System/Library/Sounds/Glass.aiff";
+        if !std::path::Path::new(audio).exists() {
+            println!("System audio fixture unavailable; skipping audio visualizer test");
+            return;
+        }
+        let Ok(gpu) = WgpuBackend::new() else {
+            println!("GPU backend unavailable; skipping audio visualizer test");
+            return;
+        };
+        let scene = Scene {
+            nodes: vec![SceneNode::AudioVisualizer {
+                src: audio.into(),
+                x: 0.0,
+                y: 0.0,
+                width: 64.0,
+                height: 32.0,
+                color: Color::rgb(0, 220, 255),
+                style: crate::scene::VisualizerStyle::default(),
+                time: 0.0,
+                opacity: 0.8,
+            }],
+        };
+        let config = FrameConfig::new(64, 32, 0, 30.0);
+        let gpu_image = gpu.render_frame(&scene, &config).unwrap();
+        let cpu_image = TinySkiaBackend::new()
+            .render_frame(&scene, &config)
+            .unwrap();
+        let mean_error: f64 = gpu_image
+            .pixels()
+            .zip(cpu_image.pixels())
+            .map(|(gpu, cpu)| {
+                (0..4)
+                    .map(|channel| {
+                        (i16::from(gpu[channel]) - i16::from(cpu[channel])).unsigned_abs() as u64
+                    })
+                    .sum::<u64>()
+            })
+            .sum::<u64>() as f64
+            / (64 * 32 * 4) as f64;
+        assert!(
+            mean_error < 18.0,
+            "GPU/CPU audio visualizer mean error was {mean_error}"
         );
         assert!(gpu_image.pixels().any(|pixel| pixel[3] > 0));
         assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
