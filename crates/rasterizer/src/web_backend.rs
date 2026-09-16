@@ -432,12 +432,14 @@ impl BrowserFrameBackend {
                 .and_then(|composition| composition.clone())
         });
         let cache_inputs = serde_json::json!({
+            "fps": request.fps,
             "props": &request.props,
             "assets": &request.assets,
             "timeline": &request.timeline,
             "image_format": &request.image_format,
             "jpeg_quality": request.jpeg_quality,
             "transparent": request.transparent,
+            "transport": &request.transport,
         });
         let cache_key = FrameCacheKey::from_props(
             composition.as_deref().unwrap_or("browser"),
