@@ -8418,10 +8418,7 @@ mod tests {
             })
             .sum::<u64>() as f64
             / (48 * 48 * 4) as f64;
-        assert!(
-            mean_error < 18.0,
-            "GPU/CPU emoji mean error was {mean_error}"
-        );
+        assert!(mean_error < 18.0, "GPU/CPU GIF mean error was {mean_error}");
         assert!(gpu_image.pixels().any(|pixel| pixel[3] > 0));
         assert_eq!(gpu.render_stats().gpu_frames, 1);
         assert_eq!(gpu.render_stats().cpu_fallback_frames, 0);
