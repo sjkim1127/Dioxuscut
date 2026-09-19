@@ -632,6 +632,10 @@ pub enum Commands {
         /// Run in permissive mode without sandbox jail (unrestricted filesystem access).
         #[arg(long, default_value_t = false)]
         permissive: bool,
+
+        /// Output end-to-end GPU profiling table and telemetry.
+        #[arg(long, default_value_t = false)]
+        profile: bool,
     },
 
     /// List compositions available to the native registry.
@@ -1313,6 +1317,8 @@ pub async fn execute_render_command_with_registry_and_control(
     );
 
     let security_policy = request.effective_security_policy();
+    #[cfg(feature = "gpu")]
+    let mut gpu_profile_summary: Option<dioxuscut_rasterizer::ProfilingSummary> = None;
 
     match request.backend {
         RenderBackend::Native => {
@@ -1482,12 +1488,17 @@ pub async fn execute_render_command_with_registry_and_control(
                     WgpuBackend,
                 };
 
+                let profile_enabled = std::env::var("DIOXUSCUT_PROFILE")
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
+
                 let rasterizer = WgpuBackend::new()
                     .map_err(|error| anyhow::anyhow!("GPU backend init failed: {error}"))?
                     .with_image_cache_bytes(
                         native_image_cache_bytes()
                             .unwrap_or(dioxuscut_rasterizer::DEFAULT_IMAGE_CACHE_BYTES),
-                    );
+                    )
+                    .with_profiling(profile_enabled);
                 if let Some(format) = request.codec.still_format() {
                     let first_scene = std::sync::Arc::clone(&first_scene_cache);
                     render_still_fallible_scaled(
@@ -1550,25 +1561,38 @@ pub async fn execute_render_command_with_registry_and_control(
                         prepared.render(frame)
                     })?;
                 }
+                if profile_enabled {
+                    let summary = rasterizer.profile_summary();
+                    eprintln!("\n{}", summary.render_table());
+                    gpu_profile_summary = Some(summary);
+                }
             }
         }
     }
 
     tracing::info!(output = %request.output.display(), "Render completed");
     if std::env::var_os("DIOXUSCUT_JSON").is_some() {
-        println!(
-            "{}",
-            serde_json::json!({
-                "ok": true,
-                "output": request.output,
-                "backend": format!("{:?}", request.backend).to_ascii_lowercase(),
-                "codec": format!("{:?}", request.codec).to_ascii_lowercase(),
-                "frame_start": frame_start,
-                "frame_end": frame_end,
-                "frames": output_frame_count,
-                "elapsed_ms": render_started.elapsed().as_secs_f64() * 1000.0,
-            })
-        );
+        #[allow(unused_mut)]
+        let mut json_obj = serde_json::json!({
+            "ok": true,
+            "output": request.output,
+            "backend": format!("{:?}", request.backend).to_ascii_lowercase(),
+            "codec": format!("{:?}", request.codec).to_ascii_lowercase(),
+            "frame_start": frame_start,
+            "frame_end": frame_end,
+            "frames": output_frame_count,
+            "elapsed_ms": render_started.elapsed().as_secs_f64() * 1000.0,
+        });
+        #[cfg(feature = "gpu")]
+        if let Some(ref prof) = gpu_profile_summary {
+            if let Some(map) = json_obj.as_object_mut() {
+                map.insert(
+                    "profile".to_string(),
+                    serde_json::to_value(prof).unwrap_or_default(),
+                );
+            }
+        }
+        println!("{}", json_obj);
     }
     Ok(())
 }

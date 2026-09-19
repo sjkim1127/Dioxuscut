@@ -14,7 +14,9 @@ mod tests;
 
 pub(crate) use compile::*;
 pub(crate) use context::*;
-pub use metrics::{WgpuRenderStats, WgpuVideoTimingStats};
+pub use metrics::{
+    FrameProfileSample, ProfilingSummary, StageSummary, WgpuRenderStats, WgpuVideoTimingStats,
+};
 pub(crate) use pipeline::*;
 pub(crate) use resources::*;
 pub(crate) use submit::*;
@@ -29,7 +31,7 @@ use crate::tiny_skia_backend::TinySkiaBackend;
 use crate::video_cache::VideoFrameCache;
 use image::RgbaImage;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tiny_skia::Transform;
@@ -81,6 +83,8 @@ pub struct WgpuBackend {
     gpu_frame_count: AtomicU64,
     cpu_fallback_frame_count: AtomicU64,
     last_cpu_fallback_reason: Mutex<Option<String>>,
+    profiling_enabled: AtomicBool,
+    profile_samples: Mutex<Vec<FrameProfileSample>>,
 }
 
 impl WgpuBackend {
@@ -115,6 +119,8 @@ impl WgpuBackend {
             gpu_frame_count: AtomicU64::new(0),
             cpu_fallback_frame_count: AtomicU64::new(0),
             last_cpu_fallback_reason: Mutex::new(None),
+            profiling_enabled: AtomicBool::new(false),
+            profile_samples: Mutex::new(Vec::new()),
         })
     }
 
@@ -226,6 +232,47 @@ impl WgpuBackend {
     /// Number of bytes sent by dirty-rectangle R8 atlas uploads.
     pub fn text_atlas_dirty_upload_bytes(&self) -> u64 {
         self.text_atlas_dirty_upload_bytes.load(Ordering::Relaxed)
+    }
+
+    /// Enable or disable fine-grained stage profiling.
+    pub fn with_profiling(self, enabled: bool) -> Self {
+        self.profiling_enabled.store(enabled, Ordering::Relaxed);
+        self
+    }
+
+    /// Check whether fine-grained stage profiling is currently enabled.
+    pub fn is_profiling_enabled(&self) -> bool {
+        self.profiling_enabled.load(Ordering::Relaxed)
+    }
+
+    /// Record a single frame profile sample.
+    pub fn record_profile_sample(&self, sample: FrameProfileSample) {
+        if let Ok(mut samples) = self.profile_samples.lock() {
+            samples.push(sample);
+        }
+    }
+
+    /// Retrieve all recorded frame profiling samples.
+    pub fn profile_samples(&self) -> Vec<FrameProfileSample> {
+        self.profile_samples
+            .lock()
+            .map(|s| s.clone())
+            .unwrap_or_default()
+    }
+
+    /// Reset all collected frame profiling samples.
+    pub fn reset_profiling(&self) {
+        if let Ok(mut samples) = self.profile_samples.lock() {
+            samples.clear();
+        }
+    }
+
+    /// Compute an aggregated stage summary of all collected frame profiles.
+    pub fn profile_summary(&self) -> ProfilingSummary {
+        let samples = self.profile_samples();
+        let hits = self.gpu_texture_cache_hits.load(Ordering::Relaxed);
+        let misses = self.gpu_texture_cache_misses.load(Ordering::Relaxed);
+        ProfilingSummary::from_samples(&samples, hits, misses)
     }
 }
 
@@ -342,6 +389,13 @@ impl RasterizerBackend for WgpuBackend {
                     None
                 }
             });
+        let frame_started = Instant::now();
+        let decode_before = self.video_decode_ns.load(Ordering::Relaxed);
+        let upload_ns_before = self.texture_upload_ns.load(Ordering::Relaxed);
+        let upload_bytes_before = self.gpu_texture_upload_bytes.load(Ordering::Relaxed)
+            + self.text_atlas_upload_bytes.load(Ordering::Relaxed);
+
+        let encode_start = Instant::now();
         let gpu_scene = gpu_base_scene.as_ref().unwrap_or(scene);
         let Some((commands, path_mask)) = compile_scene_with_path_mask(gpu_scene, &self.fallback)
         else {
@@ -352,7 +406,25 @@ impl RasterizerBackend for WgpuBackend {
                 let _ = self.offscreen_layer_slot(config.width, config.height);
             }
             self.record_cpu_fallback(reason);
-            return self.fallback.render_frame(scene, config);
+            let fb_start = Instant::now();
+            let img = self.fallback.render_frame(scene, config)?;
+            let fb_render_ns = fb_start.elapsed().as_nanos() as u64;
+            if self.is_profiling_enabled() {
+                self.record_profile_sample(FrameProfileSample {
+                    frame_idx: config.frame,
+                    decode_ns: 0,
+                    upload_ns: 0,
+                    upload_bytes: 0,
+                    compile_encode_ns: fb_render_ns,
+                    gpu_fence_ns: 0,
+                    readback_ns: 0,
+                    readback_bytes: 0,
+                    video_encode_ns: 0,
+                    total_frame_ns: frame_started.elapsed().as_nanos() as u64,
+                    cpu_fallback: true,
+                });
+            }
+            return Ok(img);
         };
 
         let width = config.width;
@@ -392,6 +464,20 @@ impl RasterizerBackend for WgpuBackend {
         })?;
         let submission_index = submitted.submission_index;
         let rx = submitted.readback_rx;
+        let encode_total_ns = encode_start.elapsed().as_nanos() as u64;
+
+        let decode_after = self.video_decode_ns.load(Ordering::Relaxed);
+        let upload_ns_after = self.texture_upload_ns.load(Ordering::Relaxed);
+        let upload_bytes_after = self.gpu_texture_upload_bytes.load(Ordering::Relaxed)
+            + self.text_atlas_upload_bytes.load(Ordering::Relaxed);
+
+        let decode_ns = decode_after.saturating_sub(decode_before);
+        let upload_ns = upload_ns_after.saturating_sub(upload_ns_before);
+        let upload_bytes = upload_bytes_after.saturating_sub(upload_bytes_before);
+        let compile_encode_ns = encode_total_ns
+            .saturating_sub(decode_ns)
+            .saturating_sub(upload_ns);
+
         // Texture preparation (including video decode and cache-miss upload)
         // is measured separately. This interval is GPU command submission,
         // synchronization, and CPU readback only.
@@ -405,6 +491,11 @@ impl RasterizerBackend for WgpuBackend {
                 slot_idx,
                 submission_index,
                 rx: rx.expect("readback was requested for render_frame"),
+                frame_started,
+                decode_ns,
+                upload_ns,
+                upload_bytes,
+                compile_encode_ns,
             },
             &res,
             width,
@@ -483,6 +574,13 @@ impl RasterizerBackend for WgpuBackend {
         let mut scratch = Vec::new();
 
         for frame in 0..total {
+            let frame_started = Instant::now();
+            let decode_before = self.video_decode_ns.load(Ordering::Relaxed);
+            let upload_ns_before = self.texture_upload_ns.load(Ordering::Relaxed);
+            let upload_bytes_before = self.gpu_texture_upload_bytes.load(Ordering::Relaxed)
+                + self.text_atlas_upload_bytes.load(Ordering::Relaxed);
+
+            let encode_start = Instant::now();
             let scene = scene_fn(frame)?;
             let cfg = config_fn(frame);
 
@@ -492,8 +590,27 @@ impl RasterizerBackend for WgpuBackend {
                     self.drain_slot(prev, &res, width, height, &mut scratch, sink)?;
                 }
                 self.record_cpu_fallback(gpu_fallback_reason(&scene));
+                let fb_start = Instant::now();
                 let img = self.fallback.render_frame(&scene, &cfg)?;
+                let fb_render_ns = fb_start.elapsed().as_nanos() as u64;
+                let enc_start = Instant::now();
                 sink.consume(frame, img.as_raw())?;
+                let enc_ns = enc_start.elapsed().as_nanos() as u64;
+                if self.is_profiling_enabled() {
+                    self.record_profile_sample(FrameProfileSample {
+                        frame_idx: frame,
+                        decode_ns: 0,
+                        upload_ns: 0,
+                        upload_bytes: 0,
+                        compile_encode_ns: fb_render_ns,
+                        gpu_fence_ns: 0,
+                        readback_ns: 0,
+                        readback_bytes: 0,
+                        video_encode_ns: enc_ns,
+                        total_frame_ns: frame_started.elapsed().as_nanos() as u64,
+                        cpu_fallback: true,
+                    });
+                }
                 continue;
             };
 
@@ -522,6 +639,20 @@ impl RasterizerBackend for WgpuBackend {
             })?;
             let submission_index = submitted.submission_index;
             let rx = submitted.readback_rx;
+            let encode_total_ns = encode_start.elapsed().as_nanos() as u64;
+
+            let decode_after = self.video_decode_ns.load(Ordering::Relaxed);
+            let upload_ns_after = self.texture_upload_ns.load(Ordering::Relaxed);
+            let upload_bytes_after = self.gpu_texture_upload_bytes.load(Ordering::Relaxed)
+                + self.text_atlas_upload_bytes.load(Ordering::Relaxed);
+
+            let decode_ns = decode_after.saturating_sub(decode_before);
+            let upload_ns = upload_ns_after.saturating_sub(upload_ns_before);
+            let upload_bytes = upload_bytes_after.saturating_sub(upload_bytes_before);
+            let compile_encode_ns = encode_total_ns
+                .saturating_sub(decode_ns)
+                .saturating_sub(upload_ns);
+
             self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
 
             in_flight.push_back(InFlight {
@@ -529,6 +660,11 @@ impl RasterizerBackend for WgpuBackend {
                 slot_idx,
                 submission_index,
                 rx: rx.expect("readback was requested for render_stream"),
+                frame_started,
+                decode_ns,
+                upload_ns,
+                upload_bytes,
+                compile_encode_ns,
             });
         }
 

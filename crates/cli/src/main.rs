@@ -50,7 +50,11 @@ async fn main() -> anyhow::Result<()> {
             hw_accel,
             sandbox_roots,
             permissive,
+            profile,
         } => {
+            if *profile {
+                std::env::set_var("DIOXUSCUT_PROFILE", "1");
+            }
             let request = RenderRequest {
                 composition: composition.clone(),
                 script: script.clone(),

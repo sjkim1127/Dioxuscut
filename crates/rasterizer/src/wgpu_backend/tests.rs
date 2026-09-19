@@ -3887,3 +3887,157 @@ fn invalid_opacity_filter_does_not_enter_gpu_path() {
     };
     assert!(!gpu_supports_scene(&scene));
 }
+
+#[test]
+fn gpu_e2e_profiling_stream_and_summary() {
+    let Ok(backend) = WgpuBackend::new() else {
+        println!("GPU backend unavailable; skipping profiling test");
+        return;
+    };
+
+    let backend = backend.with_profiling(true);
+    assert!(backend.is_profiling_enabled());
+
+    let width = 160;
+    let height = 120;
+    let total_frames = 5;
+
+    let scene_fn = |frame: u32| -> Result<Scene, RasterError> {
+        let mut scene = Scene::new();
+        scene.push(SceneNode::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: width as f32,
+            h: height as f32,
+            fill: Color::rgb(20, 30, 40),
+            stroke: None,
+            stroke_width: 0.0,
+            corner_radius: 0.0,
+        });
+        scene.push(SceneNode::Rect {
+            x: (frame * 15) as f32,
+            y: 30.0,
+            w: 40.0,
+            h: 40.0,
+            fill: Color::rgba(255, 100, 50, 200),
+            stroke: Some(Color::WHITE),
+            stroke_width: 2.0,
+            corner_radius: 4.0,
+        });
+        Ok(scene)
+    };
+
+    let config_fn = |frame: u32| -> FrameConfig { FrameConfig::new(width, height, frame, 30.0) };
+
+    let mut consumed_frames = 0;
+    let mut sink = |_frame: u32, pixels: &[u8]| -> Result<(), RasterError> {
+        assert_eq!(pixels.len(), (width * height * 4) as usize);
+        consumed_frames += 1;
+        Ok(())
+    };
+
+    backend
+        .render_stream(total_frames, &scene_fn, &config_fn, &mut sink)
+        .expect("render_stream failed");
+
+    assert_eq!(consumed_frames, total_frames);
+
+    let samples = backend.profile_samples();
+    assert_eq!(samples.len() as u32, total_frames);
+
+    for (i, sample) in samples.iter().enumerate() {
+        assert_eq!(sample.frame_idx, i as u32);
+        assert!(!sample.cpu_fallback);
+        assert_eq!(sample.readback_bytes, (width * height * 4) as u64);
+        assert!(sample.total_frame_ns > 0);
+    }
+
+    let summary = backend.profile_summary();
+    assert_eq!(summary.total_frames, total_frames);
+    assert_eq!(summary.gpu_frames, total_frames);
+    assert_eq!(summary.cpu_fallback_frames, 0);
+    assert!(summary.total_duration_ms > 0.0);
+    assert!(summary.effective_fps > 0.0);
+
+    assert!(summary.compile_encode.mean_ms >= 0.0);
+    assert!(summary.gpu_fence.mean_ms >= 0.0);
+    assert!(summary.readback.mean_ms > 0.0);
+    assert_eq!(
+        summary.readback.bytes_per_frame,
+        (width * height * 4) as f64
+    );
+    assert_eq!(
+        summary.readback.total_bytes,
+        (width * height * 4 * total_frames) as u64
+    );
+
+    assert!(summary.total_frame.p50_ms <= summary.total_frame.p95_ms);
+    assert!(summary.total_frame.p95_ms <= summary.total_frame.p99_ms);
+    assert!(summary.total_frame.min_ms <= summary.total_frame.max_ms);
+
+    let table = summary.render_table();
+    assert!(table.contains("Pipeline Stage"));
+    assert!(table.contains("p50"));
+    assert!(table.contains("Compile & Command Encode"));
+    assert!(table.contains("GPU Hardware Fence"));
+    assert!(table.contains("Readback"));
+    assert!(table.contains("Total Frame Latency"));
+    assert!(table.contains("Texture Cache:"));
+
+    backend.reset_profiling();
+    assert_eq!(backend.profile_samples().len(), 0);
+}
+
+#[test]
+fn gpu_e2e_profiling_single_frame() {
+    let Ok(backend) = WgpuBackend::new() else {
+        println!("GPU backend unavailable; skipping profiling test");
+        return;
+    };
+
+    let backend = backend.with_profiling(true);
+    let mut scene = Scene::new();
+    scene.push(SceneNode::Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 64.0,
+        h: 64.0,
+        fill: Color::rgb(255, 0, 0),
+        stroke: None,
+        stroke_width: 0.0,
+        corner_radius: 0.0,
+    });
+
+    let config = FrameConfig::new(64, 64, 7, 30.0);
+    let img = backend
+        .render_frame(&scene, &config)
+        .expect("render_frame failed");
+    assert_eq!(img.width(), 64);
+    assert_eq!(img.height(), 64);
+
+    let samples = backend.profile_samples();
+    assert_eq!(samples.len(), 1);
+    assert_eq!(samples[0].frame_idx, 7);
+    assert_eq!(samples[0].readback_bytes, 64 * 64 * 4);
+    assert!(!samples[0].cpu_fallback);
+
+    let summary = backend.profile_summary();
+    assert_eq!(summary.total_frames, 1);
+    assert_eq!(summary.gpu_frames, 1);
+}
+
+#[test]
+fn gpu_e2e_profiling_disabled_zero_samples() {
+    let Ok(backend) = WgpuBackend::new() else {
+        println!("GPU backend unavailable; skipping profiling test");
+        return;
+    };
+
+    assert!(!backend.is_profiling_enabled());
+    let scene = Scene::new();
+    let config = FrameConfig::new(64, 64, 0, 30.0);
+    let _ = backend.render_frame(&scene, &config);
+
+    assert_eq!(backend.profile_samples().len(), 0);
+    assert_eq!(backend.profile_summary().total_frames, 0);
+}

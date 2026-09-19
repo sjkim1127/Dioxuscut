@@ -27,15 +27,13 @@ fn test_cli_flag_defaults() {
             codec,
             frame_start,
             frame_end,
-            frame_step: _,
             timeout_seconds,
             crf,
             preset,
             hw_accel,
             sandbox_roots,
             permissive,
-            concurrency: _,
-            scale: _,
+            ..
         } => {
             assert_eq!(composition, Some("HelloWorld".into()));
             assert_eq!(script, None);
@@ -101,15 +99,13 @@ fn test_cli_flag_custom_values() {
             codec,
             frame_start,
             frame_end,
-            frame_step: _,
             timeout_seconds,
             crf,
             preset,
             hw_accel,
             sandbox_roots,
             permissive,
-            concurrency: _,
-            scale: _,
+            ..
         } => {
             assert_eq!(composition, Some("CustomComposition".into()));
             assert_eq!(script, None);
@@ -359,5 +355,18 @@ fn test_cli_webcodecs_drift_accepts_validation_options() {
             assert_eq!(csv, Some(PathBuf::from("drift.csv")));
         }
         _ => panic!("Expected Commands::WebcodecsDrift"),
+    }
+}
+
+#[test]
+fn test_cli_profile_flag() {
+    let cli = Cli::try_parse_from(["dioxuscut", "render", "-c", "ProfileComp", "--profile"])
+        .expect("Failed to parse --profile CLI arg");
+
+    match cli.command {
+        Commands::Render { profile, .. } => {
+            assert!(profile);
+        }
+        _ => panic!("Expected Commands::Render"),
     }
 }

@@ -97,6 +97,11 @@ pub(crate) struct InFlight {
     pub(crate) slot_idx: usize,
     pub(crate) submission_index: wgpu::SubmissionIndex,
     pub(crate) rx: std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
+    pub(crate) frame_started: std::time::Instant,
+    pub(crate) decode_ns: u64,
+    pub(crate) upload_ns: u64,
+    pub(crate) upload_bytes: u64,
+    pub(crate) compile_encode_ns: u64,
 }
 
 pub(crate) type GpuResourcePool = Mutex<HashMap<(u32, u32), Arc<Mutex<GpuFrameResources>>>>;

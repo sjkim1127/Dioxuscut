@@ -414,7 +414,10 @@ impl WgpuBackend {
     }
 
     pub(crate) fn gpu_image(&self, src: &str) -> Result<Arc<GpuImageResource>, RasterError> {
+        let decode_start = Instant::now();
         let decoded = self.image_cache.load(src)?;
+        self.video_decode_ns
+            .fetch_add(decode_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
         // ImageCache canonicalizes local paths before indexing them. Keep the
         // GPU cache on the same identity so alternate spellings of one asset
         // (relative, absolute, or file://) do not trigger duplicate uploads.
@@ -1364,9 +1367,26 @@ impl WgpuBackend {
         scratch: &mut Vec<u8>,
         sink: &mut dyn FrameSink,
     ) -> Result<(), RasterError> {
+        let is_profiling = self.is_profiling_enabled();
+
+        let fence_start = if is_profiling {
+            Some(Instant::now())
+        } else {
+            None
+        };
         self.ctx
             .device
             .poll(wgpu::Maintain::wait_for(in_flight.submission_index));
+        let gpu_fence_ns = fence_start
+            .map(|t| t.elapsed().as_nanos() as u64)
+            .unwrap_or(0);
+
+        let readback_start = if is_profiling {
+            Some(Instant::now())
+        } else {
+            None
+        };
+
         in_flight
             .rx
             .recv()
@@ -1386,6 +1406,11 @@ impl WgpuBackend {
         let slice = slot.readback.slice(..);
         let data = slice.get_mapped_range();
 
+        let encode_start = if is_profiling {
+            Some(Instant::now())
+        } else {
+            None
+        };
         let res = if bytes_per_row as usize == expected_row_bytes {
             sink.consume(in_flight.frame_idx, &data[..total_bytes])
         } else {
@@ -1398,8 +1423,33 @@ impl WgpuBackend {
             }
             sink.consume(in_flight.frame_idx, scratch)
         };
+        let video_encode_ns = encode_start
+            .map(|t| t.elapsed().as_nanos() as u64)
+            .unwrap_or(0);
+
         drop(data);
         slot.readback.unmap();
+
+        if is_profiling {
+            let readback_total_ns = readback_start
+                .map(|t| t.elapsed().as_nanos() as u64)
+                .unwrap_or(0);
+            let readback_ns = readback_total_ns.saturating_sub(video_encode_ns);
+            let total_frame_ns = in_flight.frame_started.elapsed().as_nanos() as u64;
+            self.record_profile_sample(FrameProfileSample {
+                frame_idx: in_flight.frame_idx,
+                decode_ns: in_flight.decode_ns,
+                upload_ns: in_flight.upload_ns,
+                upload_bytes: in_flight.upload_bytes,
+                compile_encode_ns: in_flight.compile_encode_ns,
+                gpu_fence_ns,
+                readback_ns,
+                readback_bytes: total_bytes as u64,
+                video_encode_ns,
+                total_frame_ns,
+                cpu_fallback: false,
+            });
+        }
 
         res
     }
