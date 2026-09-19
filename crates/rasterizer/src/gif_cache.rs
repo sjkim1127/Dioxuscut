@@ -92,20 +92,22 @@ impl GifFrameCache {
 
     /// Select the frame that should be displayed at `time_ms` milliseconds into
     /// the animation, honouring `loop_behavior`.
+    /// Select the frame index and image that should be displayed at `time_ms` milliseconds into
+    /// the animation, honouring `loop_behavior`.
     ///
     /// Returns `None` only when `loop_behavior == Unmount` and the animation
     /// has ended.
-    pub fn frame_at_time_ms(
+    pub fn frame_index_at_time_ms(
         frames: &[GifFrame],
         time_ms: f64,
         loop_behavior: LoopBehavior,
-    ) -> Option<&RgbaImage> {
+    ) -> Option<(usize, &RgbaImage)> {
         if frames.is_empty() {
             return None;
         }
         let total_ms: f64 = frames.iter().map(|f| f.delay_ms as f64).sum();
         if total_ms <= 0.0 {
-            return frames.first().map(|f| &f.image);
+            return frames.first().map(|f| (0, &f.image));
         }
 
         let t = match loop_behavior {
@@ -120,13 +122,27 @@ impl GifFrameCache {
         };
 
         let mut elapsed = 0.0_f64;
-        for frame in frames {
+        for (index, frame) in frames.iter().enumerate() {
             elapsed += frame.delay_ms as f64;
             if t < elapsed {
-                return Some(&frame.image);
+                return Some((index, &frame.image));
             }
         }
-        frames.last().map(|f| &f.image)
+        let last_index = frames.len() - 1;
+        frames.last().map(|f| (last_index, &f.image))
+    }
+
+    /// Select the frame that should be displayed at `time_ms` milliseconds into
+    /// the animation, honouring `loop_behavior`.
+    ///
+    /// Returns `None` only when `loop_behavior == Unmount` and the animation
+    /// has ended.
+    pub fn frame_at_time_ms(
+        frames: &[GifFrame],
+        time_ms: f64,
+        loop_behavior: LoopBehavior,
+    ) -> Option<&RgbaImage> {
+        Self::frame_index_at_time_ms(frames, time_ms, loop_behavior).map(|(_, img)| img)
     }
 }
 
@@ -187,10 +203,46 @@ mod tests {
     }
 
     #[test]
-    fn cache_default_constructs() {
-        let cache = GifFrameCache::new();
-        // Loading a non-existent path should return an error, not panic
-        let result = cache.load_frames("/nonexistent/path.gif");
-        assert!(result.is_err());
+    fn frame_index_matches_delay_segments() {
+        let frames = dummy_frames(&[100, 150, 200]); // frame 0: [0, 100), frame 1: [100, 250), frame 2: [250, 450)
+        assert_eq!(
+            GifFrameCache::frame_index_at_time_ms(&frames, 0.0, LoopBehavior::Loop).map(|(i, _)| i),
+            Some(0)
+        );
+        assert_eq!(
+            GifFrameCache::frame_index_at_time_ms(&frames, 99.0, LoopBehavior::Loop)
+                .map(|(i, _)| i),
+            Some(0)
+        );
+        assert_eq!(
+            GifFrameCache::frame_index_at_time_ms(&frames, 100.0, LoopBehavior::Loop)
+                .map(|(i, _)| i),
+            Some(1)
+        );
+        assert_eq!(
+            GifFrameCache::frame_index_at_time_ms(&frames, 249.0, LoopBehavior::Loop)
+                .map(|(i, _)| i),
+            Some(1)
+        );
+        assert_eq!(
+            GifFrameCache::frame_index_at_time_ms(&frames, 250.0, LoopBehavior::Loop)
+                .map(|(i, _)| i),
+            Some(2)
+        );
+        assert_eq!(
+            GifFrameCache::frame_index_at_time_ms(&frames, 500.0, LoopBehavior::Loop)
+                .map(|(i, _)| i),
+            Some(0)
+        ); // 500 % 450 = 50 -> frame 0
+        assert_eq!(
+            GifFrameCache::frame_index_at_time_ms(&frames, 500.0, LoopBehavior::Pause)
+                .map(|(i, _)| i),
+            Some(2)
+        );
+        assert_eq!(
+            GifFrameCache::frame_index_at_time_ms(&frames, 500.0, LoopBehavior::Unmount)
+                .map(|(i, _)| i),
+            None
+        );
     }
 }

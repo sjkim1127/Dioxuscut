@@ -141,21 +141,21 @@ impl TinySkiaBackend {
     }
 
     #[cfg(feature = "gpu")]
-    pub(crate) fn gif_frame(
+    pub(crate) fn gif_frame_with_index(
         &self,
         src: &str,
         time_secs: f64,
         loop_behavior: crate::gif_cache::LoopBehavior,
-    ) -> Result<Option<Arc<image::RgbaImage>>, RasterError> {
+    ) -> Result<Option<(usize, Arc<image::RgbaImage>)>, RasterError> {
         let frames = self
             .gifs
             .load_frames_with_policy(src, &crate::security::MediaSecurityPolicy::default())?;
-        Ok(crate::gif_cache::GifFrameCache::frame_at_time_ms(
+        Ok(crate::gif_cache::GifFrameCache::frame_index_at_time_ms(
             &frames,
             time_secs * 1000.0,
             loop_behavior,
         )
-        .map(|image| Arc::new(image.clone())))
+        .map(|(index, image)| (index, Arc::new(image.clone()))))
     }
 
     #[cfg(feature = "gpu")]

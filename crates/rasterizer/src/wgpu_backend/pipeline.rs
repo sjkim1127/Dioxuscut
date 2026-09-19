@@ -1,5 +1,3 @@
-
-
 pub(crate) const SHADER_SRC: &str = r#"
 struct Globals {
     resolution: vec2<f32>,
@@ -534,7 +532,6 @@ fn mask_shape_coverage(position: vec2<f32>, rect: vec4<f32>, shape: vec4<f32>, k
 // GPU State
 // ────────────────────────────────────────────────────────────────────────────
 
-
 pub(crate) fn shader_opacity_supported(source: &str) -> bool {
     !source.contains("@fragment") && source.contains("return ")
 }
@@ -560,4 +557,3 @@ pub(crate) fn shader_source_with_opacity(source: &str, opacity: f32) -> String {
         &source[semicolon + 1..]
     )
 }
-

@@ -516,5 +516,3 @@ impl GpuContext {
         })
     }
 }
-
-

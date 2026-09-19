@@ -1,7 +1,7 @@
-use wgpu::util::DeviceExt;
 use super::*;
 use crate::scene::{Color, ImageFit};
 use crate::video_cache::canonical_local_path;
+use wgpu::util::DeviceExt;
 
 pub(crate) struct FrameSubmission<'a> {
     pub(crate) commands: &'a [DrawCommand],
@@ -1348,7 +1348,10 @@ impl WgpuBackend {
             None
         };
 
-        Ok(SubmittedFrame { submission_index, readback_rx: rx })
+        Ok(SubmittedFrame {
+            submission_index,
+            readback_rx: rx,
+        })
     }
 
     #[allow(clippy::type_complexity)]
@@ -1401,7 +1404,6 @@ impl WgpuBackend {
         res
     }
 }
-
 
 impl WgpuBackend {
     pub(crate) fn render_interleaved_shader_scene(

@@ -7,7 +7,8 @@ use tiny_skia::Transform;
 pub(crate) const MAX_GRADIENT_STOPS: usize = 16;
 pub(crate) const SAMPLE_COUNT: u32 = 4;
 pub(crate) const RENDER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
-pub(crate) const MESH_ATTRIBUTES: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![0 => Float32x2];
+pub(crate) const MESH_ATTRIBUTES: [wgpu::VertexAttribute; 1] =
+    wgpu::vertex_attr_array![0 => Float32x2];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ImagePlacement {
@@ -275,7 +276,6 @@ impl DrawCommand {
     }
 }
 
-
 pub(crate) fn transform_rows(transform: Transform) -> ([f32; 4], [f32; 4]) {
     (
         [transform.sx, transform.kx, transform.tx, 0.0],
@@ -316,6 +316,3 @@ pub(crate) fn bytemuck_cast<T: Copy>(data: &[T]) -> &[u8] {
     let len = std::mem::size_of_val(data);
     unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, len) }
 }
-
-
-

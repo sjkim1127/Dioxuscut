@@ -263,13 +263,7 @@ pub(crate) fn compile_nodes(
                 let target_w = w.round().max(1.0) as u32;
                 let target_h = h.round().max(1.0) as u32;
                 let image = font
-                    .lottie_frame(
-                        src,
-                        playback_time,
-                        target_w,
-                        target_h,
-                        *loop_behavior,
-                    )
+                    .lottie_frame(src, playback_time, target_w, target_h, *loop_behavior)
                     .ok()?;
                 let mut instance =
                     GpuInstance::solid(Color::WHITE, opacity * *node_opacity, transform);
@@ -277,8 +271,9 @@ pub(crate) fn compile_nodes(
                 instance.bounds = [*x, *y, *w, *h];
                 instance.shape_bounds = instance.bounds;
                 instance.params = [0.0, 0.0, 1.0, 1.0];
-                let key =
-                    format!("lottie:{src}:{playback_time:.9}:{loop_behavior:?}:{target_w}x{target_h}");
+                let key = format!(
+                    "lottie:{src}:{playback_time:.9}:{loop_behavior:?}:{target_w}x{target_h}"
+                );
                 output.push(DrawCommand::Lottie {
                     instance,
                     key,
@@ -312,14 +307,17 @@ pub(crate) fn compile_nodes(
                     return None;
                 }
                 let playback_time = *time * f64::from(*playback_rate);
-                let image = font.gif_frame(src, playback_time, *loop_behavior).ok().flatten()?;
+                let (frame_index, image) = font
+                    .gif_frame_with_index(src, playback_time, *loop_behavior)
+                    .ok()
+                    .flatten()?;
                 let mut instance =
                     GpuInstance::solid(Color::WHITE, opacity * *node_opacity, transform);
                 instance.kind_data[0] = 5;
                 instance.bounds = [*x, *y, *w, *h];
                 instance.shape_bounds = instance.bounds;
                 instance.params = [0.0, 0.0, 1.0, 1.0];
-                let key = format!("gif:{src}:{playback_time:.9}:{loop_behavior:?}");
+                let key = format!("gif:{src}:{frame_index}");
                 output.push(DrawCommand::Gif {
                     instance,
                     key,
@@ -1788,4 +1786,3 @@ fn tiny_path_to_lyon(path: &TinyPath) -> Option<LyonPath> {
     }
     Some(builder.build())
 }
-

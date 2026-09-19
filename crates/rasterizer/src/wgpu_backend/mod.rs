@@ -1,4 +1,4 @@
-//! GPU rasterizer backend using .
+//! GPU rasterizer backend using `wgpu`.
 #![cfg(feature = "gpu")]
 
 pub(crate) mod compile;
@@ -12,15 +12,17 @@ pub(crate) mod types;
 #[cfg(test)]
 mod tests;
 
-pub use metrics::{WgpuRenderStats, WgpuVideoTimingStats};
 pub(crate) use compile::*;
 pub(crate) use context::*;
+pub use metrics::{WgpuRenderStats, WgpuVideoTimingStats};
 pub(crate) use pipeline::*;
 pub(crate) use resources::*;
 pub(crate) use submit::*;
 pub(crate) use types::*;
 
-use crate::backend::{BackendCapabilities, BackendRenderStats, FrameConfig, FrameSink, RasterError, RasterizerBackend};
+use crate::backend::{
+    BackendCapabilities, BackendRenderStats, FrameConfig, FrameSink, RasterError, RasterizerBackend,
+};
 use crate::image_cache::ImageCache;
 use crate::scene::{Scene, SceneNode};
 use crate::tiny_skia_backend::TinySkiaBackend;
@@ -32,6 +34,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tiny_skia::Transform;
 
+/// GPU-accelerated rasterizer using `wgpu`.
+///
+/// Requires a compatible GPU with Vulkan, Metal, DX12, or WebGPU support.
+/// Use `TinySkiaBackend` if GPU access is unavailable (e.g. Docker/CI).
+///
+/// Textures and readback buffers are cached per resolution in a `Mutex`-
+/// protected `HashMap`. This eliminates the per-frame allocation pressure
 /// that existed in earlier versions.
 pub struct WgpuBackend {
     ctx: GpuContext,
@@ -108,7 +117,6 @@ impl WgpuBackend {
             last_cpu_fallback_reason: Mutex::new(None),
         })
     }
-
 
     /// Return the number of frames rendered by WGPU and by the CPU fallback,
     /// along with texture cache hit and miss counts.
@@ -532,5 +540,3 @@ impl RasterizerBackend for WgpuBackend {
         Ok(())
     }
 }
-
-

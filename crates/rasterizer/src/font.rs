@@ -282,7 +282,10 @@ struct ShapedGlyph {
 }
 
 fn apply_synthetic_bold(pixels: &mut [u8], width: u32, height: u32, weight: u16) {
-    let radius = u32::from(weight).saturating_sub(400).div_ceil(200).clamp(1, 3);
+    let radius = u32::from(weight)
+        .saturating_sub(400)
+        .div_ceil(200)
+        .clamp(1, 3);
     let original = pixels.to_vec();
     for y in 0..height {
         for x in 0..width {
