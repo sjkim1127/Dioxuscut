@@ -243,10 +243,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Chromium
+      - name: Install Chromium and ffmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y chromium
+          sudo apt-get install -y chromium ffmpeg
 
       - name: Install JavaScript dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
