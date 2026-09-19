@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { existsSync } from 'node:fs';
 import { readFile, rm } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -7,7 +8,31 @@ import { promisify } from 'node:util';
 const require = createRequire(new URL('../../apps/studio-tauri/package.json', import.meta.url));
 const { chromium } = require('playwright-core');
 const url = process.env.DIOXUSCUT_BROWSER_URL ?? 'http://127.0.0.1:1421';
-const executablePath = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+
+function findBrowserExecutable() {
+  const candidates = process.platform === 'darwin'
+    ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium', 'google-chrome', 'chromium']
+    : process.platform === 'win32'
+      ? [
+        `${process.env.PROGRAMFILES ?? 'C:\\Program Files'}\\Google\\Chrome\\Application\\chrome.exe`,
+        `${process.env['PROGRAMFILES(X86)'] ?? 'C:\\Program Files (x86)'}\\Google\\Chrome\\Application\\chrome.exe`,
+        `${process.env.LOCALAPPDATA ?? ''}\\Google\\Chrome\\Application\\chrome.exe`,
+        'chrome.exe',
+      ]
+      : ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', 'google-chrome', 'google-chrome-stable', '/usr/bin/chromium', 'chromium'];
+  const pathEntries = (process.env.PATH ?? '').split(process.platform === 'win32' ? ';' : ':');
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+    if (!candidate.includes('/') && !candidate.includes('\\')) {
+      const onPath = pathEntries.map((entry) => `${entry}/${candidate}`).find(existsSync);
+      if (onPath) return onPath;
+    }
+  }
+  return undefined;
+}
+
+const executablePath = process.env.CHROME_PATH ?? findBrowserExecutable();
 const run = promisify(execFile);
 const audioFixturePath = `/tmp/dioxuscut-webcodecs-audio-${process.pid}.m4a`;
 const webmFixturePath = `/tmp/dioxuscut-webcodecs-video-${process.pid}.webm`;

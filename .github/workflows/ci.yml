@@ -243,10 +243,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Chromium and ffmpeg
+      - name: Install browser and ffmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y chromium ffmpeg
+          sudo apt-get install -y ffmpeg
+          if ! command -v google-chrome >/dev/null 2>&1; then
+            wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+            sudo dpkg -i google-chrome-stable_current_amd64.deb || sudo apt-get -fy install
+          fi
 
       - name: Install JavaScript dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
@@ -266,11 +270,12 @@ jobs:
       - name: Exercise Three.js lifecycle through worker
         env:
           DIOXUSCUT_BROWSER_URL: http://127.0.0.1:1421
-          CHROME_PATH: /usr/bin/chromium
+          CHROME_PATH: /usr/bin/google-chrome
         run: node benchmarks/browser/three-lifecycle-smoke.mjs
 
       - name: Exercise WebCodecs contract
         env:
           DIOXUSCUT_BROWSER_URL: http://127.0.0.1:1421
-          CHROME_PATH: /usr/bin/chromium
+          CHROME_PATH: /usr/bin/google-chrome
         run: node benchmarks/browser/webcodecs-contract-smoke.mjs
+
