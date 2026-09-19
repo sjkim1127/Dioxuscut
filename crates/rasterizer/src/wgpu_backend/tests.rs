@@ -36,7 +36,7 @@ fn offscreen_layer_pool_reuses_resolution_slots() {
     assert!(!Arc::ptr_eq(&first, &different));
     let slot = first.lock().expect("offscreen layer slot lock poisoned");
     let _binding = backend.offscreen_layer_binding(&slot);
-    let destination = GpuFrameSlot::new(&backend.ctx.device, 64, 32);
+    let destination = GpuFrameSlot::new(&backend.ctx.device, 64, 32, false);
     let submission = backend
         .composite_external_texture(&slot, &destination, 64, 32, 0.5)
         .expect("offscreen composite submission failed");
@@ -3956,11 +3956,13 @@ fn gpu_e2e_profiling_stream_and_summary() {
     assert_eq!(summary.total_frames, total_frames);
     assert_eq!(summary.gpu_frames, total_frames);
     assert_eq!(summary.cpu_fallback_frames, 0);
-    assert!(summary.total_duration_ms > 0.0);
-    assert!(summary.effective_fps > 0.0);
+    assert!(summary.session_wall_ms > 0.0);
+    assert!(summary.throughput_fps > 0.0);
+    assert!(summary.total_frame.mean_ms > 0.0);
 
+    assert!(summary.scene_eval.mean_ms >= 0.0);
     assert!(summary.compile_encode.mean_ms >= 0.0);
-    assert!(summary.gpu_fence.mean_ms >= 0.0);
+    assert!(summary.submission_wait.mean_ms >= 0.0);
     assert!(summary.readback.mean_ms > 0.0);
     assert_eq!(
         summary.readback.bytes_per_frame,
@@ -3979,10 +3981,12 @@ fn gpu_e2e_profiling_stream_and_summary() {
     assert!(table.contains("Pipeline Stage"));
     assert!(table.contains("p50"));
     assert!(table.contains("Compile & Command Encode"));
-    assert!(table.contains("GPU Hardware Fence"));
+    assert!(table.contains("GPU Fence Wait (CPU)"));
     assert!(table.contains("Readback"));
     assert!(table.contains("Total Frame Latency"));
-    assert!(table.contains("Texture Cache:"));
+    assert!(table.contains("Image Cache:"));
+    assert!(table.contains("Text Atlas:"));
+    assert!(table.contains("Throughput:"));
 
     backend.reset_profiling();
     assert_eq!(backend.profile_samples().len(), 0);

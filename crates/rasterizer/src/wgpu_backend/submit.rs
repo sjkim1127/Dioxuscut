@@ -17,6 +17,7 @@ pub(crate) struct FrameSubmission<'a> {
 pub(crate) struct SubmittedFrame {
     pub(crate) submission_index: wgpu::SubmissionIndex,
     pub(crate) readback_rx: Option<std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>>,
+    pub(crate) query_rx: Option<std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>>,
 }
 
 impl WgpuBackend {
@@ -31,6 +32,7 @@ impl WgpuBackend {
                     &self.ctx.device,
                     width,
                     height,
+                    false,
                 )))
             })
             .clone()
@@ -241,14 +243,14 @@ impl WgpuBackend {
         layer_opacity: f32,
         config: &FrameConfig,
     ) -> Result<RgbaImage, RasterError> {
-        let Some((base_commands, base_mask)) =
+        let Some((base_commands, base_mask, _)) =
             compile_scene_with_path_mask(base_scene, &self.fallback)
         else {
             return Err(RasterError::Scene(
                 "overlap base scene requires CPU fallback".into(),
             ));
         };
-        let Some((layer_commands, layer_mask)) =
+        let Some((layer_commands, layer_mask, _)) =
             compile_scene_with_path_mask(layer_scene, &self.fallback)
         else {
             return Err(RasterError::Scene(
@@ -271,6 +273,7 @@ impl WgpuBackend {
                         &self.ctx.device,
                         config.width,
                         config.height,
+                        self.ctx.supports_timestamp_queries,
                     )))
                 })
                 .clone()
@@ -453,6 +456,7 @@ impl WgpuBackend {
                             &snapshot.pixels[start..start + rect.width as usize],
                         );
                     }
+                    let upload_start = Instant::now();
                     queue.write_texture(
                         wgpu::ImageCopyTexture {
                             texture: &resource._texture,
@@ -476,6 +480,8 @@ impl WgpuBackend {
                             depth_or_array_layers: 1,
                         },
                     );
+                    self.text_atlas_upload_ns
+                        .fetch_add(upload_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
                     self.text_atlas_upload_bytes.fetch_add(
                         u64::from(rect.width) * u64::from(rect.height),
                         Ordering::Relaxed,
@@ -510,6 +516,7 @@ impl WgpuBackend {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
+        let upload_start = Instant::now();
         queue.write_texture(
             texture.as_image_copy(),
             &snapshot.pixels,
@@ -524,6 +531,8 @@ impl WgpuBackend {
                 depth_or_array_layers: 1,
             },
         );
+        self.text_atlas_upload_ns
+            .fetch_add(upload_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
         self.text_atlas_upload_bytes.fetch_add(
             u64::from(snapshot.width) * u64::from(snapshot.height),
             Ordering::Relaxed,
@@ -620,7 +629,7 @@ impl WgpuBackend {
                 "GPU-native frame sink does not yet support shader nodes".into(),
             ));
         }
-        let Some((commands, path_mask)) = compile_scene_with_path_mask(scene, &self.fallback)
+        let Some((commands, path_mask, _)) = compile_scene_with_path_mask(scene, &self.fallback)
         else {
             return Err(RasterError::Scene(
                 "scene requires the CPU fallback and has no GPU texture handle".into(),
@@ -638,6 +647,7 @@ impl WgpuBackend {
                         &self.ctx.device,
                         config.width,
                         config.height,
+                        self.ctx.supports_timestamp_queries,
                     )))
                 })
                 .clone()
@@ -716,6 +726,7 @@ impl WgpuBackend {
                         &self.ctx.device,
                         first.width,
                         first.height,
+                        self.ctx.supports_timestamp_queries,
                     )))
                 })
                 .clone()
@@ -734,7 +745,8 @@ impl WgpuBackend {
                     "GPU-native stream cannot change dimensions mid-stream".into(),
                 ));
             }
-            let Some((commands, path_mask)) = compile_scene_with_path_mask(&scene, &self.fallback)
+            let Some((commands, path_mask, _)) =
+                compile_scene_with_path_mask(&scene, &self.fallback)
             else {
                 return Err(RasterError::Scene(format!(
                     "frame {frame} requires the CPU fallback"
@@ -1154,6 +1166,18 @@ impl WgpuBackend {
                 );
             }
 
+            let timestamp_writes = if self.is_profiling_enabled() {
+                slot.query_set
+                    .as_ref()
+                    .map(|qs| wgpu::RenderPassTimestampWrites {
+                        query_set: qs,
+                        beginning_of_pass_write_index: Some(0),
+                        end_of_pass_write_index: Some(1),
+                    })
+            } else {
+                None
+            };
+
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("frame_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1164,7 +1188,9 @@ impl WgpuBackend {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                ..Default::default()
+                depth_stencil_attachment: None,
+                timestamp_writes,
+                occlusion_query_set: None,
             });
 
             pass.set_bind_group(0, &globals_bg, &[]);
@@ -1337,7 +1363,35 @@ impl WgpuBackend {
             );
         }
 
+        let has_queries = if self.is_profiling_enabled() && readback {
+            if let (Some(qs), Some(resolve_buf), Some(readback_buf)) = (
+                &slot.query_set,
+                &slot.query_resolve_buffer,
+                &slot.query_readback_buffer,
+            ) {
+                encoder.resolve_query_set(qs, 0..2, resolve_buf, 0);
+                encoder.copy_buffer_to_buffer(resolve_buf, 0, readback_buf, 0, 16);
+                Some(readback_buf)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let submission_index = queue.submit([encoder.finish()]);
+
+        let query_rx = if let Some(readback_buf) = has_queries {
+            let (tx, rx) = std::sync::mpsc::channel();
+            readback_buf
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |result| {
+                    let _ = tx.send(result);
+                });
+            Some(rx)
+        } else {
+            None
+        };
 
         let rx = if readback {
             let (tx, rx) = std::sync::mpsc::channel();
@@ -1354,6 +1408,7 @@ impl WgpuBackend {
         Ok(SubmittedFrame {
             submission_index,
             readback_rx: rx,
+            query_rx,
         })
     }
 
@@ -1377,9 +1432,40 @@ impl WgpuBackend {
         self.ctx
             .device
             .poll(wgpu::Maintain::wait_for(in_flight.submission_index));
-        let gpu_fence_ns = fence_start
+        let submission_wait_ns = fence_start
             .map(|t| t.elapsed().as_nanos() as u64)
             .unwrap_or(0);
+
+        let slot = &res.slots[in_flight.slot_idx];
+
+        let gpu_exec_ns = if is_profiling {
+            if let Some(query_rx) = in_flight.query_rx {
+                if let Ok(Ok(())) = query_rx.recv() {
+                    if let Some(ref q_buf) = slot.query_readback_buffer {
+                        let slice = q_buf.slice(..);
+                        let q_data = slice.get_mapped_range();
+                        let t0 = u64::from_ne_bytes(q_data[0..8].try_into().unwrap_or_default());
+                        let t1 = u64::from_ne_bytes(q_data[8..16].try_into().unwrap_or_default());
+                        drop(q_data);
+                        q_buf.unmap();
+                        if t1 >= t0 && t0 > 0 {
+                            let ticks = t1 - t0;
+                            Some((ticks as f64 * self.ctx.timestamp_period as f64) as u64)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         let readback_start = if is_profiling {
             Some(Instant::now())
@@ -1399,7 +1485,6 @@ impl WgpuBackend {
                 reason: format!("GPU map error: {e:?}"),
             })?;
 
-        let slot = &res.slots[in_flight.slot_idx];
         let bytes_per_row = slot.bytes_per_row;
         let expected_row_bytes = (width * 4) as usize;
         let total_bytes = expected_row_bytes * height as usize;
@@ -1438,11 +1523,13 @@ impl WgpuBackend {
             let total_frame_ns = in_flight.frame_started.elapsed().as_nanos() as u64;
             self.record_profile_sample(FrameProfileSample {
                 frame_idx: in_flight.frame_idx,
+                scene_eval_ns: in_flight.scene_eval_ns,
                 decode_ns: in_flight.decode_ns,
                 upload_ns: in_flight.upload_ns,
                 upload_bytes: in_flight.upload_bytes,
                 compile_encode_ns: in_flight.compile_encode_ns,
-                gpu_fence_ns,
+                submission_wait_ns,
+                gpu_exec_ns,
                 readback_ns,
                 readback_bytes: total_bytes as u64,
                 video_encode_ns,

@@ -15,7 +15,8 @@ mod tests;
 pub(crate) use compile::*;
 pub(crate) use context::*;
 pub use metrics::{
-    FrameProfileSample, ProfilingSummary, StageSummary, WgpuRenderStats, WgpuVideoTimingStats,
+    CacheTelemetry, FrameProfileSample, ProfilingSummary, StageSummary, WgpuRenderStats,
+    WgpuVideoTimingStats,
 };
 pub(crate) use pipeline::*;
 pub(crate) use resources::*;
@@ -78,6 +79,8 @@ pub struct WgpuBackend {
     gpu_texture_cache_misses: AtomicU64,
     video_decode_ns: AtomicU64,
     texture_upload_ns: AtomicU64,
+    text_atlas_upload_ns: AtomicU64,
+    last_session_wall_ns: AtomicU64,
     gpu_submit_readback_ns: AtomicU64,
     gpu_submit_no_readback_ns: AtomicU64,
     gpu_frame_count: AtomicU64,
@@ -114,6 +117,8 @@ impl WgpuBackend {
             gpu_texture_cache_misses: AtomicU64::new(0),
             video_decode_ns: AtomicU64::new(0),
             texture_upload_ns: AtomicU64::new(0),
+            text_atlas_upload_ns: AtomicU64::new(0),
+            last_session_wall_ns: AtomicU64::new(0),
             gpu_submit_readback_ns: AtomicU64::new(0),
             gpu_submit_no_readback_ns: AtomicU64::new(0),
             gpu_frame_count: AtomicU64::new(0),
@@ -204,6 +209,16 @@ impl WgpuBackend {
         self.text_atlas_upload_bytes.load(Ordering::Relaxed)
     }
 
+    /// Cumulative nanoseconds spent uploading glyphs to the GPU text atlas.
+    pub fn text_atlas_upload_ns(&self) -> u64 {
+        self.text_atlas_upload_ns.load(Ordering::Relaxed)
+    }
+
+    /// Total wall-clock nanoseconds of the most recent render session.
+    pub fn last_session_wall_ns(&self) -> u64 {
+        self.last_session_wall_ns.load(Ordering::Relaxed)
+    }
+
     /// Number of GPU text atlas snapshots reused without an upload.
     pub fn text_atlas_cache_hits(&self) -> u64 {
         self.text_atlas_cache_hits.load(Ordering::Relaxed)
@@ -265,14 +280,23 @@ impl WgpuBackend {
         if let Ok(mut samples) = self.profile_samples.lock() {
             samples.clear();
         }
+        self.last_session_wall_ns.store(0, Ordering::Relaxed);
     }
 
     /// Compute an aggregated stage summary of all collected frame profiles.
     pub fn profile_summary(&self) -> ProfilingSummary {
         let samples = self.profile_samples();
-        let hits = self.gpu_texture_cache_hits.load(Ordering::Relaxed);
-        let misses = self.gpu_texture_cache_misses.load(Ordering::Relaxed);
-        ProfilingSummary::from_samples(&samples, hits, misses)
+        let session_wall_ns = self.last_session_wall_ns.load(Ordering::Relaxed);
+        let img_hits = self.gpu_texture_cache_hits.load(Ordering::Relaxed);
+        let img_misses = self.gpu_texture_cache_misses.load(Ordering::Relaxed);
+        let atlas_hits = self.text_atlas_cache_hits.load(Ordering::Relaxed);
+        let atlas_misses = self.text_atlas_cache_misses.load(Ordering::Relaxed);
+        ProfilingSummary::from_samples(
+            &samples,
+            session_wall_ns,
+            CacheTelemetry::new(img_hits, img_misses),
+            CacheTelemetry::new(atlas_hits, atlas_misses),
+        )
     }
 }
 
@@ -389,15 +413,34 @@ impl RasterizerBackend for WgpuBackend {
                     None
                 }
             });
+        let is_profiling = self.is_profiling_enabled();
         let frame_started = Instant::now();
-        let decode_before = self.video_decode_ns.load(Ordering::Relaxed);
-        let upload_ns_before = self.texture_upload_ns.load(Ordering::Relaxed);
-        let upload_bytes_before = self.gpu_texture_upload_bytes.load(Ordering::Relaxed)
-            + self.text_atlas_upload_bytes.load(Ordering::Relaxed);
+        let decode_before = if is_profiling {
+            self.video_decode_ns.load(Ordering::Relaxed)
+        } else {
+            0
+        };
+        let upload_ns_before = if is_profiling {
+            self.texture_upload_ns.load(Ordering::Relaxed)
+                + self.text_atlas_upload_ns.load(Ordering::Relaxed)
+        } else {
+            0
+        };
+        let upload_bytes_before = if is_profiling {
+            self.gpu_texture_upload_bytes.load(Ordering::Relaxed)
+                + self.text_atlas_upload_bytes.load(Ordering::Relaxed)
+        } else {
+            0
+        };
 
-        let encode_start = Instant::now();
+        let encode_start = if is_profiling {
+            Some(Instant::now())
+        } else {
+            None
+        };
         let gpu_scene = gpu_base_scene.as_ref().unwrap_or(scene);
-        let Some((commands, path_mask)) = compile_scene_with_path_mask(gpu_scene, &self.fallback)
+        let Some((commands, path_mask, asset_decode_ns)) =
+            compile_scene_with_path_mask(gpu_scene, &self.fallback)
         else {
             let reason = gpu_fallback_reason(gpu_scene);
             if reason == "overlapping texture layer requires offscreen compositing" {
@@ -406,23 +449,31 @@ impl RasterizerBackend for WgpuBackend {
                 let _ = self.offscreen_layer_slot(config.width, config.height);
             }
             self.record_cpu_fallback(reason);
-            let fb_start = Instant::now();
+            let fb_start = if is_profiling {
+                Some(Instant::now())
+            } else {
+                None
+            };
             let img = self.fallback.render_frame(scene, config)?;
-            let fb_render_ns = fb_start.elapsed().as_nanos() as u64;
-            if self.is_profiling_enabled() {
+            let fb_render_ns = fb_start.map(|t| t.elapsed().as_nanos() as u64).unwrap_or(0);
+            if is_profiling {
+                let total_ns = frame_started.elapsed().as_nanos() as u64;
                 self.record_profile_sample(FrameProfileSample {
                     frame_idx: config.frame,
+                    scene_eval_ns: 0,
                     decode_ns: 0,
                     upload_ns: 0,
                     upload_bytes: 0,
                     compile_encode_ns: fb_render_ns,
-                    gpu_fence_ns: 0,
+                    submission_wait_ns: 0,
+                    gpu_exec_ns: None,
                     readback_ns: 0,
                     readback_bytes: 0,
                     video_encode_ns: 0,
-                    total_frame_ns: frame_started.elapsed().as_nanos() as u64,
+                    total_frame_ns: total_ns,
                     cpu_fallback: true,
                 });
+                self.last_session_wall_ns.store(total_ns, Ordering::Relaxed);
             }
             return Ok(img);
         };
@@ -441,6 +492,7 @@ impl RasterizerBackend for WgpuBackend {
                         &self.ctx.device,
                         width,
                         height,
+                        self.ctx.supports_timestamp_queries,
                     )))
                 })
                 .clone()
@@ -464,19 +516,29 @@ impl RasterizerBackend for WgpuBackend {
         })?;
         let submission_index = submitted.submission_index;
         let rx = submitted.readback_rx;
-        let encode_total_ns = encode_start.elapsed().as_nanos() as u64;
+        let query_rx = submitted.query_rx;
+        let encode_total_ns = encode_start
+            .map(|t| t.elapsed().as_nanos() as u64)
+            .unwrap_or(0);
 
-        let decode_after = self.video_decode_ns.load(Ordering::Relaxed);
-        let upload_ns_after = self.texture_upload_ns.load(Ordering::Relaxed);
-        let upload_bytes_after = self.gpu_texture_upload_bytes.load(Ordering::Relaxed)
-            + self.text_atlas_upload_bytes.load(Ordering::Relaxed);
+        let (decode_ns, upload_ns, upload_bytes, compile_encode_ns) = if is_profiling {
+            let decode_after = self.video_decode_ns.load(Ordering::Relaxed);
+            let upload_ns_after = self.texture_upload_ns.load(Ordering::Relaxed)
+                + self.text_atlas_upload_ns.load(Ordering::Relaxed);
+            let upload_bytes_after = self.gpu_texture_upload_bytes.load(Ordering::Relaxed)
+                + self.text_atlas_upload_bytes.load(Ordering::Relaxed);
 
-        let decode_ns = decode_after.saturating_sub(decode_before);
-        let upload_ns = upload_ns_after.saturating_sub(upload_ns_before);
-        let upload_bytes = upload_bytes_after.saturating_sub(upload_bytes_before);
-        let compile_encode_ns = encode_total_ns
-            .saturating_sub(decode_ns)
-            .saturating_sub(upload_ns);
+            let video_decode_diff = decode_after.saturating_sub(decode_before);
+            let dec_ns = video_decode_diff.saturating_add(asset_decode_ns);
+            let upl_ns = upload_ns_after.saturating_sub(upload_ns_before);
+            let upl_bytes = upload_bytes_after.saturating_sub(upload_bytes_before);
+            let comp_enc_ns = encode_total_ns
+                .saturating_sub(upl_ns)
+                .saturating_sub(asset_decode_ns);
+            (dec_ns, upl_ns, upl_bytes, comp_enc_ns)
+        } else {
+            (0, 0, 0, 0)
+        };
 
         // Texture preparation (including video decode and cache-miss upload)
         // is measured separately. This interval is GPU command submission,
@@ -491,7 +553,9 @@ impl RasterizerBackend for WgpuBackend {
                 slot_idx,
                 submission_index,
                 rx: rx.expect("readback was requested for render_frame"),
+                query_rx,
                 frame_started,
+                scene_eval_ns: 0,
                 decode_ns,
                 upload_ns,
                 upload_bytes,
@@ -514,6 +578,11 @@ impl RasterizerBackend for WgpuBackend {
         let image = RgbaImage::from_raw(width, height, pixels).ok_or_else(|| {
             RasterError::ImageEncode("Failed to assemble RgbaImage from GPU readback".into())
         })?;
+        if is_profiling {
+            let total_frame_ns = frame_started.elapsed().as_nanos() as u64;
+            self.last_session_wall_ns
+                .store(total_frame_ns, Ordering::Relaxed);
+        }
         self.gpu_submit_readback_ns.fetch_add(
             gpu_submit_start.elapsed().as_nanos() as u64,
             Ordering::Relaxed,
@@ -538,14 +607,23 @@ impl RasterizerBackend for WgpuBackend {
             return Ok(());
         }
 
+        let is_profiling = self.is_profiling_enabled();
+        let session_start = Instant::now();
+
         let first_cfg = config_fn(0);
         let width = first_cfg.width;
         let height = first_cfg.height;
 
         if width > self.ctx.max_texture_dimension_2d || height > self.ctx.max_texture_dimension_2d {
-            return self
+            let res = self
                 .fallback
                 .render_stream(total, scene_fn, config_fn, sink);
+            if is_profiling {
+                let session_wall_ns = session_start.elapsed().as_nanos() as u64;
+                self.last_session_wall_ns
+                    .store(session_wall_ns, Ordering::Relaxed);
+            }
+            return res;
         }
 
         let resource = {
@@ -559,6 +637,7 @@ impl RasterizerBackend for WgpuBackend {
                         &self.ctx.device,
                         width,
                         height,
+                        self.ctx.supports_timestamp_queries,
                     )))
                 })
                 .clone()
@@ -575,35 +654,74 @@ impl RasterizerBackend for WgpuBackend {
 
         for frame in 0..total {
             let frame_started = Instant::now();
-            let decode_before = self.video_decode_ns.load(Ordering::Relaxed);
-            let upload_ns_before = self.texture_upload_ns.load(Ordering::Relaxed);
-            let upload_bytes_before = self.gpu_texture_upload_bytes.load(Ordering::Relaxed)
-                + self.text_atlas_upload_bytes.load(Ordering::Relaxed);
+            let decode_before = if is_profiling {
+                self.video_decode_ns.load(Ordering::Relaxed)
+            } else {
+                0
+            };
+            let upload_ns_before = if is_profiling {
+                self.texture_upload_ns.load(Ordering::Relaxed)
+                    + self.text_atlas_upload_ns.load(Ordering::Relaxed)
+            } else {
+                0
+            };
+            let upload_bytes_before = if is_profiling {
+                self.gpu_texture_upload_bytes.load(Ordering::Relaxed)
+                    + self.text_atlas_upload_bytes.load(Ordering::Relaxed)
+            } else {
+                0
+            };
 
-            let encode_start = Instant::now();
+            let scene_eval_start = if is_profiling {
+                Some(Instant::now())
+            } else {
+                None
+            };
             let scene = scene_fn(frame)?;
+            let scene_eval_ns = scene_eval_start
+                .map(|t| t.elapsed().as_nanos() as u64)
+                .unwrap_or(0);
+
             let cfg = config_fn(frame);
 
-            let Some((commands, path_mask)) = compile_scene_with_path_mask(&scene, &self.fallback)
+            let encode_start = if is_profiling {
+                Some(Instant::now())
+            } else {
+                None
+            };
+            let Some((commands, path_mask, asset_decode_ns)) =
+                compile_scene_with_path_mask(&scene, &self.fallback)
             else {
                 while let Some(prev) = in_flight.pop_front() {
                     self.drain_slot(prev, &res, width, height, &mut scratch, sink)?;
                 }
                 self.record_cpu_fallback(gpu_fallback_reason(&scene));
-                let fb_start = Instant::now();
+                let fb_start = if is_profiling {
+                    Some(Instant::now())
+                } else {
+                    None
+                };
                 let img = self.fallback.render_frame(&scene, &cfg)?;
-                let fb_render_ns = fb_start.elapsed().as_nanos() as u64;
-                let enc_start = Instant::now();
+                let fb_render_ns = fb_start.map(|t| t.elapsed().as_nanos() as u64).unwrap_or(0);
+                let enc_start = if is_profiling {
+                    Some(Instant::now())
+                } else {
+                    None
+                };
                 sink.consume(frame, img.as_raw())?;
-                let enc_ns = enc_start.elapsed().as_nanos() as u64;
-                if self.is_profiling_enabled() {
+                let enc_ns = enc_start
+                    .map(|t| t.elapsed().as_nanos() as u64)
+                    .unwrap_or(0);
+                if is_profiling {
                     self.record_profile_sample(FrameProfileSample {
                         frame_idx: frame,
+                        scene_eval_ns,
                         decode_ns: 0,
                         upload_ns: 0,
                         upload_bytes: 0,
                         compile_encode_ns: fb_render_ns,
-                        gpu_fence_ns: 0,
+                        submission_wait_ns: 0,
+                        gpu_exec_ns: None,
                         readback_ns: 0,
                         readback_bytes: 0,
                         video_encode_ns: enc_ns,
@@ -639,19 +757,29 @@ impl RasterizerBackend for WgpuBackend {
             })?;
             let submission_index = submitted.submission_index;
             let rx = submitted.readback_rx;
-            let encode_total_ns = encode_start.elapsed().as_nanos() as u64;
+            let query_rx = submitted.query_rx;
+            let encode_total_ns = encode_start
+                .map(|t| t.elapsed().as_nanos() as u64)
+                .unwrap_or(0);
 
-            let decode_after = self.video_decode_ns.load(Ordering::Relaxed);
-            let upload_ns_after = self.texture_upload_ns.load(Ordering::Relaxed);
-            let upload_bytes_after = self.gpu_texture_upload_bytes.load(Ordering::Relaxed)
-                + self.text_atlas_upload_bytes.load(Ordering::Relaxed);
+            let (decode_ns, upload_ns, upload_bytes, compile_encode_ns) = if is_profiling {
+                let decode_after = self.video_decode_ns.load(Ordering::Relaxed);
+                let upload_ns_after = self.texture_upload_ns.load(Ordering::Relaxed)
+                    + self.text_atlas_upload_ns.load(Ordering::Relaxed);
+                let upload_bytes_after = self.gpu_texture_upload_bytes.load(Ordering::Relaxed)
+                    + self.text_atlas_upload_bytes.load(Ordering::Relaxed);
 
-            let decode_ns = decode_after.saturating_sub(decode_before);
-            let upload_ns = upload_ns_after.saturating_sub(upload_ns_before);
-            let upload_bytes = upload_bytes_after.saturating_sub(upload_bytes_before);
-            let compile_encode_ns = encode_total_ns
-                .saturating_sub(decode_ns)
-                .saturating_sub(upload_ns);
+                let video_decode_diff = decode_after.saturating_sub(decode_before);
+                let dec_ns = video_decode_diff.saturating_add(asset_decode_ns);
+                let upl_ns = upload_ns_after.saturating_sub(upload_ns_before);
+                let upl_bytes = upload_bytes_after.saturating_sub(upload_bytes_before);
+                let comp_enc_ns = encode_total_ns
+                    .saturating_sub(upl_ns)
+                    .saturating_sub(asset_decode_ns);
+                (dec_ns, upl_ns, upl_bytes, comp_enc_ns)
+            } else {
+                (0, 0, 0, 0)
+            };
 
             self.gpu_frame_count.fetch_add(1, Ordering::Relaxed);
 
@@ -660,7 +788,9 @@ impl RasterizerBackend for WgpuBackend {
                 slot_idx,
                 submission_index,
                 rx: rx.expect("readback was requested for render_stream"),
+                query_rx,
                 frame_started,
+                scene_eval_ns,
                 decode_ns,
                 upload_ns,
                 upload_bytes,
@@ -671,6 +801,12 @@ impl RasterizerBackend for WgpuBackend {
         // Drain any remaining in-flight frame at the end of the stream
         while let Some(prev) = in_flight.pop_front() {
             self.drain_slot(prev, &res, width, height, &mut scratch, sink)?;
+        }
+
+        if is_profiling {
+            let session_wall_ns = session_start.elapsed().as_nanos() as u64;
+            self.last_session_wall_ns
+                .store(session_wall_ns, Ordering::Relaxed);
         }
 
         Ok(())

@@ -13,10 +13,18 @@ pub(crate) struct GpuFrameSlot {
     pub(crate) msaa_view: wgpu::TextureView,
     pub(crate) readback: wgpu::Buffer,
     pub(crate) bytes_per_row: u32,
+    pub(crate) query_set: Option<wgpu::QuerySet>,
+    pub(crate) query_resolve_buffer: Option<wgpu::Buffer>,
+    pub(crate) query_readback_buffer: Option<wgpu::Buffer>,
 }
 
 impl GpuFrameSlot {
-    pub(crate) fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        supports_timestamps: bool,
+    ) -> Self {
         let bytes_per_row = align_to_256(width * 4);
 
         let msaa_texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -60,6 +68,29 @@ impl GpuFrameSlot {
             mapped_at_creation: false,
         });
 
+        let (query_set, query_resolve_buffer, query_readback_buffer) = if supports_timestamps {
+            let qs = device.create_query_set(&wgpu::QuerySetDescriptor {
+                label: Some("gpu_frame_slot_timestamp_query_set"),
+                count: 2,
+                ty: wgpu::QueryType::Timestamp,
+            });
+            let resolve = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("gpu_query_resolve_buffer"),
+                size: 16,
+                usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            });
+            let readback = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("gpu_query_readback_buffer"),
+                size: 16,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            (Some(qs), Some(resolve), Some(readback))
+        } else {
+            (None, None, None)
+        };
+
         Self {
             texture,
             texture_view,
@@ -67,6 +98,9 @@ impl GpuFrameSlot {
             msaa_view,
             readback,
             bytes_per_row,
+            query_set,
+            query_resolve_buffer,
+            query_readback_buffer,
         }
     }
 }
@@ -81,11 +115,16 @@ pub(crate) struct GpuFrameResources {
 }
 
 impl GpuFrameResources {
-    pub(crate) fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        supports_timestamps: bool,
+    ) -> Self {
         Self {
             slots: [
-                GpuFrameSlot::new(device, width, height),
-                GpuFrameSlot::new(device, width, height),
+                GpuFrameSlot::new(device, width, height, supports_timestamps),
+                GpuFrameSlot::new(device, width, height, supports_timestamps),
             ],
             active_index: 0,
         }
@@ -97,7 +136,9 @@ pub(crate) struct InFlight {
     pub(crate) slot_idx: usize,
     pub(crate) submission_index: wgpu::SubmissionIndex,
     pub(crate) rx: std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
+    pub(crate) query_rx: Option<std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>>,
     pub(crate) frame_started: std::time::Instant,
+    pub(crate) scene_eval_ns: u64,
     pub(crate) decode_ns: u64,
     pub(crate) upload_ns: u64,
     pub(crate) upload_bytes: u64,

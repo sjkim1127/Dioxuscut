@@ -37,6 +37,8 @@ pub(crate) struct GpuContext {
     pub(crate) image_layout: wgpu::BindGroupLayout,
     pub(crate) path_mask_layout: wgpu::BindGroupLayout,
     pub(crate) max_texture_dimension_2d: u32,
+    pub(crate) supports_timestamp_queries: bool,
+    pub(crate) timestamp_period: f32,
 }
 
 impl GpuContext {
@@ -67,11 +69,18 @@ impl GpuContext {
         let limits = adapter.limits();
         let max_texture_dimension_2d = limits.max_texture_dimension_2d;
 
+        let adapter_features = adapter.features();
+        let supports_timestamp_queries = adapter_features.contains(wgpu::Features::TIMESTAMP_QUERY);
+        let mut required_features = wgpu::Features::empty();
+        if supports_timestamp_queries {
+            required_features |= wgpu::Features::TIMESTAMP_QUERY;
+        }
+
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("dioxuscut-rasterizer"),
-                    required_features: wgpu::Features::empty(),
+                    required_features,
                     required_limits: limits,
                     memory_hints: Default::default(),
                 },
@@ -79,6 +88,12 @@ impl GpuContext {
             )
             .await
             .map_err(|e| RasterError::Init(format!("GPU device creation failed: {e}")))?;
+
+        let timestamp_period = if supports_timestamp_queries {
+            queue.get_timestamp_period()
+        } else {
+            1.0
+        };
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("dioxuscut_shader"),
@@ -513,6 +528,8 @@ impl GpuContext {
             image_layout,
             path_mask_layout,
             max_texture_dimension_2d,
+            supports_timestamp_queries,
+            timestamp_period,
         })
     }
 }

@@ -9,15 +9,16 @@ use tiny_skia::{Path as TinyPath, PathSegment, Stroke, Transform};
 
 #[cfg(test)]
 pub(crate) fn compile_scene(scene: &Scene, font: &TinySkiaBackend) -> Option<Vec<DrawCommand>> {
-    compile_scene_with_path_mask(scene, font).map(|(commands, _)| commands)
+    compile_scene_with_path_mask(scene, font).map(|(commands, _, _)| commands)
 }
 
 pub(crate) fn compile_scene_with_path_mask(
     scene: &Scene,
     font: &TinySkiaBackend,
-) -> Option<(Vec<DrawCommand>, Option<GpuPathMask>)> {
+) -> Option<(Vec<DrawCommand>, Option<GpuPathMask>, u64)> {
     let mut commands = Vec::new();
     let mut path_mask = None;
+    let mut asset_decode_ns = 0u64;
     compile_nodes(
         &scene.nodes,
         Transform::identity(),
@@ -25,6 +26,7 @@ pub(crate) fn compile_scene_with_path_mask(
         &mut commands,
         font,
         &mut path_mask,
+        &mut asset_decode_ns,
     )?;
     if scene.nodes.iter().any(|node| {
         matches!(
@@ -42,7 +44,7 @@ pub(crate) fn compile_scene_with_path_mask(
             command.instance_mut().kind_data[3] |= 2;
         }
     }
-    Some((commands, path_mask))
+    Some((commands, path_mask, asset_decode_ns))
 }
 
 pub(crate) fn compile_nodes(
@@ -52,6 +54,7 @@ pub(crate) fn compile_nodes(
     output: &mut Vec<DrawCommand>,
     font: &TinySkiaBackend,
     path_mask: &mut Option<GpuPathMask>,
+    asset_decode_ns: &mut u64,
 ) -> Option<()> {
     for node in nodes {
         match node {
@@ -262,9 +265,11 @@ pub(crate) fn compile_nodes(
                 let playback_time = *time * f64::from(*playback_rate);
                 let target_w = w.round().max(1.0) as u32;
                 let target_h = h.round().max(1.0) as u32;
+                let t_start = std::time::Instant::now();
                 let image = font
                     .lottie_frame(src, playback_time, target_w, target_h, *loop_behavior)
                     .ok()?;
+                *asset_decode_ns += t_start.elapsed().as_nanos() as u64;
                 let mut instance =
                     GpuInstance::solid(Color::WHITE, opacity * *node_opacity, transform);
                 instance.kind_data[0] = 5;
@@ -307,10 +312,10 @@ pub(crate) fn compile_nodes(
                     return None;
                 }
                 let playback_time = *time * f64::from(*playback_rate);
-                let (frame_index, image) = font
-                    .gif_frame_with_index(src, playback_time, *loop_behavior)
-                    .ok()
-                    .flatten()?;
+                let t_start = std::time::Instant::now();
+                let frame_res = font.gif_frame_with_index(src, playback_time, *loop_behavior);
+                *asset_decode_ns += t_start.elapsed().as_nanos() as u64;
+                let (frame_index, image) = frame_res.ok().flatten()?;
                 let mut instance =
                     GpuInstance::solid(Color::WHITE, opacity * *node_opacity, transform);
                 instance.kind_data[0] = 5;
@@ -338,8 +343,10 @@ pub(crate) fn compile_nodes(
                 if ![*x, *y, *font_size].iter().all(|v| v.is_finite()) || *font_size <= 0.0 {
                     return None;
                 }
+                let t_start = std::time::Instant::now();
                 let rendered =
                     font.rasterize_text(content, *font_size, *font_weight, font_sources)?;
+                *asset_decode_ns += t_start.elapsed().as_nanos() as u64;
                 let mut instance = GpuInstance::solid(*color, opacity, transform);
                 instance.kind_data[0] = 6;
                 instance.bounds = [
@@ -376,6 +383,7 @@ pub(crate) fn compile_nodes(
                     output,
                     font,
                     path_mask,
+                    asset_decode_ns,
                 )?;
             }
 
@@ -403,6 +411,7 @@ pub(crate) fn compile_nodes(
                     output,
                     font,
                     path_mask,
+                    asset_decode_ns,
                 )?;
                 *path_mask = gpu_path_mask_from_svg(d, transform, Color::WHITE);
                 for command in &mut output[start..] {
@@ -467,6 +476,7 @@ pub(crate) fn compile_nodes(
                     output,
                     font,
                     path_mask,
+                    asset_decode_ns,
                 )?;
                 *path_mask =
                     gpu_path_mask_from_node(mask_nodes.first().unwrap(), transform, *mask_mode);
@@ -562,6 +572,7 @@ pub(crate) fn compile_nodes(
                     output,
                     font,
                     path_mask,
+                    asset_decode_ns,
                 )?;
                 for command in &mut output[start..] {
                     let instance = command.instance_mut();
@@ -622,6 +633,7 @@ pub(crate) fn compile_nodes(
                     output,
                     font,
                     path_mask,
+                    asset_decode_ns,
                 )?;
                 for command in &mut output[start..] {
                     let instance = command.instance_mut();
