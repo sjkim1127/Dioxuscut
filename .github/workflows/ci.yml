@@ -62,6 +62,9 @@ jobs:
       - name: Check Dioxus Desktop host contract
         run: cargo check --locked -p example --features desktop
 
+      - name: Prepare Tauri frontend directory for macro checks
+        run: mkdir -p apps/studio-tauri/dist
+
       - name: Check Tauri host contract
         run: cargo check --locked -p dioxuscut-studio-tauri
 

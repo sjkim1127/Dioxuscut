@@ -359,10 +359,12 @@ impl WgpuShaderRunner {
             &view,
             width,
             height,
-            time,
-            params,
-            source,
-            wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+            ShaderRenderParams {
+                time,
+                params,
+                source,
+                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+            },
         )?;
 
         // Staging buffer readback
@@ -433,24 +435,13 @@ impl WgpuShaderRunner {
         target: &wgpu::TextureView,
         width: u32,
         height: u32,
-        time: f32,
-        params: [f32; 4],
-        source: &str,
-        load: wgpu::LoadOp<wgpu::Color>,
+        params: ShaderRenderParams<'_>,
     ) -> Result<(), RasterError> {
         self.render_into_region(
             encoder,
             target,
-            width,
-            height,
-            0.0,
-            0.0,
-            width as f32,
-            height as f32,
-            time,
+            ShaderRenderRegion::full_target(width, height),
             params,
-            source,
-            load,
         )
     }
 
@@ -461,18 +452,10 @@ impl WgpuShaderRunner {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
-        target_width: u32,
-        target_height: u32,
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
-        time: f32,
-        params: [f32; 4],
-        source: &str,
-        load: wgpu::LoadOp<wgpu::Color>,
+        region: ShaderRenderRegion,
+        params: ShaderRenderParams<'_>,
     ) -> Result<(), RasterError> {
-        let wgsl = wrap_wgsl_shader(source);
+        let wgsl = wrap_wgsl_shader(params.source);
         let cache_key = format!("target:{wgsl}");
         let mut cache = self
             .pipeline_cache
@@ -527,10 +510,10 @@ impl WgpuShaderRunner {
         drop(cache);
 
         let uniforms = ShaderUniforms {
-            resolution: [width, height],
-            time,
+            resolution: [region.width, region.height],
+            time: params.time,
             _pad: 0.0,
-            params,
+            params: params.params,
         };
         let uniform_bytes = unsafe {
             std::slice::from_raw_parts(
@@ -559,7 +542,7 @@ impl WgpuShaderRunner {
                 view: target,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load,
+                    load: params.load,
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -570,14 +553,51 @@ impl WgpuShaderRunner {
         pass.set_pipeline(&pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
         pass.set_viewport(
-            x.clamp(0.0, target_width as f32),
-            y.clamp(0.0, target_height as f32),
-            width.max(1.0).min(target_width as f32),
-            height.max(1.0).min(target_height as f32),
+            region.x.clamp(0.0, region.target_width as f32),
+            region.y.clamp(0.0, region.target_height as f32),
+            region.width.max(1.0).min(region.target_width as f32),
+            region.height.max(1.0).min(region.target_height as f32),
             0.0,
             1.0,
         );
         pass.draw(0..6, 0..1);
         Ok(())
     }
+}
+
+/// Target dimensions and viewport region for a shader draw.
+#[cfg(feature = "gpu")]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShaderRenderRegion {
+    pub target_width: u32,
+    pub target_height: u32,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+#[cfg(feature = "gpu")]
+impl ShaderRenderRegion {
+    /// Create a region covering the entire target dimensions.
+    pub fn full_target(width: u32, height: u32) -> Self {
+        Self {
+            target_width: width,
+            target_height: height,
+            x: 0.0,
+            y: 0.0,
+            width: width as f32,
+            height: height as f32,
+        }
+    }
+}
+
+/// Dynamic shader parameters, source code, and load operation.
+#[cfg(feature = "gpu")]
+#[derive(Debug, Clone, Copy)]
+pub struct ShaderRenderParams<'a> {
+    pub time: f32,
+    pub params: [f32; 4],
+    pub source: &'a str,
+    pub load: wgpu::LoadOp<wgpu::Color>,
 }
