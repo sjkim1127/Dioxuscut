@@ -444,7 +444,6 @@ export async function parseMedia({
   if (!video && !image && audioDuration === null && container?.durationInSeconds == null) {
     throw new Error(`unable to parse media metadata: ${src}`);
   }
-  const dimensions = video ? { width: video.width, height: video.height } : image;
   const webmTrack = webm && video ? {
     type: 'video',
     width: video.width,
@@ -461,10 +460,15 @@ export async function parseMedia({
     sampleRate: webmMetadata.audioSampleRate,
     numberOfChannels: webmMetadata.audioChannels,
   } : null;
-  const durationInSeconds = video?.durationInSeconds ?? audioDuration ?? container?.durationInSeconds
-    ?? webmMetadata?.durationInSeconds ?? 0;
   const videoTrack = container?.tracks?.find((track) => track.type === 'video') ?? webmTrack;
   const audioTrack = container?.tracks?.find((track) => track.type === 'audio') ?? webmAudioTrack;
+  const dimensions = video
+    ? { width: video.width, height: video.height }
+    : videoTrack && videoTrack.width && videoTrack.height
+      ? { width: videoTrack.width, height: videoTrack.height }
+      : image;
+  const durationInSeconds = video?.durationInSeconds ?? audioDuration ?? container?.durationInSeconds
+    ?? webmMetadata?.durationInSeconds ?? 0;
   const fps = videoTrack?.fps ?? null;
   const videoCodec = videoTrack?.codecConfig
     ? makeIsoBmffWebCodecsConfig(videoTrack).codec
@@ -484,8 +488,8 @@ export async function parseMedia({
   if (videoTrack) {
     await onVideoTrack?.({
       ...videoTrack,
-      width: video?.width ?? null,
-      height: video?.height ?? null,
+      width: video?.width ?? videoTrack.width ?? null,
+      height: video?.height ?? videoTrack.height ?? null,
       codec: videoCodec,
     });
   }
@@ -520,10 +524,16 @@ export async function parseMedia({
   const tracks = container?.tracks ?? [webmTrack, webmAudioTrack].filter(Boolean);
   await onTracks?.(tracks);
   await onParseProgress?.({ bytes: 0, percentage: 1, totalBytes: null });
+  const resolvedWidth = video?.width ?? videoTrack?.width;
+  const resolvedHeight = video?.height ?? videoTrack?.height;
   const result = {
     durationInSeconds,
     dimensions,
-    videoTracks: video ? [{ width: video.width, height: video.height, aspectRatio: video.aspectRatio }] : [],
+    videoTracks: resolvedWidth && resolvedHeight ? [{
+      width: resolvedWidth,
+      height: resolvedHeight,
+      aspectRatio: resolvedWidth / resolvedHeight,
+    }] : [],
     videoCodec,
     audioCodec,
     audioTracks: audioDuration !== null ? [{ durationInSeconds: audioDuration }] : [],
@@ -1225,6 +1235,20 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
   const tracks = isoChildren(bytes, moov.headerSize, bytes.length)
     .filter((box) => box.type === 'trak')
     .map((trak) => {
+      const tkhd = isoPath(bytes, trak, ['tkhd']);
+      let trackWidth = null;
+      let trackHeight = null;
+      let trackId = null;
+      if (tkhd) {
+        const tkhdPayload = tkhd.offset + tkhd.headerSize;
+        const version = bytes[tkhdPayload];
+        trackId = uint32be(bytes, tkhdPayload + (version === 1 ? 20 : 12));
+        const geomOffset = tkhdPayload + (version === 1 ? 88 : 76);
+        if (geomOffset + 8 <= tkhd.offset + tkhd.size) {
+          trackWidth = uint32be(bytes, geomOffset) >>> 16;
+          trackHeight = uint32be(bytes, geomOffset + 4) >>> 16;
+        }
+      }
       const mdia = isoPath(bytes, trak, ['mdia']);
       const mdhd = mdia && isoPath(bytes, mdia, ['mdhd']);
       const hdlr = mdia && isoPath(bytes, mdia, ['hdlr']);
@@ -1371,6 +1395,9 @@ export async function parseIsoBmffMovieHeader(source, { requestInit, maxBytes = 
           : null,
       }));
       return {
+        id: trackId,
+        width: trackWidth,
+        height: trackHeight,
         type: handler === 'vide' ? 'video' : handler === 'soun' ? 'audio' : 'unknown',
         handler,
         timescale: trackTimescale,
