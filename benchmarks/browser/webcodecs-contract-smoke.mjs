@@ -65,7 +65,11 @@ await run(process.env.FFMPEG_PATH ?? 'ffmpeg', [
   '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-map', '0:v', '-map', '1:a',
   '-c:v', 'libvpx-vp9', '-crf', '35', '-b:v', '0', '-c:a', 'libopus', '-b:a', '64k', '-shortest', '-y', webmAvFixturePath,
 ]);
-const browser = await chromium.launch({ executablePath, headless: true });
+const browser = await chromium.launch({
+  ...(executablePath ? { executablePath } : {}),
+  headless: true,
+  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+});
 try {
   const page = await browser.newPage();
   const fixture = await readFile(new URL('../../assets/showcase.mp4', import.meta.url));

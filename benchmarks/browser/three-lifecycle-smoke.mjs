@@ -11,11 +11,21 @@ const child = spawn(process.execPath, [worker.pathname, `--url=${url}`, `--compo
 });
 const lines = createInterface({ input: child.stdout });
 const messages = [];
-lines.on('line', (line) => { try { messages.push(JSON.parse(line)); } catch {} });
-const waitFor = async (predicate) => {
+lines.on('line', (line) => {
+  try {
+    messages.push(JSON.parse(line));
+  } catch (err) {
+    console.error('NON_JSON LINE:', line);
+  }
+});
+const waitFor = async (predicate, timeoutMs = 15000) => {
+  const started = Date.now();
   while (true) {
     const index = messages.findIndex(predicate);
     if (index >= 0) return messages.splice(index, 1)[0];
+    if (Date.now() - started > timeoutMs) {
+      throw new Error(`Timed out waiting for message after ${timeoutMs}ms. Received messages: ${JSON.stringify(messages)}`);
+    }
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 };

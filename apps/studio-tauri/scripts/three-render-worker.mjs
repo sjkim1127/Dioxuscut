@@ -52,7 +52,11 @@ const renderFrame = (request) => new Promise((resolve, reject) => {
     );
 });
 
-const browser = await chromium.launch({ ...(executablePath ? { executablePath } : {}), headless: true });
+const browser = await chromium.launch({
+  ...(executablePath ? { executablePath } : {}),
+  headless: true,
+  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+});
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
 let viewportWidth = 1280;
 let viewportHeight = 720;
