@@ -2469,6 +2469,25 @@ export async function renderFrame({ composition = 'three_preview', frame: nextFr
       // buffer while retaining normal alpha blending in track order.
       renderer.clear(true, true, true);
     }
+    // Three.js resets the drawing buffer whenever setSize() is called, even
+    // when the dimensions have not changed. Timeline compositions commonly
+    // call setSize(width, height) from render(), so preserve the shared color
+    // buffer for same-size requests while restoring the viewport as usual.
+    const originalSetSize = hasThreeLayers ? renderer.setSize : undefined;
+    if (hasThreeLayers) {
+      renderer.setSize = (requestedWidth, requestedHeight, updateStyle = true) => {
+        const currentSize = renderer.getSize(new THREE.Vector2());
+        if (requestedWidth === currentSize.x && requestedHeight === currentSize.y) {
+          if (updateStyle) {
+            canvas.style.width = `${requestedWidth}px`;
+            canvas.style.height = `${requestedHeight}px`;
+          }
+          renderer.setViewport(0, 0, requestedWidth, requestedHeight);
+          return;
+        }
+        return originalSetSize.call(renderer, requestedWidth, requestedHeight, updateStyle);
+      };
+    }
     try {
       for (const clip of activeClips) {
         const clipFrame = nextFrame - clip.start;
@@ -2517,6 +2536,7 @@ export async function renderFrame({ composition = 'three_preview', frame: nextFr
         }
       }
     } finally {
+      if (hasThreeLayers) renderer.setSize = originalSetSize;
       frame = projectContext.frame;
       activeAssets = projectContext.activeAssets;
       activeProps = projectContext.activeProps;
