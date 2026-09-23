@@ -9,6 +9,7 @@
 - Partial exports honor their requested frame ranges and report progress; audio volume keyframes follow composition time.
 - Concurrent render jobs use isolated temporary directories.
 - Remote asset downloads reject unsafe destinations, revalidate redirects, and enforce per-asset and per-project byte limits.
+- Studio's Tauri webview blocks external and lookalike-origin navigation while allowing the packaged app and local development server.
 
 ### Release
 
