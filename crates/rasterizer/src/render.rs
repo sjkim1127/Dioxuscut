@@ -28,12 +28,12 @@ use rayon::prelude::*;
 use std::fmt;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{ChildStdin, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-struct FfmpegFrameSink<'a> {
+struct FfmpegFrameSink<'a, W: Write> {
     control: &'a RenderControl,
     started: Instant,
     input_width: u32,
@@ -42,10 +42,11 @@ struct FfmpegFrameSink<'a> {
     output_height: u32,
     total: u32,
     start_frame: u32,
-    stdin: &'a mut ChildStdin,
+    frame_step: u32,
+    stdin: &'a mut W,
 }
 
-impl FrameSink for FfmpegFrameSink<'_> {
+impl<W: Write> FrameSink for FfmpegFrameSink<'_, W> {
     fn consume(&mut self, frame: u32, rgba: &[u8]) -> Result<(), RasterError> {
         self.control.check(self.started)?;
         let scaled = scale_rgba_frame(
@@ -62,7 +63,7 @@ impl FrameSink for FfmpegFrameSink<'_> {
             callback(RenderProgress {
                 completed_frames: frame + 1,
                 total_frames: self.total,
-                frame: self.start_frame + frame,
+                frame: self.start_frame + frame * self.frame_step,
             });
         }
         Ok(())
@@ -802,6 +803,7 @@ where
             output_height,
             total,
             start_frame: config.start_frame,
+            frame_step: config.frame_step,
             stdin: &mut stdin,
         };
         backend.render_stream(
@@ -892,7 +894,7 @@ where
                         callback(RenderProgress {
                             completed_frames: frame + 1,
                             total_frames: total,
-                            frame: config.start_frame + frame,
+                            frame: config.start_frame + frame * config.frame_step,
                         });
                     }
                     config.control.report_encoding_progress(EncodingProgress {
@@ -2092,6 +2094,33 @@ mod tests {
     }
 
     #[test]
+    fn streaming_progress_reports_the_sampled_source_frame() {
+        let frames = Arc::new(Mutex::new(Vec::new()));
+        let captured_frames = Arc::clone(&frames);
+        let control = RenderControl::new().with_progress(move |progress| {
+            captured_frames.lock().unwrap().push(progress.frame);
+        });
+        let mut output = Vec::new();
+        let mut sink = FfmpegFrameSink {
+            control: &control,
+            started: Instant::now(),
+            input_width: 1,
+            input_height: 1,
+            output_width: 1,
+            output_height: 1,
+            total: 2,
+            start_frame: 10,
+            frame_step: 3,
+            stdin: &mut output,
+        };
+
+        sink.consume(1, &[0, 0, 0, 255]).unwrap();
+
+        assert_eq!(*frames.lock().unwrap(), vec![13]);
+        assert_eq!(output, vec![0, 0, 0, 255]);
+    }
+
+    #[test]
     fn frame_step_preserves_sampled_video_duration_for_audio() {
         let config = PipeConfig::new(64, 64, 30.0, 3, "out.mp4")
             .with_codec(VideoCodec::H264)
@@ -2280,6 +2309,7 @@ mod tests {
         });
         let config = PipeConfig::new(32, 24, 30.0, 3, &output)
             .with_frame_start(10)
+            .with_frame_step(2)
             .with_concurrency(2)
             .with_control(control);
 
@@ -2291,7 +2321,7 @@ mod tests {
 
         let mut actual_frames = rendered_frames.lock().unwrap().clone();
         actual_frames.sort_unstable();
-        assert_eq!(actual_frames, vec![10, 11, 12]);
+        assert_eq!(actual_frames, vec![10, 12, 14]);
         assert_eq!(
             progress.lock().unwrap().as_slice(),
             &[
@@ -2303,12 +2333,12 @@ mod tests {
                 RenderProgress {
                     completed_frames: 2,
                     total_frames: 3,
-                    frame: 11,
+                    frame: 12,
                 },
                 RenderProgress {
                     completed_frames: 3,
                     total_frames: 3,
-                    frame: 12,
+                    frame: 14,
                 },
             ]
         );

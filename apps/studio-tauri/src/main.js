@@ -2617,10 +2617,23 @@ document.querySelector('#timeline-slider').addEventListener('input', (event) => 
   setFrame(Number(event.currentTarget.value));
 });
 
+function expectedOutputFrameCount(job) {
+  const output = String(job.output ?? '').split(/[\\/]/).pop() ?? '';
+  const extension = output.split('.').pop()?.toLowerCase();
+  if (['png', 'jpg', 'jpeg', 'webp'].includes(extension)) return 1;
+
+  const settings = job.project.settings;
+  const start = settings.frame_start ?? 0;
+  const end = settings.frame_end ?? settings.duration - 1;
+  const step = Math.max(1, settings.frame_step ?? 1);
+  return Math.ceil(Math.max(0, end - start + 1) / step);
+}
+
 async function refreshJob(id) {
   const job = await invoke('get_render_job', { id });
   if (!job) return;
-  const progress = `render ${job.completed_frames}/${job.project.settings.duration} · encode ${job.encoded_frames ?? 0}/${job.project.settings.duration}`;
+  const totalFrames = expectedOutputFrameCount(job);
+  const progress = `render ${job.completed_frames}/${totalFrames} · encode ${job.encoded_frames ?? 0}/${totalFrames}`;
   document.querySelector('#job').textContent = `${job.id} · ${job.status} · ${progress}`;
   const terminal = ['completed', 'failed', 'cancelled'].includes(job.status);
   document.querySelector('#cancel-render').disabled = terminal;
@@ -2634,7 +2647,8 @@ async function refreshJobList() {
   list.replaceChildren(...jobs.map((job) => {
   const item = document.createElement('div');
     item.className = 'job-item';
-    const progress = `render ${job.completed_frames}/${job.project.settings.duration} · encode ${job.encoded_frames ?? 0}/${job.project.settings.duration}`;
+    const totalFrames = expectedOutputFrameCount(job);
+    const progress = `render ${job.completed_frames}/${totalFrames} · encode ${job.encoded_frames ?? 0}/${totalFrames}`;
     const diagnostics = job.gpu_frames !== null && job.gpu_frames !== undefined
       ? ` · GPU ${job.gpu_frames} · CPU fallback ${job.cpu_fallback_frames ?? 0}${job.gpu_fallback_reason ? ` (${job.gpu_fallback_reason})` : ''}`
       : '';

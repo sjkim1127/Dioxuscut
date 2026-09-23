@@ -84,6 +84,19 @@ fn project_still_format(path: &std::path::Path) -> Option<StillImageFormat> {
     }
 }
 
+fn selected_output_frame_count(
+    frame_start: u32,
+    frame_end: u32,
+    frame_step: u32,
+    still_image: bool,
+) -> u32 {
+    if still_image {
+        1
+    } else {
+        (frame_end - frame_start + 1).div_ceil(frame_step)
+    }
+}
+
 fn browser_worker_path() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os("DIOXUSCUT_BROWSER_WORKER") {
         return Ok(PathBuf::from(path));
@@ -172,17 +185,24 @@ fn start_render_job(
         .settings
         .frame_end
         .unwrap_or(project.settings.duration.saturating_sub(1));
-    let render_frame_count = render_frame_end
-        .saturating_sub(render_frame_start)
-        .saturating_add(1);
-    let gif_output = std::path::Path::new(&output)
-        .extension()
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("gif"));
-    let output_frame_count = if gif_output {
-        render_frame_count.div_ceil(project.settings.frame_step)
+    let browser_preflight = if backend_kind == dioxuscut_project::BackendKind::Browser {
+        let worker = browser_worker_path()?;
+        let configured_url = std::env::var("DIOXUSCUT_BROWSER_URL").ok();
+        let frontend_path = if configured_url.is_none() {
+            Some(browser_frontend_path()?)
+        } else {
+            None
+        };
+        Some((worker, configured_url, frontend_path))
     } else {
-        render_frame_count
+        None
     };
+    let output_frame_count = selected_output_frame_count(
+        render_frame_start,
+        render_frame_end,
+        project.settings.frame_step,
+        project_still_format(std::path::Path::new(&output)).is_some(),
+    );
     {
         let mut store = state
             .jobs
@@ -321,13 +341,8 @@ fn start_render_job(
         });
         return Ok(());
     }
-    let worker = browser_worker_path()?;
-    let configured_url = std::env::var("DIOXUSCUT_BROWSER_URL").ok();
-    let frontend_path = if configured_url.is_none() {
-        Some(browser_frontend_path()?)
-    } else {
-        None
-    };
+    let (worker, configured_url, frontend_path) =
+        browser_preflight.ok_or_else(|| "Browser render preflight was not prepared".to_string())?;
     let concurrency = project
         .settings
         .concurrency
@@ -681,7 +696,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_browser_concurrency, use_file_transport};
+    use super::{default_browser_concurrency, selected_output_frame_count, use_file_transport};
 
     #[test]
     fn tauri_defaults_to_lossless_file_transport() {
@@ -693,5 +708,12 @@ mod tests {
     #[test]
     fn browser_concurrency_has_a_bounded_positive_default() {
         assert!((1..=4).contains(&default_browser_concurrency()));
+    }
+
+    #[test]
+    fn output_frame_count_uses_stride_for_video_and_one_frame_for_stills() {
+        assert_eq!(selected_output_frame_count(100, 199, 2, false), 50);
+        assert_eq!(selected_output_frame_count(100, 199, 3, false), 34);
+        assert_eq!(selected_output_frame_count(100, 199, 3, true), 1);
     }
 }
