@@ -449,9 +449,10 @@ written into workflow files.
 - Video frames use cached FFprobe stream metadata, up to four persistent FFmpeg decoder sources, fixed-output-FPS sampling for VFR input, and a 128 MiB frame LRU. Backward or large forward seeks restart only the affected decoder.
 - Audio declarations may be supplied by `PreparedComposition::audio_tracks()` as
   an explicit render-level timeline, including per-track timing and volume
-  keyframes. Compositions that do not implement that contract use the first
-  rendered scene as a legacy fallback, so audio discovered only after frame
-  zero is not currently inferred automatically.
+  keyframes. The CLI scans rendered scenes across the full timeline when that
+  method returns `None`, so it includes tracks first emitted after frame zero.
+  This legacy fallback renders frames once before encoding; implement
+  `audio_tracks()` to avoid the extra pass.
 - `SceneLayer` supports rectangular or SVG-path clips, alpha or luminance masks, twelve blend modes, ordered blur/brightness/grayscale/opacity filters, and drop shadows. These effects use CPU offscreen surfaces for export and SVG/CSS equivalents for Player preview.
 - GPU acceleration covers rectangles, circles, tessellated path fills and strokes, nested group transforms and opacity, plain normal layers, gradients with up to 16 stops, cached image/video/Lottie textures, and text atlas draws. Unsupported shaders, gradients beyond the stop limit, and some composited mask/blend/filter combinations use CPU fallback; the supported texture/text paths have dedicated CPU/GPU parity tests.
 - Text nodes accept ordered local TTF/OTF `font_sources`; native rendering caches those files, shapes glyph runs with Rustybuzz, and falls through per grapheme. `SceneTextBlock` and Rhai `text_box` add Unicode line breaking, fitting, alignment, line limits, and ellipsis. Text without explicit sources still uses platform font discovery and is not pixel-identical across platforms; full mixed-direction paragraph layout remains incomplete.

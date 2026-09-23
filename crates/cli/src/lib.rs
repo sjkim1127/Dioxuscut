@@ -54,6 +54,59 @@ pub fn project_audio_assets_from_dir(
         .collect()
 }
 
+fn collect_scene_audio_tracks(
+    prepared: &dyn PreparedComposition,
+    first_scene: &dioxuscut_rasterizer::Scene,
+    duration_in_frames: u32,
+    fps: f64,
+) -> Result<Vec<dioxuscut_rasterizer::AudioTrack>, CompositionError> {
+    let mut tracks: Vec<(usize, dioxuscut_rasterizer::AudioTrack)> = Vec::new();
+    for frame in 0..duration_in_frames {
+        let scene;
+        let frame_tracks = if frame == 0 {
+            first_scene.audio_tracks()
+        } else {
+            scene = prepared.render(frame)?;
+            scene.audio_tracks()
+        };
+        for (index, mut candidate) in frame_tracks.into_iter().enumerate() {
+            if candidate.timeline_start == 0.0 && frame > 0 {
+                candidate.timeline_start = frame as f64 / fps;
+            }
+            if let Some((_, existing)) = tracks.iter_mut().find(|(track_index, track)| {
+                *track_index == index && same_inferred_audio_track(track, &candidate)
+            }) {
+                if existing.duration.is_none() {
+                    existing.duration = candidate.duration;
+                } else if let Some(candidate_duration) = candidate.duration {
+                    existing.duration = Some(
+                        existing
+                            .duration
+                            .expect("duration was checked above")
+                            .max(candidate_duration),
+                    );
+                }
+                if existing.volume_keyframes.is_empty() {
+                    existing.volume_keyframes = candidate.volume_keyframes;
+                }
+                continue;
+            }
+            tracks.push((index, candidate));
+        }
+    }
+    Ok(tracks.into_iter().map(|(_, track)| track).collect())
+}
+
+fn same_inferred_audio_track(
+    left: &dioxuscut_rasterizer::AudioTrack,
+    right: &dioxuscut_rasterizer::AudioTrack,
+) -> bool {
+    left.src == right.src
+        && left.start_from == right.start_from
+        && left.playback_rate == right.playback_rate
+        && left.looped == right.looped
+}
+
 fn native_image_cache_bytes() -> Option<usize> {
     std::env::var("DIOXUSCUT_IMAGE_CACHE_BYTES")
         .ok()
@@ -188,6 +241,8 @@ mod project_timeline_tests {
 
     struct PreparedAudioOnly;
 
+    struct PreparedLateSceneAudio;
+
     impl dioxuscut_composition::Composition for AudioOnlyComposition {
         fn id(&self) -> &str {
             "AudioOnly"
@@ -214,6 +269,18 @@ mod project_timeline_tests {
             Ok(Some(vec![dioxuscut_rasterizer::AudioTrack::new(
                 "later.wav",
             )]))
+        }
+    }
+
+    impl dioxuscut_composition::PreparedComposition for PreparedLateSceneAudio {
+        fn render(&self, frame: u32) -> Result<dioxuscut_rasterizer::Scene, CompositionError> {
+            let mut scene = dioxuscut_rasterizer::Scene::new();
+            if frame >= 30 {
+                scene.push(dioxuscut_rasterizer::SceneNode::Audio {
+                    track: dioxuscut_rasterizer::AudioTrack::new("later.wav"),
+                });
+            }
+            Ok(scene)
         }
     }
 
@@ -283,6 +350,19 @@ mod project_timeline_tests {
         assert_eq!(tracks[0].src, "later.wav");
         assert!((tracks[0].timeline_start - 10.0 / 30.0).abs() < f64::EPSILON);
         assert_eq!(tracks[0].duration, Some(5.0 / 30.0));
+    }
+
+    #[test]
+    fn legacy_scene_audio_is_collected_when_first_emitted_after_frame_zero() {
+        let prepared = PreparedLateSceneAudio;
+        let first_scene = prepared.render(0).expect("frame zero renders");
+
+        let tracks = collect_scene_audio_tracks(&prepared, &first_scene, 60, 30.0)
+            .expect("scene audio is collected");
+
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].src, "later.wav");
+        assert!((tracks[0].timeline_start - 1.0).abs() < f64::EPSILON);
     }
 }
 
@@ -1296,9 +1376,24 @@ pub async fn execute_render_command_with_registry_and_control(
     // Validate the first frame before starting FFmpeg. Dynamic compositions
     // therefore report syntax, type, and API errors without creating an output.
     let first_scene = prepared.render(0)?;
-    let mut audio_tracks = prepared
-        .audio_tracks()?
-        .unwrap_or_else(|| first_scene.audio_tracks());
+    let mut audio_tracks = match prepared.audio_tracks()? {
+        Some(tracks) => tracks,
+        None if request.backend != RenderBackend::Browser
+            && request.codec.still_format().is_none()
+            && request.codec != RenderCodec::Gif =>
+        {
+            // FFmpeg's input layout is fixed before frame rendering starts, so
+            // legacy scene-derived audio must be collected across the timeline.
+            // Implementing audio_tracks() avoids this extra render pass.
+            collect_scene_audio_tracks(
+                prepared.as_ref(),
+                &first_scene,
+                context.duration_in_frames,
+                context.fps,
+            )?
+        }
+        None => first_scene.audio_tracks(),
+    };
     audio_tracks.extend(
         request
             .audio
