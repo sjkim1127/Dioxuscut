@@ -110,8 +110,17 @@ try {
   const layeredFrame = await waitFor((message) =>
     (message.type === 'frame' || message.type === 'error') && message.frame === 1);
   assert.equal(layeredFrame.type, 'frame', `timeline layer render failed: ${layeredFrame.message ?? 'no frame response'}`);
-  assert.equal(layeredFrame.video_frame.width, 640, `timeline frame width: ${layeredFrame.video_frame.width}`);
-  assert.equal(layeredFrame.video_frame.height, 360, `timeline frame height: ${layeredFrame.video_frame.height}`);
+  const frameMetadata = JSON.stringify({
+    width: layeredFrame.video_frame.width,
+    height: layeredFrame.video_frame.height,
+    sourceCanvasWidth: layeredFrame.video_frame.source_canvas_width,
+    sourceCanvasHeight: layeredFrame.video_frame.source_canvas_height,
+    sourceCssWidth: layeredFrame.video_frame.source_css_width,
+    sourceCssHeight: layeredFrame.video_frame.source_css_height,
+    devicePixelRatio: layeredFrame.video_frame.device_pixel_ratio,
+  });
+  assert.equal(layeredFrame.video_frame.width, 640, `timeline frame dimensions: ${frameMetadata}`);
+  assert.equal(layeredFrame.video_frame.height, 360, `timeline frame dimensions: ${frameMetadata}`);
   const layeredPixels = Buffer.from(layeredFrame.video_frame.rgba_base64, 'base64');
   assert.equal(layeredPixels.length, 640 * 360 * 4, `timeline RGBA byte length: ${layeredPixels.length}`);
   const centerPixel = 4 * (Math.floor(180) * 640 + Math.floor(320));
