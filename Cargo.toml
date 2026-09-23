@@ -78,6 +78,7 @@ symphonia         = { version = "0.5.4", default-features = false, features = ["
 anyhow            = "1"
 thiserror         = "1"
 sha2              = "0.10"
+tempfile          = "3"
 
 # Parallelism
 rayon             = "1"
