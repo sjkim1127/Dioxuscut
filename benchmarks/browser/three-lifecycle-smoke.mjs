@@ -110,7 +110,10 @@ try {
   const layeredFrame = await waitFor((message) =>
     (message.type === 'frame' || message.type === 'error') && message.frame === 1);
   assert.equal(layeredFrame.type, 'frame', `timeline layer render failed: ${layeredFrame.message ?? 'no frame response'}`);
+  assert.equal(layeredFrame.video_frame.width, 640, `timeline frame width: ${layeredFrame.video_frame.width}`);
+  assert.equal(layeredFrame.video_frame.height, 360, `timeline frame height: ${layeredFrame.video_frame.height}`);
   const layeredPixels = Buffer.from(layeredFrame.video_frame.rgba_base64, 'base64');
+  assert.equal(layeredPixels.length, 640 * 360 * 4, `timeline RGBA byte length: ${layeredPixels.length}`);
   const centerPixel = 4 * (Math.floor(180) * 640 + Math.floor(320));
   assert.ok(layeredPixels[centerPixel] > 80, `base layer was cleared: ${[...layeredPixels.subarray(centerPixel, centerPixel + 4)]}`);
   assert.ok(layeredPixels[centerPixel + 2] > 80, `overlay layer was not composited: ${[...layeredPixels.subarray(centerPixel, centerPixel + 4)]}`);
