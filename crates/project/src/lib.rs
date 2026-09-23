@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::Read;
+#[cfg(not(target_arch = "wasm32"))]
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -453,6 +455,20 @@ impl Project {
         cache_dir: impl AsRef<std::path::Path>,
         max_bytes: usize,
     ) -> Result<(), ProjectError> {
+        self.materialize_remote_assets_with_resolver(
+            cache_dir,
+            max_bytes,
+            &PublicRemoteAssetResolver,
+        )
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn materialize_remote_assets_with_resolver(
+        &mut self,
+        cache_dir: impl AsRef<std::path::Path>,
+        max_bytes: usize,
+        resolver: &impl RemoteAssetResolver,
+    ) -> Result<(), ProjectError> {
         if max_bytes == 0 {
             return Err(ProjectError::AssetRead {
                 asset: "remote".into(),
@@ -462,28 +478,106 @@ impl Project {
         let cache_dir = cache_dir.as_ref();
         std::fs::create_dir_all(cache_dir)
             .map_err(|error| ProjectError::File(error.to_string()))?;
-        let client = reqwest::blocking::Client::builder()
-            .redirect(reqwest::redirect::Policy::limited(5))
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .map_err(|error| ProjectError::AssetRead {
-                asset: "remote".into(),
-                reason: error.to_string(),
-            })?;
         let mut replacements = Vec::new();
         for asset in &mut self.assets {
             let source = asset.path.trim();
-            if !(source.starts_with("http://") || source.starts_with("https://")) {
+            if !has_http_scheme(source) {
                 continue;
             }
-            let response = client
-                .get(source)
-                .send()
-                .and_then(|response| response.error_for_status())
-                .map_err(|error| ProjectError::AssetRead {
+            let mut current_url =
+                reqwest::Url::parse(source).map_err(|error| ProjectError::AssetRead {
+                    asset: asset.id.clone(),
+                    reason: format!("invalid remote asset URL: {error}"),
+                })?;
+            validate_remote_url(&current_url).map_err(|reason| ProjectError::AssetRead {
+                asset: asset.id.clone(),
+                reason,
+            })?;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            let mut response = None;
+            for redirect_count in 0..=5 {
+                let addresses =
+                    resolver
+                        .resolve(&current_url)
+                        .map_err(|reason| ProjectError::AssetRead {
+                            asset: asset.id.clone(),
+                            reason,
+                        })?;
+                if addresses.is_empty() {
+                    return Err(ProjectError::AssetRead {
+                        asset: asset.id.clone(),
+                        reason: "remote asset hostname resolved to no addresses".into(),
+                    });
+                }
+                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                if remaining.is_zero() {
+                    return Err(ProjectError::AssetRead {
+                        asset: asset.id.clone(),
+                        reason: "remote asset download timed out".into(),
+                    });
+                }
+                let mut builder = reqwest::blocking::Client::builder()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .no_proxy()
+                    .timeout(remaining);
+                if let Some(host) = current_url.host_str() {
+                    if parse_url_ip_literal(host).is_none() {
+                        builder = builder.resolve_to_addrs(host, &addresses);
+                    }
+                }
+                let client = builder.build().map_err(|error| ProjectError::AssetRead {
                     asset: asset.id.clone(),
                     reason: error.to_string(),
                 })?;
+                let result = client.get(current_url.clone()).send().map_err(|error| {
+                    ProjectError::AssetRead {
+                        asset: asset.id.clone(),
+                        reason: error.to_string(),
+                    }
+                })?;
+                if result.status().is_redirection() {
+                    if let Some(location) = result.headers().get(reqwest::header::LOCATION) {
+                        let location =
+                            location.to_str().map_err(|error| ProjectError::AssetRead {
+                                asset: asset.id.clone(),
+                                reason: format!("invalid remote asset redirect: {error}"),
+                            })?;
+                        if redirect_count == 5 {
+                            return Err(ProjectError::AssetRead {
+                                asset: asset.id.clone(),
+                                reason: "remote asset exceeded the 5 redirect limit".into(),
+                            });
+                        }
+                        current_url = current_url.join(location).map_err(|error| {
+                            ProjectError::AssetRead {
+                                asset: asset.id.clone(),
+                                reason: format!("invalid remote asset redirect URL: {error}"),
+                            }
+                        })?;
+                        validate_remote_url(&current_url).map_err(|reason| {
+                            ProjectError::AssetRead {
+                                asset: asset.id.clone(),
+                                reason,
+                            }
+                        })?;
+                        continue;
+                    }
+                }
+                response =
+                    Some(
+                        result
+                            .error_for_status()
+                            .map_err(|error| ProjectError::AssetRead {
+                                asset: asset.id.clone(),
+                                reason: error.to_string(),
+                            })?,
+                    );
+                break;
+            }
+            let response = response.ok_or_else(|| ProjectError::AssetRead {
+                asset: asset.id.clone(),
+                reason: "remote asset redirect did not produce a response".into(),
+            })?;
             if response
                 .content_length()
                 .is_some_and(|length| length > max_bytes as u64)
@@ -637,6 +731,196 @@ impl Project {
             .persist(path)
             .map(|_| ())
             .map_err(|error| ProjectError::File(error.to_string()))
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+trait RemoteAssetResolver {
+    fn resolve(&self, url: &reqwest::Url) -> Result<Vec<SocketAddr>, String>;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct PublicRemoteAssetResolver;
+
+#[cfg(not(target_arch = "wasm32"))]
+fn parse_url_ip_literal(host: &str) -> Option<IpAddr> {
+    let host = host
+        .strip_prefix('[')
+        .and_then(|host| host.strip_suffix(']'))
+        .unwrap_or(host);
+    host.parse().ok()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl RemoteAssetResolver for PublicRemoteAssetResolver {
+    fn resolve(&self, url: &reqwest::Url) -> Result<Vec<SocketAddr>, String> {
+        let host = url
+            .host_str()
+            .ok_or_else(|| "remote asset URL has no hostname".to_string())?;
+        let port = url
+            .port_or_known_default()
+            .ok_or_else(|| "remote asset URL has no valid port".to_string())?;
+        let addresses = if let Some(ip) = parse_url_ip_literal(host) {
+            vec![SocketAddr::new(ip, port)]
+        } else {
+            (host, port)
+                .to_socket_addrs()
+                .map_err(|error| format!("failed to resolve remote asset hostname: {error}"))?
+                .collect()
+        };
+        validate_public_addresses(&addresses)?;
+        Ok(addresses)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl<F> RemoteAssetResolver for F
+where
+    F: Fn(&reqwest::Url) -> Result<Vec<SocketAddr>, String>,
+{
+    fn resolve(&self, url: &reqwest::Url) -> Result<Vec<SocketAddr>, String> {
+        self(url)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn has_http_scheme(value: &str) -> bool {
+    value
+        .get(..7)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("http://"))
+        || value
+            .get(..8)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn validate_remote_url(url: &reqwest::Url) -> Result<(), String> {
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("remote asset URL must use HTTP or HTTPS".into());
+    }
+    if url.host_str().is_none() {
+        return Err("remote asset URL has no hostname".into());
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("remote asset URL must not contain credentials".into());
+    }
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn validate_public_addresses(addresses: &[SocketAddr]) -> Result<(), String> {
+    if addresses.is_empty() {
+        return Err("remote asset hostname resolved to no addresses".into());
+    }
+    if addresses.iter().any(|address| !is_public_ip(address.ip())) {
+        return Err("remote asset destination is not a public IP address".into());
+    }
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn is_public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            let value = u32::from(ip);
+            let in_range = |network: u32, prefix: u32| {
+                let mask = if prefix == 0 {
+                    0
+                } else {
+                    u32::MAX << (32 - prefix)
+                };
+                value & mask == network & mask
+            };
+            let blocked = [
+                (0x0000_0000, 8),  // This network
+                (0x0a00_0000, 8),  // Private use
+                (0x6440_0000, 10), // Shared address space
+                (0x7f00_0000, 8),  // Loopback
+                (0xa9fe_0000, 16), // Link local
+                (0xac10_0000, 12), // Private use
+                (0xc000_0000, 24), // IETF protocol assignments
+                (0xc000_0200, 24), // Documentation
+                (0xc058_6300, 24), // Deprecated 6to4 relay anycast
+                (0xc0a8_0000, 16), // Private use
+                (0xc612_0000, 15), // Benchmarking
+                (0xc633_6400, 24), // Documentation
+                (0xcb00_7100, 24), // Documentation
+                (0xe000_0000, 4),  // Multicast
+                (0xf000_0000, 4),  // Reserved and broadcast
+            ];
+            !blocked
+                .iter()
+                .any(|(network, prefix)| in_range(*network, *prefix))
+                && value != u32::from(std::net::Ipv4Addr::new(168, 63, 129, 16))
+        }
+        IpAddr::V6(ip) => {
+            let segments = ip.segments();
+            let global_unicast = segments[0] >> 13 == 0b001;
+            let value = u128::from(ip);
+            // This allowlist follows the assigned prefixes in IANA's IPv6
+            // Global Unicast Address Space registry; unlisted space is reserved.
+            let assigned_global_unicast = [
+                (0x2001_0200_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_0400_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_0600_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_0800_0000_0000_0000_0000_0000_0000, 22),
+                (0x2001_0c00_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_0e00_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_1200_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_1400_0000_0000_0000_0000_0000_0000, 22),
+                (0x2001_1800_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_1a00_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_1c00_0000_0000_0000_0000_0000_0000, 22),
+                (0x2001_2000_0000_0000_0000_0000_0000_0000, 19),
+                (0x2001_4000_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_4200_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_4400_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_4600_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_4800_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_4a00_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_4c00_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_5000_0000_0000_0000_0000_0000_0000, 20),
+                (0x2001_8000_0000_0000_0000_0000_0000_0000, 19),
+                (0x2001_a000_0000_0000_0000_0000_0000_0000, 20),
+                (0x2001_b000_0000_0000_0000_0000_0000_0000, 20),
+                (0x2003_0000_0000_0000_0000_0000_0000_0000, 18),
+                (0x2400_0000_0000_0000_0000_0000_0000_0000, 12),
+                (0x2410_0000_0000_0000_0000_0000_0000_0000, 12),
+                (0x2600_0000_0000_0000_0000_0000_0000_0000, 12),
+                (0x2610_0000_0000_0000_0000_0000_0000_0000, 23),
+                (0x2620_0000_0000_0000_0000_0000_0000_0000, 23),
+                (0x2630_0000_0000_0000_0000_0000_0000_0000, 12),
+                (0x2800_0000_0000_0000_0000_0000_0000_0000, 12),
+                (0x2a00_0000_0000_0000_0000_0000_0000_0000, 12),
+                (0x2a10_0000_0000_0000_0000_0000_0000_0000, 12),
+                (0x2c00_0000_0000_0000_0000_0000_0000_0000, 12),
+            ];
+            let in_prefix = |network: u128, prefix: u32| {
+                let mask = u128::MAX << (128 - prefix);
+                value & mask == network
+            };
+            let globally_reachable_special = [
+                (0x2001_0001_0000_0000_0000_0000_0000_0001, 128),
+                (0x2001_0001_0000_0000_0000_0000_0000_0002, 128),
+                (0x2001_0001_0000_0000_0000_0000_0000_0003, 128),
+                (0x2001_0003_0000_0000_0000_0000_0000_0000, 32),
+                (0x2001_0004_0112_0000_0000_0000_0000_0000, 48),
+                (0x2001_0020_0000_0000_0000_0000_0000_0000, 28),
+                (0x2001_0030_0000_0000_0000_0000_0000_0000, 28),
+            ];
+            let allowed_special = globally_reachable_special
+                .iter()
+                .any(|(network, prefix)| in_prefix(*network, *prefix));
+            let assigned = assigned_global_unicast
+                .iter()
+                .any(|(network, prefix)| in_prefix(*network, *prefix))
+                || allowed_special;
+            let special_use = (in_prefix(0x2001_0000_0000_0000_0000_0000_0000_0000, 23)
+                && !allowed_special)
+                || in_prefix(0x2001_0db8_0000_0000_0000_0000_0000_0000, 32)
+                || in_prefix(0x2002_0000_0000_0000_0000_0000_0000_0000, 16);
+            global_unicast && assigned && !special_use
+        }
     }
 }
 
@@ -1019,6 +1303,144 @@ mod tests {
             .all(|entry| { entry.unwrap().file_name() == "project.dcp" }));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn remote_asset_destination_rejects_non_public_and_encoded_ip_literals() {
+        let resolver = PublicRemoteAssetResolver;
+        for source in [
+            "http://127.0.0.1/asset",
+            "http://2130706433/asset",
+            "http://0x7f000001/asset",
+            "http://0177.1/asset",
+            "http://[::1]/asset",
+            "http://[2001:2::1]/asset",
+            "http://[2200::1]/asset",
+            "http://[2d00::1]/asset",
+            "http://[2e00::1]/asset",
+            "http://[2f00::1]/asset",
+            "http://[3000::1]/asset",
+            "http://[3800::1]/asset",
+            "http://[3c00::1]/asset",
+            "http://[3e00::1]/asset",
+            "http://[3f00::1]/asset",
+            "http://[3f80::1]/asset",
+            "http://[3fc0::1]/asset",
+            "http://[3fe0::1]/asset",
+            "http://[3ff0::1]/asset",
+            "http://[3ff8::1]/asset",
+            "http://[3ffc::1]/asset",
+            "http://[3ffe::1]/asset",
+            "http://[3fff::1]/asset",
+            "http://localhost/asset",
+            "http://169.254.169.254/latest/meta-data/",
+        ] {
+            let url = reqwest::Url::parse(source).unwrap();
+            assert!(
+                resolver.resolve(&url).is_err(),
+                "expected {source} to be rejected (parsed as {url})"
+            );
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn remote_asset_destination_rejects_mixed_dns_answers() {
+        let public = SocketAddr::from(([93, 184, 216, 34], 443));
+        let private = SocketAddr::from(([10, 0, 0, 7], 443));
+        let public_ipv6 = "2606:4700:4700::1111".parse().unwrap();
+        let reachable_special_ipv6 = "2001:1::1".parse().unwrap();
+
+        assert!(validate_public_addresses(&[public]).is_ok());
+        assert!(is_public_ip(public_ipv6));
+        assert!(is_public_ip(reachable_special_ipv6));
+        assert!(validate_public_addresses(&[public, private])
+            .unwrap_err()
+            .contains("not a public IP"));
+        assert!(validate_public_addresses(&[])
+            .unwrap_err()
+            .contains("no addresses"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn remote_asset_resolver_accepts_public_and_rejects_private_ipv6_literals() {
+        let resolver = PublicRemoteAssetResolver;
+        let public = reqwest::Url::parse("https://[2606:4700:4700::1111]/asset").unwrap();
+        let globally_reachable_exception =
+            reqwest::Url::parse("https://[2001:1::1]/asset").unwrap();
+        let private = reqwest::Url::parse("https://[fd00::1]/asset").unwrap();
+
+        assert_eq!(
+            resolver.resolve(&public).unwrap(),
+            vec![SocketAddr::new(
+                "2606:4700:4700::1111".parse().unwrap(),
+                443
+            )]
+        );
+        assert!(resolver.resolve(&globally_reachable_exception).is_ok());
+        assert!(resolver.resolve(&private).is_err());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn remote_asset_redirect_targets_are_resolved_and_rechecked() {
+        let public_ip = reqwest::Url::parse("https://93.184.216.34/assets/clip.png").unwrap();
+        let internal = public_ip.join("http://127.0.0.1/admin").unwrap();
+        let credentials = public_ip
+            .join("https://user:pass@cdn.example/asset")
+            .unwrap();
+        let resolver = PublicRemoteAssetResolver;
+
+        assert!(resolver.resolve(&public_ip).is_ok());
+        assert!(resolver.resolve(&internal).is_err());
+        assert!(validate_remote_url(&credentials)
+            .unwrap_err()
+            .contains("credentials"));
+        assert!(validate_remote_url(&reqwest::Url::parse("file:///etc/passwd").unwrap()).is_err());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn materializer_rechecks_redirect_destination_before_connecting() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 512];
+            let _ = stream.read(&mut request);
+            write!(
+                stream,
+                "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{}/private\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                address.port()
+            )
+            .unwrap();
+        });
+        let mut p = project();
+        p.assets = vec![AssetRef {
+            id: "redirected".into(),
+            path: format!("http://asset.test:{}/start", address.port()),
+            kind: AssetKind::Other,
+            sha256: None,
+        }];
+        let resolver = |url: &reqwest::Url| {
+            if url.host_str() == Some("asset.test") {
+                Ok(vec![address])
+            } else {
+                PublicRemoteAssetResolver.resolve(url)
+            }
+        };
+        let cache = tempfile::tempdir().unwrap();
+
+        assert!(matches!(
+            p.materialize_remote_assets_with_resolver(cache.path(), 1024, &resolver),
+            Err(ProjectError::AssetRead { reason, .. }) if reason.contains("not a public IP")
+        ));
+        server.join().unwrap();
+    }
+
     #[test]
     fn materializes_remote_assets_and_rewrites_clip_props() {
         use std::io::{Read, Write};
@@ -1043,7 +1465,7 @@ mod tests {
 
         let cache =
             std::env::temp_dir().join(format!("dioxuscut-remote-assets-{}", std::process::id()));
-        let url = format!("http://{address}/poster.png");
+        let url = format!("http://asset.test:{}/poster.png", address.port());
         let digest = format!("{:x}", Sha256::digest(&payload));
         let mut p = project();
         p.assets = vec![AssetRef {
@@ -1064,7 +1486,9 @@ mod tests {
             }],
         }];
 
-        p.materialize_remote_assets(&cache, 1024).unwrap();
+        let resolver = |_: &reqwest::Url| Ok(vec![address]);
+        p.materialize_remote_assets_with_resolver(&cache, 1024, &resolver)
+            .unwrap();
         let local = std::path::PathBuf::from(&p.assets[0].path);
         assert_eq!(std::fs::read(&local).unwrap(), payload);
         assert_eq!(p.props["poster"], local.to_string_lossy().as_ref());
@@ -1095,14 +1519,15 @@ mod tests {
         let mut p = project();
         p.assets = vec![AssetRef {
             id: "large".into(),
-            path: format!("http://{address}/large.bin"),
+            path: format!("http://asset.test:{}/large.bin", address.port()),
             kind: AssetKind::Other,
             sha256: None,
         }];
         let cache =
             std::env::temp_dir().join(format!("dioxuscut-remote-limit-{}", std::process::id()));
+        let resolver = |_: &reqwest::Url| Ok(vec![address]);
         assert!(matches!(
-            p.materialize_remote_assets(&cache, 1024),
+            p.materialize_remote_assets_with_resolver(&cache, 1024, &resolver),
             Err(ProjectError::AssetRead { reason, .. }) if reason.contains("exceeds")
         ));
         server.join().unwrap();
