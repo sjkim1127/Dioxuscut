@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "dioxuscut"
-version = "0.2.0a1"
+version = "0.2.0"
 description = "High-performance browser-free programmatic video rendering engine for Python"
 readme = "README.md"
 authors = [{ name = "Dioxuscut Contributors" }]

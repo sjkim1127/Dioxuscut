@@ -51,6 +51,9 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev
 
+      - name: Prepare Tauri frontend directory for macro checks
+        run: mkdir -p apps/studio-tauri/dist
+
       - name: Verify tag matches workspace version
         shell: bash
         run: |
@@ -62,6 +65,17 @@ jobs:
             echo "::error::Tag $RELEASE_TAG does not match workspace version $package_version"
             exit 1
           fi
+
+          tauri_version=$(jq -r '.version' apps/studio-tauri/src-tauri/tauri.conf.json)
+          python_version=$(awk -F '"' '/^version = / {print $2; exit}' crates/python/pyproject.toml)
+          for artifact in "Tauri:$tauri_version" "Python:$python_version"; do
+            artifact_name="${artifact%%:*}"
+            artifact_version="${artifact#*:}"
+            if [[ "$artifact_version" != "$tag_version" ]]; then
+              echo "::error::$artifact_name version $artifact_version does not match tag $tag_version"
+              exit 1
+            fi
+          done
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -76,22 +90,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          packages=(
-            dioxuscut-animation
-            dioxuscut-paths
-            dioxuscut-rasterizer
-            dioxuscut-composition
-            dioxuscut-vdom
-            dioxuscut-renderer
-            dioxuscut-core
-            dioxuscut-media
-            dioxuscut-player
-            dioxuscut-transitions
-            dioxuscut-shapes
-            dioxuscut-captions
-            dioxuscut-noise
-            dioxuscut-cli
-          )
+          packages=()
+          while IFS= read -r package; do packages+=("$package"); done < .github/release-crates.txt
+          metadata_packages=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[]
+              | select(.source == null and (.name | startswith("dioxuscut-")))
+              | select(.publish == null or (.publish | length > 0))
+              | .name' \
+            | sort)
+          configured_packages=$(printf '%s\n' "${packages[@]}" | sort)
+          if [[ "$configured_packages" != "$metadata_packages" ]]; then
+            echo "::error::The crates.io release list does not match publishable workspace packages"
+            diff -u <(printf '%s\n' "$metadata_packages") <(printf '%s\n' "$configured_packages") || true
+            exit 1
+          fi
           for package in "${packages[@]}"; do
             cargo package --locked --list -p "$package" >/dev/null
           done
@@ -167,22 +179,8 @@ jobs:
             done
           }
 
-          packages=(
-            dioxuscut-animation
-            dioxuscut-paths
-            dioxuscut-rasterizer
-            dioxuscut-composition
-            dioxuscut-vdom
-            dioxuscut-renderer
-            dioxuscut-core
-            dioxuscut-media
-            dioxuscut-player
-            dioxuscut-transitions
-            dioxuscut-shapes
-            dioxuscut-captions
-            dioxuscut-noise
-            dioxuscut-cli
-          )
+          packages=()
+          while IFS= read -r package; do packages+=("$package"); done < .github/release-crates.txt
 
           for package in "${packages[@]}"; do
             publish_package "$package"

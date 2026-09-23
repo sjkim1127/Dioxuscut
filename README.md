@@ -432,15 +432,18 @@ JPEG, and WebP still outputs.
 
 ## Releasing
 
-Releases are driven by a version tag such as `v0.1.0`. The release workflow
+Releases are driven by a version tag such as `v0.2.0`. The release workflow
 validates the tag against the Cargo workspace version, tests the complete
 workspace, publishes all public `dioxuscut-*` packages to crates.io in dependency
 order, builds Rhai-enabled CLI archives for Linux, macOS, and Windows, and then
 creates one GitHub Release with SHA-256 checksums.
 
-Repository maintainers must configure a crates.io API token as the GitHub Actions
-secret `CRATES_IO_TOKEN`. Tokens must never be committed, placed in a tag, or
-written into workflow files.
+The Python extension wheels and source distribution are built and published to
+PyPI by a separate workflow on the same version tag.
+
+Repository maintainers must configure the crates.io API token as the GitHub
+Actions secret `CRATES_IO_TOKEN` and the PyPI API token as `PYPI_API_TOKEN`.
+Tokens must never be committed, placed in a tag, or written into workflow files.
 
 ## Current limitations
 
