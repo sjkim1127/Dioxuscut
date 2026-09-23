@@ -110,6 +110,7 @@ def test_render_video():
         fps=30.0,
         duration=60, # 2 seconds
         codec="h264",
+        hw_accel="disabled",
     )
 
     assert out_mp4.exists(), "Output MP4 was not created"
@@ -151,6 +152,7 @@ def test_render_script():
         height=360,
         fps=30.0,
         duration=45,
+        hw_accel="disabled",
     )
 
     assert out_rhai_mp4.exists(), "Output Rhai MP4 was not created"
@@ -166,7 +168,7 @@ def test_composition_class():
 
     comp = dioxuscut.Composition("HelloWorld", width=640, height=360, duration=30)
     print(f"[+] Initialized {comp}")
-    comp.render(out_comp, props={"title": "OOP API"})
+    comp.render(out_comp, props={"title": "OOP API"}, hw_accel="disabled")
 
     assert out_comp.exists(), "Output OOP MP4 was not created"
     print(f"[+] Rendered OOP MP4 size: {out_comp.stat().st_size} bytes")
@@ -201,7 +203,7 @@ def test_shorts_ai_video():
         font_size=48.0,
     )
     short.add_emoji("🚀", x=360.0, y=400.0, size=80.0)
-    short.render(out_shorts)
+    short.render(out_shorts, hw_accel="disabled")
 
     assert out_shorts.exists() and out_shorts.stat().st_size > 1000
     meta = dioxuscut.get_video_metadata(str(out_shorts))
@@ -260,7 +262,7 @@ def test_audio_visualizer_and_ducking():
     short.add_background_music(wav_path, volume=0.3, duck_on_voice=True, duck_volume=0.08)
     short.add_audio_visualizer(wav_path, x=100.0, y=700.0, width=520.0, height=140.0, style="bars", color="#00e5ff")
     short.add_audio_visualizer(wav_path, x=100.0, y=900.0, width=520.0, height=140.0, style="wave", color="#ff007f")
-    short.render(out_audio_mp4)
+    short.render(out_audio_mp4, hw_accel="disabled")
 
     assert out_audio_mp4.exists() and out_audio_mp4.stat().st_size > 5000
     print(f"[+] Rendered Audio Suite Shorts MP4: {out_audio_mp4.stat().st_size} bytes")

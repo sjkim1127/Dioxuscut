@@ -186,6 +186,8 @@ jobs:
         run: choco install ffmpeg -y
       - name: Smoke test wheel (x64 native)
         shell: bash
+        env:
+          PYTHONUTF8: '1'
         run: |
           pip install dist/*.whl
           python crates/python/tests/test_binding.py
