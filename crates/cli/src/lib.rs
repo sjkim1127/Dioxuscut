@@ -787,6 +787,9 @@ pub enum Commands {
         /// Optional directory for downloading HTTP(S) project assets before rendering.
         #[arg(long)]
         asset_cache_dir: Option<PathBuf>,
+        /// Maximum combined bytes downloaded for this project render.
+        #[arg(long, default_value_t = 1024 * 1024 * 1024)]
+        max_total_asset_bytes: usize,
     },
 
     /// (Experimental) Scaffold a Dioxuscut component from a Remotion (.tsx) file.

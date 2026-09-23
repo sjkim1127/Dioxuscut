@@ -449,17 +449,20 @@ impl Project {
     }
 
     /// Download remote HTTP(S) assets into `cache_dir` and rewrite the project
-    /// to use the downloaded local files. This is opt-in so Browser projects
-    /// can continue to let Chromium fetch remote media directly.
+    /// to use the downloaded local files. Both per-asset and total downloaded
+    /// byte limits are required. This is opt-in so Browser projects can
+    /// continue to let Chromium fetch remote media directly.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn materialize_remote_assets(
         &mut self,
         cache_dir: impl AsRef<std::path::Path>,
-        max_bytes: usize,
+        max_asset_bytes: usize,
+        max_total_bytes: usize,
     ) -> Result<(), ProjectError> {
         self.materialize_remote_assets_with_resolver(
             cache_dir,
-            max_bytes,
+            max_asset_bytes,
+            max_total_bytes,
             &PublicRemoteAssetResolver,
         )
     }
@@ -468,19 +471,27 @@ impl Project {
     fn materialize_remote_assets_with_resolver(
         &mut self,
         cache_dir: impl AsRef<std::path::Path>,
-        max_bytes: usize,
+        max_asset_bytes: usize,
+        max_total_bytes: usize,
         resolver: &impl RemoteAssetResolver,
     ) -> Result<(), ProjectError> {
-        if max_bytes == 0 {
+        if max_asset_bytes == 0 {
             return Err(ProjectError::AssetRead {
                 asset: "remote".into(),
-                reason: "remote asset byte limit must be greater than zero".into(),
+                reason: "per-asset remote byte limit must be greater than zero".into(),
+            });
+        }
+        if max_total_bytes == 0 {
+            return Err(ProjectError::AssetRead {
+                asset: "remote".into(),
+                reason: "total remote asset byte limit must be greater than zero".into(),
             });
         }
         let cache_dir = cache_dir.as_ref();
         std::fs::create_dir_all(cache_dir)
             .map_err(|error| ProjectError::File(error.to_string()))?;
         let mut replacements = Vec::new();
+        let mut downloaded_bytes = 0usize;
         for asset in &mut self.assets {
             let source = asset.path.trim();
             if !has_http_scheme(source) {
@@ -580,28 +591,49 @@ impl Project {
                 asset: asset.id.clone(),
                 reason: "remote asset redirect did not produce a response".into(),
             })?;
-            if response
-                .content_length()
-                .is_some_and(|length| length > max_bytes as u64)
-            {
-                return Err(ProjectError::AssetRead {
-                    asset: asset.id.clone(),
-                    reason: format!("remote asset exceeds the {max_bytes} byte limit"),
-                });
+            let remaining_total_bytes = max_total_bytes.saturating_sub(downloaded_bytes);
+            if let Some(length) = response.content_length() {
+                if length > max_asset_bytes as u64 {
+                    return Err(ProjectError::AssetRead {
+                        asset: asset.id.clone(),
+                        reason: format!(
+                            "remote asset exceeds the {max_asset_bytes} byte per-asset limit"
+                        ),
+                    });
+                }
+                if length > remaining_total_bytes as u64 {
+                    return Err(ProjectError::AssetRead {
+                        asset: asset.id.clone(),
+                        reason: format!(
+                            "project remote assets exceed the {max_total_bytes} byte total limit"
+                        ),
+                    });
+                }
             }
-            let mut bytes = Vec::with_capacity(max_bytes.min(1024 * 1024));
+            let read_limit = max_asset_bytes.min(remaining_total_bytes);
+            let mut bytes = Vec::with_capacity(read_limit.min(1024 * 1024));
             std::io::Read::read_to_end(
-                &mut response.take((max_bytes as u64).saturating_add(1)),
+                &mut response.take((read_limit as u64).saturating_add(1)),
                 &mut bytes,
             )
             .map_err(|error| ProjectError::AssetRead {
                 asset: asset.id.clone(),
                 reason: error.to_string(),
             })?;
-            if bytes.len() > max_bytes {
+            if bytes.len() > max_asset_bytes {
                 return Err(ProjectError::AssetRead {
                     asset: asset.id.clone(),
-                    reason: format!("remote asset exceeds the {max_bytes} byte limit"),
+                    reason: format!(
+                        "remote asset exceeds the {max_asset_bytes} byte per-asset limit"
+                    ),
+                });
+            }
+            if bytes.len() > remaining_total_bytes {
+                return Err(ProjectError::AssetRead {
+                    asset: asset.id.clone(),
+                    reason: format!(
+                        "project remote assets exceed the {max_total_bytes} byte total limit"
+                    ),
                 });
             }
             let actual = format!("{:x}", Sha256::digest(&bytes));
@@ -626,6 +658,7 @@ impl Project {
             replacements.push((source.to_string(), local.to_string_lossy().into_owned()));
             replacements.push((reference, local.to_string_lossy().into_owned()));
             asset.path = local.to_string_lossy().into_owned();
+            downloaded_bytes += bytes.len();
         }
         fn rewrite(value: &mut serde_json::Value, replacements: &[(String, String)]) {
             match value {
@@ -1479,7 +1512,7 @@ mod tests {
         let cache = tempfile::tempdir().unwrap();
 
         assert!(matches!(
-            p.materialize_remote_assets_with_resolver(cache.path(), 1024, &resolver),
+            p.materialize_remote_assets_with_resolver(cache.path(), 1024, 1024, &resolver),
             Err(ProjectError::AssetRead { reason, .. }) if reason.contains("not a public IP")
         ));
         server.join().unwrap();
@@ -1531,7 +1564,7 @@ mod tests {
         }];
 
         let resolver = |_: &reqwest::Url| Ok(vec![address]);
-        p.materialize_remote_assets_with_resolver(&cache, 1024, &resolver)
+        p.materialize_remote_assets_with_resolver(&cache, 1024, 1024, &resolver)
             .unwrap();
         let local = std::path::PathBuf::from(&p.assets[0].path);
         assert_eq!(std::fs::read(&local).unwrap(), payload);
@@ -1571,11 +1604,103 @@ mod tests {
             std::env::temp_dir().join(format!("dioxuscut-remote-limit-{}", std::process::id()));
         let resolver = |_: &reqwest::Url| Ok(vec![address]);
         assert!(matches!(
-            p.materialize_remote_assets_with_resolver(&cache, 1024, &resolver),
+            p.materialize_remote_assets_with_resolver(&cache, 1024, 2048, &resolver),
             Err(ProjectError::AssetRead { reason, .. }) if reason.contains("exceeds")
         ));
         server.join().unwrap();
         let _ = std::fs::remove_dir_all(cache);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn materializer_enforces_total_limit_for_unknown_length_responses() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            for (index, payload) in [b"abcd".to_vec(), b"xyz".to_vec()].into_iter().enumerate() {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0; 512];
+                let _ = stream.read(&mut request);
+                if index == 0 {
+                    write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        payload.len()
+                    )
+                    .unwrap();
+                } else {
+                    stream
+                        .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n")
+                        .unwrap();
+                }
+                let _ = stream.write_all(&payload);
+            }
+        });
+
+        let first = format!("http://asset.test:{}/first.bin", address.port());
+        let second = format!("http://asset.test:{}/second.bin", address.port());
+        let mut p = project();
+        p.assets = vec![
+            AssetRef {
+                id: "first".into(),
+                path: first,
+                kind: AssetKind::Other,
+                sha256: None,
+            },
+            AssetRef {
+                id: "second".into(),
+                path: second.clone(),
+                kind: AssetKind::Other,
+                sha256: None,
+            },
+        ];
+        let cache = tempfile::tempdir().unwrap();
+        let resolver = |_: &reqwest::Url| Ok(vec![address]);
+
+        assert!(matches!(
+            p.materialize_remote_assets_with_resolver(cache.path(), 8, 6, &resolver),
+            Err(ProjectError::AssetRead { reason, .. }) if reason.contains("6 byte total limit")
+        ));
+        server.join().unwrap();
+        assert_eq!(std::fs::read_dir(cache.path()).unwrap().count(), 1);
+        assert_eq!(p.assets[1].path, second);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn materializer_rejects_declared_size_over_total_limit_before_caching() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 512];
+            let _ = stream.read(&mut request);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nabcd")
+                .unwrap();
+        });
+        let mut p = project();
+        p.assets = vec![AssetRef {
+            id: "oversized-total".into(),
+            path: format!("http://asset.test:{}/asset.bin", address.port()),
+            kind: AssetKind::Other,
+            sha256: None,
+        }];
+        let cache = tempfile::tempdir().unwrap();
+        let resolver = |_: &reqwest::Url| Ok(vec![address]);
+
+        assert!(matches!(
+            p.materialize_remote_assets_with_resolver(cache.path(), 8, 3, &resolver),
+            Err(ProjectError::AssetRead { reason, .. }) if reason.contains("3 byte total limit")
+        ));
+        server.join().unwrap();
+        assert_eq!(std::fs::read_dir(cache.path()).unwrap().count(), 0);
     }
 
     #[cfg(unix)]

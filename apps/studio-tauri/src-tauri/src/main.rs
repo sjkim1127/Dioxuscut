@@ -152,6 +152,20 @@ struct AppState {
     cancellations: Arc<Mutex<HashMap<String, RenderCancellationToken>>>,
 }
 
+const DEFAULT_MAX_TOTAL_REMOTE_ASSET_BYTES: usize = 1024 * 1024 * 1024;
+
+fn max_total_remote_asset_bytes() -> Result<usize, String> {
+    let Some(value) = std::env::var_os("DIOXUSCUT_MAX_TOTAL_REMOTE_ASSET_BYTES") else {
+        return Ok(DEFAULT_MAX_TOTAL_REMOTE_ASSET_BYTES);
+    };
+    let value = value
+        .into_string()
+        .map_err(|_| "DIOXUSCUT_MAX_TOTAL_REMOTE_ASSET_BYTES must be valid UTF-8".to_string())?;
+    value
+        .parse::<usize>()
+        .map_err(|error| format!("invalid DIOXUSCUT_MAX_TOTAL_REMOTE_ASSET_BYTES value: {error}"))
+}
+
 #[tauri::command]
 fn submit_project(state: tauri::State<'_, AppState>, project: Project) -> Result<String, String> {
     RenderJobController::new(Arc::clone(&state.jobs)).submit(project)
@@ -187,6 +201,9 @@ fn start_render_job(
             .project
     };
     let backend_kind = project.settings.backend;
+    let max_total_asset_bytes = (backend_kind != dioxuscut_project::BackendKind::Browser)
+        .then(max_total_remote_asset_bytes)
+        .transpose()?;
     let render_frame_start = project.settings.frame_start.unwrap_or(0);
     let render_frame_end = project
         .settings
@@ -223,6 +240,7 @@ fn start_render_job(
             .map_err(|error| error.to_string())?;
     }
     if backend_kind != dioxuscut_project::BackendKind::Browser {
+        let max_total_asset_bytes = max_total_asset_bytes.expect("native asset limit was read");
         let state_jobs = Arc::clone(&state.jobs);
         let state_cancellations = Arc::clone(&state.cancellations);
         let cancellation = make_cancel_signal();
@@ -236,7 +254,11 @@ fn start_render_job(
                 let props_path = job_temp_dir.path().join("props.json");
                 let asset_cache_dir = job_temp_dir.path().join("assets");
                 project
-                    .materialize_remote_assets(&asset_cache_dir, 256 * 1024 * 1024)
+                    .materialize_remote_assets(
+                        &asset_cache_dir,
+                        256 * 1024 * 1024,
+                        max_total_asset_bytes,
+                    )
                     .map_err(|error| error.to_string())?;
                 std::fs::write(
                     &props_path,

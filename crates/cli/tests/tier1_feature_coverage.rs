@@ -302,6 +302,8 @@ fn test_cli_render_project_accepts_remote_asset_cache() {
         "out.mp4",
         "--asset-cache-dir",
         ".dioxuscut-assets",
+        "--max-total-asset-bytes",
+        "2048",
     ])
     .expect("Failed to parse render-project asset cache option");
     match cli.command {
@@ -309,10 +311,12 @@ fn test_cli_render_project_accepts_remote_asset_cache() {
             input,
             output,
             asset_cache_dir,
+            max_total_asset_bytes,
         } => {
             assert_eq!(input, PathBuf::from("project.dioxuscut.json"));
             assert_eq!(output, PathBuf::from("out.mp4"));
             assert_eq!(asset_cache_dir, Some(PathBuf::from(".dioxuscut-assets")));
+            assert_eq!(max_total_asset_bytes, 2048);
         }
         _ => panic!("Expected Commands::RenderProject"),
     }

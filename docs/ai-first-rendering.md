@@ -81,8 +81,11 @@ Native/GPU hosts can opt into downloading HTTP(S) assets before rendering:
 dioxuscut render-project project.dioxuscut.json --asset-cache-dir .dioxuscut-assets
 ```
 
-The materializer applies a 256 MiB per-asset limit, verifies a declared
-`sha256`, and rewrites `asset://<id>` references to the cached local file.
+The materializer applies a 256 MiB per-asset limit and a configurable 1 GiB
+project total by default. Use `--max-total-asset-bytes` to change the project
+limit. It verifies a declared `sha256` and rewrites `asset://<id>` references
+to the cached local file. Studio uses the same per-asset limit and reads its
+project total from `DIOXUSCUT_MAX_TOTAL_REMOTE_ASSET_BYTES` (1 GiB by default).
 Without this option, remote assets remain Browser-backend URLs and are not
 fetched by the CLI.
 
