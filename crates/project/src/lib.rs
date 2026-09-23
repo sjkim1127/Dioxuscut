@@ -847,11 +847,56 @@ fn is_public_ip(ip: IpAddr) -> bool {
         IpAddr::V6(ip) => {
             let segments = ip.segments();
             let global_unicast = segments[0] >> 13 == 0b001;
-            let protocol_assignment = segments[0] == 0x2001 && segments[1] & 0xfe00 == 0;
-            let documentation = (segments[0] == 0x2001 && segments[1] == 0x0db8)
-                || (segments[0] == 0x3fff && segments[1] & 0xf000 == 0);
-            global_unicast && !protocol_assignment && !documentation && segments[0] != 0x2002
-            // Deprecated 6to4
+            let value = u128::from(ip);
+            // This allowlist follows the assigned prefixes in IANA's IPv6
+            // Global Unicast Address Space registry; unlisted space is reserved.
+            let assigned_global_unicast = [
+                (0x2001_0200_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_0400_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_0600_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_0800_0000_0000_0000_0000_0000_0000, 22),
+                (0x2001_0c00_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_0e00_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_1200_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_1400_0000_0000_0000_0000_0000_0000, 22),
+                (0x2001_1800_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_1a00_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_1c00_0000_0000_0000_0000_0000_0000, 22),
+                (0x2001_2000_0000_0000_0000_0000_0000_0000, 19),
+                (0x2001_4000_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_4200_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_4400_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_4600_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_4800_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_4a00_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_4c00_0000_0000_0000_0000_0000_0000, 23),
+                (0x2001_5000_0000_0000_0000_0000_0000_0000, 20),
+                (0x2001_8000_0000_0000_0000_0000_0000_0000, 19),
+                (0x2001_a000_0000_0000_0000_0000_0000_0000, 20),
+                (0x2001_b000_0000_0000_0000_0000_0000_0000, 20),
+                (0x2003_0000_0000_0000_0000_0000_0000_0000, 18),
+                (0x2400_0000_0000_0000_0000_0000_0000_0000, 12),
+                (0x2410_0000_0000_0000_0000_0000_0000_0000, 12),
+                (0x2600_0000_0000_0000_0000_0000_0000_0000, 12),
+                (0x2610_0000_0000_0000_0000_0000_0000_0000, 23),
+                (0x2620_0000_0000_0000_0000_0000_0000_0000, 23),
+                (0x2630_0000_0000_0000_0000_0000_0000_0000, 12),
+                (0x2800_0000_0000_0000_0000_0000_0000_0000, 12),
+                (0x2a00_0000_0000_0000_0000_0000_0000_0000, 12),
+                (0x2a10_0000_0000_0000_0000_0000_0000_0000, 12),
+                (0x2c00_0000_0000_0000_0000_0000_0000_0000, 12),
+            ];
+            let in_prefix = |network: u128, prefix: u32| {
+                let mask = u128::MAX << (128 - prefix);
+                value & mask == network
+            };
+            let assigned = assigned_global_unicast
+                .iter()
+                .any(|(network, prefix)| in_prefix(*network, *prefix));
+            let special_use = in_prefix(0x2001_0000_0000_0000_0000_0000_0000_0000, 23)
+                || in_prefix(0x2001_0db8_0000_0000_0000_0000_0000_0000, 32)
+                || in_prefix(0x2002_0000_0000_0000_0000_0000_0000_0000, 16);
+            global_unicast && assigned && !special_use
         }
     }
 }
@@ -1245,6 +1290,23 @@ mod tests {
             "http://0x7f000001/asset",
             "http://0177.1/asset",
             "http://[::1]/asset",
+            "http://[2200::1]/asset",
+            "http://[2d00::1]/asset",
+            "http://[2e00::1]/asset",
+            "http://[2f00::1]/asset",
+            "http://[3000::1]/asset",
+            "http://[3800::1]/asset",
+            "http://[3c00::1]/asset",
+            "http://[3e00::1]/asset",
+            "http://[3f00::1]/asset",
+            "http://[3f80::1]/asset",
+            "http://[3fc0::1]/asset",
+            "http://[3fe0::1]/asset",
+            "http://[3ff0::1]/asset",
+            "http://[3ff8::1]/asset",
+            "http://[3ffc::1]/asset",
+            "http://[3ffe::1]/asset",
+            "http://[3fff::1]/asset",
             "http://localhost/asset",
             "http://169.254.169.254/latest/meta-data/",
         ] {
@@ -1261,8 +1323,10 @@ mod tests {
     fn remote_asset_destination_rejects_mixed_dns_answers() {
         let public = SocketAddr::from(([93, 184, 216, 34], 443));
         let private = SocketAddr::from(([10, 0, 0, 7], 443));
+        let public_ipv6 = "2606:4700:4700::1111".parse().unwrap();
 
         assert!(validate_public_addresses(&[public]).is_ok());
+        assert!(is_public_ip(public_ipv6));
         assert!(validate_public_addresses(&[public, private])
             .unwrap_err()
             .contains("not a public IP"));
