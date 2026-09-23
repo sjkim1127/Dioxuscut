@@ -9,6 +9,17 @@ const moduleUrl = `${url}/src/three-lifecycle-composition.js`;
 const child = spawn(process.execPath, [worker.pathname, `--url=${url}`, `--composition-module=${moduleUrl}`], {
   stdio: ['pipe', 'pipe', 'inherit'],
 });
+let childExited = false;
+const childExit = new Promise((resolve) => {
+  child.once('exit', (code, signal) => {
+    childExited = true;
+    resolve({ code, signal });
+  });
+  child.once('error', (error) => {
+    childExited = true;
+    resolve({ error });
+  });
+});
 const lines = createInterface({ input: child.stdout });
 const messages = [];
 lines.on('line', (line) => {
@@ -23,6 +34,11 @@ const waitFor = async (predicate, timeoutMs = 15000) => {
   while (true) {
     const index = messages.findIndex(predicate);
     if (index >= 0) return messages.splice(index, 1)[0];
+    if (childExited) {
+      const exit = await childExit;
+      const reason = exit.error?.message ?? `code ${exit.code}, signal ${exit.signal}`;
+      throw new Error(`Browser worker exited before sending the expected message (${reason})`);
+    }
     if (Date.now() - started > timeoutMs) {
       throw new Error(`Timed out waiting for message after ${timeoutMs}ms. Received messages: ${JSON.stringify(messages)}`);
     }
@@ -31,7 +47,7 @@ const waitFor = async (predicate, timeoutMs = 15000) => {
 };
 
 try {
-  const ready = await waitFor((message) => message.type === 'ready');
+  const ready = await waitFor((message) => message.type === 'ready', 60_000);
   assert.ok(ready.compositions.includes('three_lifecycle_preview'));
   assert.ok(ready.compositions.includes('three_audio_reactive_preview'));
   const parityRequest = { type: 'render', composition: 'three_lifecycle_preview', frame: 1, fps: 30, width: 640, height: 360, props: { color: '#ff8844' } };
@@ -70,6 +86,25 @@ try {
   }
   console.log(JSON.stringify({ compositions: 2, frames: 8, raw_rgba_parity: true, status: 'ok' }));
 } finally {
-  child.stdin.write('{"type":"shutdown"}\n');
-  await new Promise((resolve) => child.once('exit', resolve));
+  if (!childExited) {
+    try { child.stdin.write('{"type":"shutdown"}\n'); } catch {}
+    let exited = await Promise.race([
+      childExit.then(() => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), 5000)),
+    ]);
+    if (!exited) {
+      child.kill('SIGTERM');
+      exited = await Promise.race([
+        childExit.then(() => true),
+        new Promise((resolve) => setTimeout(() => resolve(false), 2000)),
+      ]);
+    }
+    if (!exited) {
+      child.kill('SIGKILL');
+      await Promise.race([
+        childExit,
+        new Promise((resolve) => setTimeout(resolve, 2000)),
+      ]);
+    }
+  }
 }
