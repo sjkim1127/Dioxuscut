@@ -76,22 +76,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          packages=(
-            dioxuscut-animation
-            dioxuscut-paths
-            dioxuscut-rasterizer
-            dioxuscut-composition
-            dioxuscut-vdom
-            dioxuscut-renderer
-            dioxuscut-core
-            dioxuscut-media
-            dioxuscut-player
-            dioxuscut-transitions
-            dioxuscut-shapes
-            dioxuscut-captions
-            dioxuscut-noise
-            dioxuscut-cli
-          )
+          packages=()
+          while IFS= read -r package; do packages+=("$package"); done < .github/release-crates.txt
+          metadata_packages=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[]
+              | select(.source == null and (.name | startswith("dioxuscut-")))
+              | select(.publish == null or (.publish | length > 0))
+              | .name' \
+            | sort)
+          configured_packages=$(printf '%s\n' "${packages[@]}" | sort)
+          if [[ "$configured_packages" != "$metadata_packages" ]]; then
+            echo "::error::The crates.io release list does not match publishable workspace packages"
+            diff -u <(printf '%s\n' "$metadata_packages") <(printf '%s\n' "$configured_packages") || true
+            exit 1
+          fi
           for package in "${packages[@]}"; do
             cargo package --locked --list -p "$package" >/dev/null
           done
@@ -167,22 +165,8 @@ jobs:
             done
           }
 
-          packages=(
-            dioxuscut-animation
-            dioxuscut-paths
-            dioxuscut-rasterizer
-            dioxuscut-composition
-            dioxuscut-vdom
-            dioxuscut-renderer
-            dioxuscut-core
-            dioxuscut-media
-            dioxuscut-player
-            dioxuscut-transitions
-            dioxuscut-shapes
-            dioxuscut-captions
-            dioxuscut-noise
-            dioxuscut-cli
-          )
+          packages=()
+          while IFS= read -r package; do packages+=("$package"); done < .github/release-crates.txt
 
           for package in "${packages[@]}"; do
             publish_package "$package"
