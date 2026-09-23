@@ -312,6 +312,7 @@ async fn main() -> anyhow::Result<()> {
             input,
             output,
             asset_cache_dir,
+            max_total_asset_bytes,
         } => {
             let mut project = dioxuscut_project::Project::load(input)
                 .map_err(|error| anyhow::anyhow!("Project validation failed: {error}"))?;
@@ -320,7 +321,11 @@ async fn main() -> anyhow::Result<()> {
                 project.resolve_local_asset_paths(parent);
             }
             if let Some(cache_dir) = asset_cache_dir {
-                project.materialize_remote_assets(cache_dir, 256 * 1024 * 1024)?;
+                project.materialize_remote_assets(
+                    cache_dir,
+                    256 * 1024 * 1024,
+                    *max_total_asset_bytes,
+                )?;
             }
             let props_path = std::env::temp_dir().join(format!(
                 "dioxuscut-project-props-{}.json",
