@@ -364,6 +364,14 @@ mod project_timeline_tests {
         assert_eq!(tracks[0].src, "later.wav");
         assert!((tracks[0].timeline_start - 1.0).abs() < f64::EPSILON);
     }
+
+    #[test]
+    fn project_timelines_are_used_by_native_and_gpu_backends() {
+        assert!(uses_project_timeline(RenderBackend::Native, true));
+        assert!(uses_project_timeline(RenderBackend::Gpu, true));
+        assert!(!uses_project_timeline(RenderBackend::Browser, true));
+        assert!(!uses_project_timeline(RenderBackend::Gpu, false));
+    }
 }
 
 struct BrowserPreparedComposition;
@@ -1180,14 +1188,15 @@ pub async fn execute_render_command_with_registry(
     .await
 }
 
-/// Render a project timeline, resolving Native clip compositions through the
-/// built-in registry while preserving the shared render request contract.
+/// Render a project timeline through the Native or GPU scene pipeline while
+/// preserving the shared render request contract. Browser timelines are
+/// evaluated by the browser worker.
 pub async fn execute_project_render_command_with_control(
     request: &RenderRequest,
     project: &Project,
     control: dioxuscut_rasterizer::RenderControl,
 ) -> anyhow::Result<()> {
-    if project.tracks.is_empty() || request.backend != RenderBackend::Native {
+    if !uses_project_timeline(request.backend, !project.tracks.is_empty()) {
         return execute_render_command_with_registry_and_control(
             request,
             &built_in_registry(),
@@ -1206,6 +1215,10 @@ pub async fn execute_project_render_command_with_control(
         registry: built_in_registry(),
     })?;
     execute_render_command_with_registry_and_control(request, &registry, control).await
+}
+
+fn uses_project_timeline(backend: RenderBackend, has_tracks: bool) -> bool {
+    has_tracks && matches!(backend, RenderBackend::Native | RenderBackend::Gpu)
 }
 
 /// Build the standard CLI progress and timeout controls for a render request.

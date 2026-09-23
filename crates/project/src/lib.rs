@@ -698,6 +698,11 @@ impl Project {
             }
         }
         rewrite(&mut self.props, &replacements);
+        for track in &mut self.tracks {
+            for clip in &mut track.clips {
+                rewrite(&mut clip.props, &replacements);
+            }
+        }
     }
 
     pub fn load(path: impl AsRef<std::path::Path>) -> Result<Self, ProjectError> {
@@ -1213,6 +1218,43 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Project>(&serde_json::to_string(&p).unwrap()).unwrap(),
             p
+        );
+    }
+
+    #[test]
+    fn save_rewrites_local_asset_paths_in_timeline_clip_props() {
+        let directory = tempfile::tempdir().unwrap();
+        let asset_path = directory.path().join("logo.png");
+        std::fs::write(&asset_path, b"logo").unwrap();
+        let resolved_asset = asset_path.to_string_lossy().into_owned();
+        let mut p = project();
+        p.assets.push(AssetRef {
+            id: "logo".into(),
+            path: resolved_asset.clone(),
+            kind: AssetKind::Image,
+            sha256: None,
+        });
+        p.tracks.push(Track {
+            id: "main".into(),
+            clips: vec![Clip {
+                id: "logo-clip".into(),
+                composition: "shorts".into(),
+                start: 0,
+                duration: 10,
+                props: serde_json::json!({"overlay": {"src": resolved_asset}}),
+            }],
+        });
+
+        p.relativize_local_asset_paths(directory.path());
+        let project_path = directory.path().join("project.json");
+        p.save(&project_path).unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(project_path).unwrap()).unwrap();
+
+        assert_eq!(saved["assets"][0]["path"], "logo.png");
+        assert_eq!(
+            saved["tracks"][0]["clips"][0]["props"]["overlay"]["src"],
+            "logo.png"
         );
     }
 
