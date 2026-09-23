@@ -612,9 +612,31 @@ impl Project {
 
     pub fn save(&self, path: impl AsRef<std::path::Path>) -> Result<(), ProjectError> {
         self.validate()?;
+        use std::io::Write;
+
+        let path = path.as_ref();
         let source = serde_json::to_vec_pretty(self)
             .map_err(|error| ProjectError::Json(error.to_string()))?;
-        std::fs::write(path, source).map_err(|error| ProjectError::File(error.to_string()))
+        let parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let mut temporary = tempfile::NamedTempFile::new_in(parent)
+            .map_err(|error| ProjectError::File(error.to_string()))?;
+        temporary
+            .write_all(&source)
+            .and_then(|()| temporary.as_file().sync_all())
+            .map_err(|error| ProjectError::File(error.to_string()))?;
+        if let Ok(metadata) = std::fs::metadata(path) {
+            temporary
+                .as_file()
+                .set_permissions(metadata.permissions())
+                .map_err(|error| ProjectError::File(error.to_string()))?;
+        }
+        temporary
+            .persist(path)
+            .map(|_| ())
+            .map_err(|error| ProjectError::File(error.to_string()))
     }
 }
 
@@ -980,6 +1002,21 @@ mod tests {
         );
         std::fs::remove_file(base.join("../outside.bin")).unwrap();
         std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn project_save_atomically_replaces_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("project.dcp");
+        std::fs::write(&path, b"old incomplete project").unwrap();
+
+        project().save(&path).unwrap();
+
+        let saved = Project::load(&path).unwrap();
+        assert_eq!(saved, project());
+        assert!(std::fs::read_dir(dir.path())
+            .unwrap()
+            .all(|entry| { entry.unwrap().file_name() == "project.dcp" }));
     }
 
     #[test]

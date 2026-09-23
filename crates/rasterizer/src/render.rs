@@ -748,6 +748,65 @@ where
     F: Fn(u32) -> Result<Scene, E> + Send + Sync,
     E: std::fmt::Display + Send,
 {
+    let parent = config
+        .output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let suffix = config
+        .output
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| format!(".{extension}"))
+        .unwrap_or_default();
+    let temporary_output = tempfile::Builder::new()
+        .prefix(".dioxuscut-render-")
+        .suffix(&suffix)
+        .tempfile_in(parent)
+        .map_err(|error| {
+            RasterError::ImageEncode(format!(
+                "Failed to create temporary output beside {}: {error}",
+                config.output.display()
+            ))
+        })?;
+    let mut temporary_config = config.clone();
+    temporary_config.output = temporary_output.path().to_path_buf();
+
+    render_pipe_to_path(backend, &temporary_config, scene_fn)?;
+
+    if let Ok(metadata) = std::fs::metadata(&config.output) {
+        temporary_output
+            .as_file()
+            .set_permissions(metadata.permissions())
+            .map_err(|error| {
+                RasterError::ImageEncode(format!(
+                    "Failed to preserve output permissions for {}: {error}",
+                    config.output.display()
+                ))
+            })?;
+    }
+    temporary_output.as_file().sync_all().map_err(|error| {
+        RasterError::ImageEncode(format!("Failed to flush rendered output: {error}"))
+    })?;
+    temporary_output.persist(&config.output).map_err(|error| {
+        RasterError::ImageEncode(format!(
+            "Failed to atomically replace {}: {error}",
+            config.output.display()
+        ))
+    })?;
+    Ok(())
+}
+
+fn render_pipe_to_path<F, B, E>(
+    backend: &B,
+    config: &PipeConfig,
+    scene_fn: F,
+) -> Result<(), RasterError>
+where
+    B: RasterizerBackend + Send + Sync,
+    F: Fn(u32) -> Result<Scene, E> + Send + Sync,
+    E: std::fmt::Display + Send,
+{
     let width = config.width;
     let height = config.height;
     let (output_width, output_height) = config.output_dimensions()?;
@@ -2456,6 +2515,30 @@ mod tests {
             std::fs::read(&preserved_output).unwrap(),
             b"existing valid output"
         );
+        std::fs::remove_dir_all(temp).unwrap();
+    }
+
+    #[test]
+    fn failed_render_preserves_existing_output() {
+        let temp = unique_temp_dir("preserve_output");
+        std::fs::create_dir_all(&temp).unwrap();
+        let output = temp.join("existing.mp4");
+        let original = b"existing output must survive";
+        std::fs::write(&output, original).unwrap();
+        let config = PipeConfig::new(32, 24, 30.0, 3, &output).with_concurrency(1);
+
+        let error =
+            render_to_ffmpeg_pipe_fallible(&TinySkiaBackend::headless(), &config, |frame| {
+                if frame == 1 {
+                    Err(RasterError::Scene("intentional frame failure".into()))
+                } else {
+                    Ok(solid_scene(Color::rgb(10, 20, 30))(frame))
+                }
+            })
+            .unwrap_err();
+
+        assert!(matches!(error, RasterError::Frame { frame: 1, .. }));
+        assert_eq!(std::fs::read(&output).unwrap(), original);
         std::fs::remove_dir_all(temp).unwrap();
     }
 
