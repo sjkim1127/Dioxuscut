@@ -36,7 +36,14 @@ async function ensureThree() {
   if (threeReady) return threeReady;
   threeReady = import('three').then((module) => {
     THREE = module;
-    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+    // Keep rendered pixels available across awaited clip callbacks and the
+    // worker's subsequent canvas readback.
+    renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      alpha: true,
+      preserveDrawingBuffer: true,
+    });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setClearColor(0x0b1020);
     scene = new THREE.Scene();
@@ -2449,21 +2456,98 @@ export async function renderFrame({ composition = 'three_preview', frame: nextFr
   // declared font faces have finished loading.
   await document.fonts.ready;
   if (timeline.length > 0) {
-    for (const clip of timeline) {
-      if (nextFrame < clip.start || nextFrame >= clip.start + clip.duration) continue;
-      const render = compositions.get(clip.composition) ??
-        (clip.composition === 'three_preview' ? renderDefaultFrame : undefined);
-      if (!render) throw new Error(`unknown browser composition: ${clip.composition}`);
-      await render({
-        composition: clip.composition,
-        frame: nextFrame - clip.start,
-        fps,
-        props: clip.props ?? {},
-        assets,
-        width,
-        height,
-        durationInFrames: clip.duration,
-      });
+    const projectContext = {
+      frame,
+      activeAssets,
+      activeProps,
+      videoConfig,
+    };
+    const activeClips = timeline.filter((clip) =>
+      nextFrame >= clip.start && nextFrame < clip.start + clip.duration);
+    const hasThreeLayers = activeClips.some((clip) =>
+      clip.composition === 'three_preview' || threeCompositions.has(clip.composition));
+    if (hasThreeLayers) {
+      await ensureThree();
+      if (Number.isFinite(width) && Number.isFinite(height)) {
+        renderer.setSize(width, height, false);
+      }
+      // Start with a clean color buffer, then preserve color between layers.
+      // Clearing depth before every clip gives each scene an independent depth
+      // buffer while retaining normal alpha blending in track order.
+      renderer.clear(true, true, true);
+    }
+    // Three.js resets the drawing buffer whenever setSize() is called, even
+    // when the dimensions have not changed. Timeline compositions commonly
+    // call setSize(width, height) from render(), so preserve the shared color
+    // buffer for same-size requests while restoring the viewport as usual.
+    const originalSetSize = hasThreeLayers ? renderer.setSize : undefined;
+    if (hasThreeLayers) {
+      renderer.setSize = (requestedWidth, requestedHeight, updateStyle = true) => {
+        const currentSize = renderer.getSize(new THREE.Vector2());
+        if (requestedWidth === currentSize.x && requestedHeight === currentSize.y) {
+          if (updateStyle) {
+            canvas.style.width = `${requestedWidth}px`;
+            canvas.style.height = `${requestedHeight}px`;
+          }
+          renderer.setViewport(0, 0, requestedWidth, requestedHeight);
+          return;
+        }
+        return originalSetSize.call(renderer, requestedWidth, requestedHeight, updateStyle);
+      };
+    }
+    try {
+      for (const clip of activeClips) {
+        const clipFrame = nextFrame - clip.start;
+        const clipProps = clip.props && typeof clip.props === 'object' ? clip.props : {};
+        frame = clipFrame;
+        activeProps = clipProps;
+        videoConfig = {
+          ...projectContext.videoConfig,
+          fps,
+          ...(Number.isFinite(width) ? { width } : {}),
+          ...(Number.isFinite(height) ? { height } : {}),
+          durationInFrames: clip.duration,
+        };
+
+        const render = compositions.get(clip.composition) ??
+          (clip.composition === 'three_preview' ? renderDefaultFrame : undefined);
+        if (!render) throw new Error(`unknown browser composition: ${clip.composition}`);
+        const isThreeLayer = clip.composition === 'three_preview' ||
+          threeCompositions.has(clip.composition);
+        const previousAutoClear = isThreeLayer ? renderer.autoClear : undefined;
+        const previousAutoClearColor = isThreeLayer ? renderer.autoClearColor : undefined;
+        const previousAutoClearDepth = isThreeLayer ? renderer.autoClearDepth : undefined;
+        if (isThreeLayer) {
+          renderer.autoClear = false;
+          renderer.autoClearColor = false;
+          renderer.autoClearDepth = false;
+          renderer.clearDepth();
+        }
+        try {
+          await render({
+            composition: clip.composition,
+            frame: clipFrame,
+            fps,
+            props: clipProps,
+            assets,
+            width,
+            height,
+            durationInFrames: clip.duration,
+          });
+        } finally {
+          if (isThreeLayer) {
+            renderer.autoClear = previousAutoClear;
+            renderer.autoClearColor = previousAutoClearColor;
+            renderer.autoClearDepth = previousAutoClearDepth;
+          }
+        }
+      }
+    } finally {
+      if (hasThreeLayers) renderer.setSize = originalSetSize;
+      frame = projectContext.frame;
+      activeAssets = projectContext.activeAssets;
+      activeProps = projectContext.activeProps;
+      videoConfig = projectContext.videoConfig;
     }
     await syncMediaElements({ frame: nextFrame, fps });
     await syncLottieElements({ frame: nextFrame, fps });
@@ -2559,7 +2643,7 @@ window.dioxuscut = {
 };
 
 function resize() {
-  if (!renderer || !camera) return;
+  if (!renderer || !camera || window.__DIOXUSCUT_HEADLESS_RENDER__ === true) return;
   const { width, height } = canvas.parentElement.getBoundingClientRect();
   renderer.setSize(width, height, false);
   camera.aspect = width / Math.max(height, 1);
