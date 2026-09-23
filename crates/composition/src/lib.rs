@@ -72,10 +72,12 @@ pub trait PreparedComposition: Send + Sync {
     /// Return audio tracks for the complete render, when the composition has
     /// an explicit timeline-level audio contract.
     ///
-    /// `None` preserves the legacy behavior where the host derives tracks
-    /// from the first rendered scene. Implementations that can describe audio
-    /// independently of a frame may return `Some`, including tracks whose
-    /// timing is dynamic across the composition timeline.
+    /// `None` asks the host to derive tracks from rendered scenes. The CLI
+    /// scans the complete frame range before encoding so it can find tracks
+    /// first emitted after frame zero; this requires an extra render pass.
+    /// Implementations that can describe the complete audio timeline should
+    /// return `Some`, including tracks whose timing changes over time, to
+    /// avoid that scan.
     fn audio_tracks(&self) -> Result<Option<Vec<AudioTrack>>, CompositionError> {
         Ok(None)
     }
