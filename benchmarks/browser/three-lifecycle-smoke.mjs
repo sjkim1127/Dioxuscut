@@ -50,6 +50,8 @@ try {
   const ready = await waitFor((message) => message.type === 'ready', 60_000);
   assert.ok(ready.compositions.includes('three_lifecycle_preview'));
   assert.ok(ready.compositions.includes('three_audio_reactive_preview'));
+  assert.ok(ready.compositions.includes('timeline_layer_base'));
+  assert.ok(ready.compositions.includes('timeline_layer_overlay'));
   const parityRequest = { type: 'render', composition: 'three_lifecycle_preview', frame: 1, fps: 30, width: 640, height: 360, props: { color: '#ff8844' } };
   child.stdin.write(`${JSON.stringify({ ...parityRequest, transport: 'rgba' })}\n`);
   const rgbaParity = await waitFor((message) => message.type === 'frame' && message.frame === 1);
@@ -84,7 +86,37 @@ try {
     assert.equal(response.width, 640);
     assert.equal(response.height, 360);
   }
-  console.log(JSON.stringify({ compositions: 2, frames: 8, raw_rgba_parity: true, status: 'ok' }));
+
+  child.stdin.write(`${JSON.stringify({
+    type: 'render', composition: 'timeline_hook_probe', frame: 55, fps: 10,
+    width: 64, height: 64, durationInFrames: 100, props: { projectOnly: true },
+    timeline: [{
+      composition: 'timeline_hook_probe', start: 50, duration: 20,
+      props: { clipOnly: 'visible' },
+    }],
+  })}\n`);
+  const hookContext = await waitFor((message) =>
+    (message.type === 'frame' || message.type === 'error') && message.frame === 55);
+  assert.equal(hookContext.type, 'frame', `timeline hook context failed: ${hookContext.message ?? 'no frame response'}`);
+
+  child.stdin.write(`${JSON.stringify({
+    type: 'render', composition: 'three_preview', frame: 1, fps: 30,
+    width: 640, height: 360, durationInFrames: 10, props: {}, transport: 'rgba',
+    timeline: [
+      { composition: 'timeline_layer_base', start: 0, duration: 10, props: {} },
+      { composition: 'timeline_layer_overlay', start: 0, duration: 10, props: {} },
+    ],
+  })}\n`);
+  const layeredFrame = await waitFor((message) =>
+    (message.type === 'frame' || message.type === 'error') && message.frame === 1);
+  assert.equal(layeredFrame.type, 'frame', `timeline layer render failed: ${layeredFrame.message ?? 'no frame response'}`);
+  const layeredPixels = Buffer.from(layeredFrame.video_frame.rgba_base64, 'base64');
+  const centerPixel = 4 * (Math.floor(180) * 640 + Math.floor(320));
+  assert.ok(layeredPixels[centerPixel] > 80, `base layer was cleared: ${[...layeredPixels.subarray(centerPixel, centerPixel + 4)]}`);
+  assert.ok(layeredPixels[centerPixel + 2] > 80, `overlay layer was not composited: ${[...layeredPixels.subarray(centerPixel, centerPixel + 4)]}`);
+  assert.ok(layeredPixels[centerPixel + 1] < 20, `unexpected green channel: ${[...layeredPixels.subarray(centerPixel, centerPixel + 4)]}`);
+
+  console.log(JSON.stringify({ compositions: 5, frames: 10, raw_rgba_parity: true, timeline_hooks: true, overlapping_layers: true, status: 'ok' }));
 } finally {
   if (!childExited) {
     try { child.stdin.write('{"type":"shutdown"}\n'); } catch {}

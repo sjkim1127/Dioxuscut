@@ -118,4 +118,44 @@ export async function register(api) {
       instance?.mesh?.material?.dispose?.();
     },
   });
+
+  api.registerComposition('timeline_hook_probe', (context) => {
+    const hookConfig = api.useVideoConfig();
+    const hookProps = api.getInputProps();
+    if (api.useCurrentFrame() !== context.frame) {
+      throw new Error(`timeline hook frame mismatch: ${api.useCurrentFrame()} != ${context.frame}`);
+    }
+    if (hookConfig.durationInFrames !== context.durationInFrames ||
+        hookConfig.fps !== context.fps || hookConfig.width !== context.width ||
+        hookConfig.height !== context.height) {
+      throw new Error(`timeline hook config mismatch: ${JSON.stringify(hookConfig)}`);
+    }
+    if (hookProps.clipOnly !== 'visible' || hookProps.projectOnly !== undefined) {
+      throw new Error(`timeline hook props mismatch: ${JSON.stringify(hookProps)}`);
+    }
+  });
+
+  const registerLayer = (id, color, opacity) => api.registerThreeComposition(id, {
+    setup({ THREE }) {
+      const scene = new THREE.Scene();
+      const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+      camera.position.z = 1;
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(20, 20),
+        new THREE.MeshBasicMaterial({ color, transparent: opacity < 1, opacity, depthWrite: false }),
+      );
+      scene.add(mesh);
+      return { scene, camera, mesh };
+    },
+    render({ renderer, scene, camera, width, height }) {
+      renderer.setSize(width, height, false);
+      renderer.render(scene, camera);
+    },
+    dispose(instance) {
+      instance?.mesh?.geometry?.dispose?.();
+      instance?.mesh?.material?.dispose?.();
+    },
+  });
+  registerLayer('timeline_layer_base', 0xff0000, 1);
+  registerLayer('timeline_layer_overlay', 0x0000ff, 0.5);
 }

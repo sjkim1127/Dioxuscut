@@ -36,7 +36,7 @@ async function ensureThree() {
   if (threeReady) return threeReady;
   threeReady = import('three').then((module) => {
     THREE = module;
-    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setClearColor(0x0b1020);
     scene = new THREE.Scene();
@@ -2449,21 +2449,78 @@ export async function renderFrame({ composition = 'three_preview', frame: nextFr
   // declared font faces have finished loading.
   await document.fonts.ready;
   if (timeline.length > 0) {
-    for (const clip of timeline) {
-      if (nextFrame < clip.start || nextFrame >= clip.start + clip.duration) continue;
-      const render = compositions.get(clip.composition) ??
-        (clip.composition === 'three_preview' ? renderDefaultFrame : undefined);
-      if (!render) throw new Error(`unknown browser composition: ${clip.composition}`);
-      await render({
-        composition: clip.composition,
-        frame: nextFrame - clip.start,
-        fps,
-        props: clip.props ?? {},
-        assets,
-        width,
-        height,
-        durationInFrames: clip.duration,
-      });
+    const projectContext = {
+      frame,
+      activeAssets,
+      activeProps,
+      videoConfig,
+    };
+    const activeClips = timeline.filter((clip) =>
+      nextFrame >= clip.start && nextFrame < clip.start + clip.duration);
+    const hasThreeLayers = activeClips.some((clip) =>
+      clip.composition === 'three_preview' || threeCompositions.has(clip.composition));
+    if (hasThreeLayers) {
+      await ensureThree();
+      if (Number.isFinite(width) && Number.isFinite(height)) {
+        renderer.setSize(width, height, false);
+      }
+      // Start with a clean color buffer, then preserve color between layers.
+      // Clearing depth before every clip gives each scene an independent depth
+      // buffer while retaining normal alpha blending in track order.
+      renderer.clear(true, true, true);
+    }
+    try {
+      for (const clip of activeClips) {
+        const clipFrame = nextFrame - clip.start;
+        const clipProps = clip.props && typeof clip.props === 'object' ? clip.props : {};
+        frame = clipFrame;
+        activeProps = clipProps;
+        videoConfig = {
+          ...projectContext.videoConfig,
+          fps,
+          ...(Number.isFinite(width) ? { width } : {}),
+          ...(Number.isFinite(height) ? { height } : {}),
+          durationInFrames: clip.duration,
+        };
+
+        const render = compositions.get(clip.composition) ??
+          (clip.composition === 'three_preview' ? renderDefaultFrame : undefined);
+        if (!render) throw new Error(`unknown browser composition: ${clip.composition}`);
+        const isThreeLayer = clip.composition === 'three_preview' ||
+          threeCompositions.has(clip.composition);
+        const previousAutoClear = isThreeLayer ? renderer.autoClear : undefined;
+        const previousAutoClearColor = isThreeLayer ? renderer.autoClearColor : undefined;
+        const previousAutoClearDepth = isThreeLayer ? renderer.autoClearDepth : undefined;
+        if (isThreeLayer) {
+          renderer.autoClear = false;
+          renderer.autoClearColor = false;
+          renderer.autoClearDepth = false;
+          renderer.clearDepth();
+        }
+        try {
+          await render({
+            composition: clip.composition,
+            frame: clipFrame,
+            fps,
+            props: clipProps,
+            assets,
+            width,
+            height,
+            durationInFrames: clip.duration,
+          });
+        } finally {
+          if (isThreeLayer) {
+            renderer.autoClear = previousAutoClear;
+            renderer.autoClearColor = previousAutoClearColor;
+            renderer.autoClearDepth = previousAutoClearDepth;
+          }
+        }
+      }
+    } finally {
+      frame = projectContext.frame;
+      activeAssets = projectContext.activeAssets;
+      activeProps = projectContext.activeProps;
+      videoConfig = projectContext.videoConfig;
     }
     await syncMediaElements({ frame: nextFrame, fps });
     await syncLottieElements({ frame: nextFrame, fps });
