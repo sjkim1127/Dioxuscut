@@ -111,13 +111,19 @@ jobs:
       - name: Install FFmpeg (Linux)
         if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Checkout Python smoke test harness
+        if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref }}
+          path: smoke-tests
       - name: Smoke test wheel (x86_64 native)
         if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
         env:
           DIOXUSCUT_TEST_OUTPUT_DIR: ${{ runner.temp }}/dioxuscut-python-smoke
         run: |
           pip install dist/*.whl
-          python3 crates/python/tests/test_binding.py
+          python3 smoke-tests/crates/python/tests/test_binding.py
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
@@ -151,13 +157,19 @@ jobs:
       - name: Install FFmpeg (macOS)
         if: matrix.platform.target == 'aarch64-apple-darwin'
         run: brew install ffmpeg
+      - name: Checkout Python smoke test harness
+        if: matrix.platform.target == 'aarch64-apple-darwin'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref }}
+          path: smoke-tests
       - name: Smoke test wheel (Apple Silicon native)
         if: matrix.platform.target == 'aarch64-apple-darwin'
         env:
           DIOXUSCUT_TEST_OUTPUT_DIR: ${{ runner.temp }}/dioxuscut-python-smoke
         run: |
           pip install dist/*.whl
-          python3 crates/python/tests/test_binding.py
+          python3 smoke-tests/crates/python/tests/test_binding.py
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
@@ -188,6 +200,11 @@ jobs:
           sccache: 'true'
       - name: Install FFmpeg (Windows)
         run: choco install ffmpeg -y
+      - name: Checkout Python smoke test harness
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref }}
+          path: smoke-tests
       - name: Smoke test wheel (x64 native)
         shell: bash
         env:
@@ -195,7 +212,7 @@ jobs:
           DIOXUSCUT_TEST_OUTPUT_DIR: ${{ runner.temp }}/dioxuscut-python-smoke
         run: |
           pip install dist/*.whl
-          python crates/python/tests/test_binding.py
+          python smoke-tests/crates/python/tests/test_binding.py
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
