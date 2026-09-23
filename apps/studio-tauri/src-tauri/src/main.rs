@@ -97,6 +97,13 @@ fn selected_output_frame_count(
     }
 }
 
+fn create_render_job_temp_dir() -> Result<tempfile::TempDir, String> {
+    tempfile::Builder::new()
+        .prefix("dioxuscut-render-job-")
+        .tempdir()
+        .map_err(|error| format!("failed to create render job temp directory: {error}"))
+}
+
 fn browser_worker_path() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os("DIOXUSCUT_BROWSER_WORKER") {
         return Ok(PathBuf::from(path));
@@ -224,9 +231,10 @@ fn start_render_job(
             .map_err(|_| "cancellation store lock poisoned".to_string())?
             .insert(id.clone(), cancellation.clone());
         thread::spawn(move || {
-            let props_path = std::env::temp_dir().join(format!("dioxuscut-{id}-props.json"));
             let result = (|| -> Result<(), String> {
-                let asset_cache_dir = std::env::temp_dir().join("dioxuscut-assets").join(&id);
+                let job_temp_dir = create_render_job_temp_dir()?;
+                let props_path = job_temp_dir.path().join("props.json");
+                let asset_cache_dir = job_temp_dir.path().join("assets");
                 project
                     .materialize_remote_assets(&asset_cache_dir, 256 * 1024 * 1024)
                     .map_err(|error| error.to_string())?;
@@ -307,9 +315,6 @@ fn start_render_job(
                     ))
                     .map_err(|e| e.to_string())
             })();
-            let _ = std::fs::remove_file(&props_path);
-            let _ =
-                std::fs::remove_dir_all(std::env::temp_dir().join("dioxuscut-assets").join(&id));
             if let Ok(mut cancellations) = state_cancellations.lock() {
                 cancellations.remove(&id);
             }
@@ -696,7 +701,10 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_browser_concurrency, selected_output_frame_count, use_file_transport};
+    use super::{
+        create_render_job_temp_dir, default_browser_concurrency, selected_output_frame_count,
+        use_file_transport,
+    };
 
     #[test]
     fn tauri_defaults_to_lossless_file_transport() {
@@ -715,5 +723,12 @@ mod tests {
         assert_eq!(selected_output_frame_count(100, 199, 2, false), 50);
         assert_eq!(selected_output_frame_count(100, 199, 3, false), 34);
         assert_eq!(selected_output_frame_count(100, 199, 3, true), 1);
+    }
+
+    #[test]
+    fn render_jobs_get_distinct_temporary_directories() {
+        let first = create_render_job_temp_dir().unwrap();
+        let second = create_render_job_temp_dir().unwrap();
+        assert_ne!(first.path(), second.path());
     }
 }
