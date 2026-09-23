@@ -36,7 +36,14 @@ async function ensureThree() {
   if (threeReady) return threeReady;
   threeReady = import('three').then((module) => {
     THREE = module;
-    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    // Keep rendered pixels available across awaited clip callbacks and the
+    // worker's subsequent canvas readback.
+    renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      alpha: true,
+      preserveDrawingBuffer: true,
+    });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setClearColor(0x0b1020);
     scene = new THREE.Scene();
