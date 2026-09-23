@@ -290,15 +290,17 @@ impl Project {
         {
             return Err(ProjectError::InvalidBrowserTransport);
         }
-        if let Some(end) = self.settings.frame_end {
-            let start = self.settings.frame_start.unwrap_or(0);
-            if start > end || end >= self.settings.duration {
-                return Err(ProjectError::InvalidFrameRange {
-                    start,
-                    end,
-                    duration: self.settings.duration,
-                });
-            }
+        let start = self.settings.frame_start.unwrap_or(0);
+        let end = self
+            .settings
+            .frame_end
+            .unwrap_or_else(|| self.settings.duration.saturating_sub(1));
+        if start > end || end >= self.settings.duration {
+            return Err(ProjectError::InvalidFrameRange {
+                start,
+                end,
+                duration: self.settings.duration,
+            });
         }
         let mut asset_ids = BTreeSet::new();
         for asset in &self.assets {
@@ -1674,6 +1676,13 @@ mod tests {
         let mut p = project();
         p.settings.frame_start = Some(20);
         p.settings.frame_end = Some(10);
+        assert!(matches!(
+            p.validate(),
+            Err(ProjectError::InvalidFrameRange { .. })
+        ));
+
+        p.settings.frame_end = None;
+        p.settings.frame_start = Some(p.settings.duration);
         assert!(matches!(
             p.validate(),
             Err(ProjectError::InvalidFrameRange { .. })
