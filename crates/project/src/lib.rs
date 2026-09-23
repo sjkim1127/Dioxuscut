@@ -890,10 +890,24 @@ fn is_public_ip(ip: IpAddr) -> bool {
                 let mask = u128::MAX << (128 - prefix);
                 value & mask == network
             };
-            let assigned = assigned_global_unicast
+            let globally_reachable_special = [
+                (0x2001_0001_0000_0000_0000_0000_0000_0001, 128),
+                (0x2001_0001_0000_0000_0000_0000_0000_0002, 128),
+                (0x2001_0001_0000_0000_0000_0000_0000_0003, 128),
+                (0x2001_0003_0000_0000_0000_0000_0000_0000, 32),
+                (0x2001_0004_0112_0000_0000_0000_0000_0000, 48),
+                (0x2001_0020_0000_0000_0000_0000_0000_0000, 28),
+                (0x2001_0030_0000_0000_0000_0000_0000_0000, 28),
+            ];
+            let allowed_special = globally_reachable_special
                 .iter()
                 .any(|(network, prefix)| in_prefix(*network, *prefix));
-            let special_use = in_prefix(0x2001_0000_0000_0000_0000_0000_0000_0000, 23)
+            let assigned = assigned_global_unicast
+                .iter()
+                .any(|(network, prefix)| in_prefix(*network, *prefix))
+                || allowed_special;
+            let special_use = (in_prefix(0x2001_0000_0000_0000_0000_0000_0000_0000, 23)
+                && !allowed_special)
                 || in_prefix(0x2001_0db8_0000_0000_0000_0000_0000_0000, 32)
                 || in_prefix(0x2002_0000_0000_0000_0000_0000_0000_0000, 16);
             global_unicast && assigned && !special_use
@@ -1290,6 +1304,7 @@ mod tests {
             "http://0x7f000001/asset",
             "http://0177.1/asset",
             "http://[::1]/asset",
+            "http://[2001:2::1]/asset",
             "http://[2200::1]/asset",
             "http://[2d00::1]/asset",
             "http://[2e00::1]/asset",
@@ -1324,9 +1339,11 @@ mod tests {
         let public = SocketAddr::from(([93, 184, 216, 34], 443));
         let private = SocketAddr::from(([10, 0, 0, 7], 443));
         let public_ipv6 = "2606:4700:4700::1111".parse().unwrap();
+        let reachable_special_ipv6 = "2001:1::1".parse().unwrap();
 
         assert!(validate_public_addresses(&[public]).is_ok());
         assert!(is_public_ip(public_ipv6));
+        assert!(is_public_ip(reachable_special_ipv6));
         assert!(validate_public_addresses(&[public, private])
             .unwrap_err()
             .contains("not a public IP"));
