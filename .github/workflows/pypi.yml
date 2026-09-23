@@ -5,23 +5,59 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build and publish
+        required: true
+        type: string
 
 permissions:
   contents: read
 
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+concurrency:
+  group: pypi-release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
+  validate_tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Expected a version tag such as v0.2.0, got: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          if ! git tag --points-at HEAD | grep -Fxq "$RELEASE_TAG"; then
+            echo "The requested tag does not point at the checked out commit: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
   linux:
     runs-on: ${{ matrix.platform.runner }}
+    needs: [validate_tag]
     strategy:
       fail-fast: false
       matrix:
         platform:
           - runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            manylinux: manylinux2014
           - runner: ubuntu-latest
             target: aarch64-unknown-linux-gnu
+            manylinux: manylinux_2_28
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -31,7 +67,47 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: --release --out dist --manifest-path crates/python/Cargo.toml
           sccache: 'true'
-          manylinux: auto
+          manylinux: ${{ matrix.platform.manylinux }}
+          before-script-linux: |
+            set -euo pipefail
+            if [[ "${{ matrix.platform.target }}" == "x86_64-unknown-linux-gnu" ]]; then
+              yum install -y openssl11-devel
+              ln -sf /usr/lib64/pkgconfig/openssl11.pc /usr/lib64/pkgconfig/openssl.pc
+              ln -sf /usr/lib64/pkgconfig/libssl11.pc /usr/lib64/pkgconfig/libssl.pc
+              ln -sf /usr/lib64/pkgconfig/libcrypto11.pc /usr/lib64/pkgconfig/libcrypto.pc
+            else
+              (
+                cd /tmp
+                DEBIAN_MIRROR="https://snapshot.debian.org/archive/debian/20231003T205808Z/pool/main/o/openssl"
+                LIBSSL_DEB="libssl1.1_1.1.1w-0+deb11u1_arm64.deb"
+                LIBSSL_SHA256="fe7a7d313c87e46e62e614a07137e4a476a79fc9e5aab7b23e8235211280fee3"
+                LIBSSL_DEV_DEB="libssl-dev_1.1.1w-0+deb11u1_arm64.deb"
+                LIBSSL_DEV_SHA256="6223f761bd4b961aa0c7c1662a6e99ab31150a1a7e6529d440428b361a9c8c4a"
+
+                curl --fail --location --show-error --silent --output "$LIBSSL_DEB" "$DEBIAN_MIRROR/$LIBSSL_DEB"
+                curl --fail --location --show-error --silent --output "$LIBSSL_DEV_DEB" "$DEBIAN_MIRROR/$LIBSSL_DEV_DEB"
+                printf '%s %s\n' "$LIBSSL_SHA256" "$LIBSSL_DEB" | sha256sum -c -
+                printf '%s %s\n' "$LIBSSL_DEV_SHA256" "$LIBSSL_DEV_DEB" | sha256sum -c -
+
+                for deb in *.deb; do
+                  ar x "$deb"
+                  tar xf data.tar.*
+                  rm -f debian-binary control.tar.* data.tar.*
+                done
+
+                TARGET_DIR="/usr/aarch64-unknown-linux-gnu"
+                mkdir -p "$TARGET_DIR/include/openssl" "$TARGET_DIR/lib"
+                cp -r usr/include/openssl/* "$TARGET_DIR/include/openssl/"
+                cp -f usr/include/aarch64-linux-gnu/openssl/configuration.h "$TARGET_DIR/include/openssl/" || true
+                cp -f usr/include/aarch64-linux-gnu/openssl/opensslconf.h "$TARGET_DIR/include/openssl/" || true
+                cp -a usr/lib/aarch64-linux-gnu/libssl* "$TARGET_DIR/lib/"
+                cp -a usr/lib/aarch64-linux-gnu/libcrypto* "$TARGET_DIR/lib/"
+
+                test -f "$TARGET_DIR/include/openssl/opensslv.h"
+                test -f "$TARGET_DIR/include/openssl/opensslconf.h"
+                test -f "$TARGET_DIR/lib/libssl.a"
+              )
+            fi
       - name: Install FFmpeg (Linux)
         if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
@@ -48,6 +124,7 @@ jobs:
 
   macos:
     runs-on: ${{ matrix.platform.runner }}
+    needs: [validate_tag]
     strategy:
       fail-fast: false
       matrix:
@@ -58,6 +135,8 @@ jobs:
             target: aarch64-apple-darwin
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -83,6 +162,7 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    needs: [validate_tag]
     strategy:
       fail-fast: false
       matrix:
@@ -90,6 +170,8 @@ jobs:
           - target: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -115,8 +197,11 @@ jobs:
 
   sdist:
     runs-on: ubuntu-latest
+    needs: [validate_tag]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
@@ -131,8 +216,8 @@ jobs:
   release:
     name: Release to PyPI
     runs-on: ubuntu-latest
-    needs: [linux, macos, windows, sdist]
-    if: "startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'"
+    needs: [validate_tag, linux, macos, windows, sdist]
+    if: startsWith(inputs.tag || github.ref_name, 'v')
     permissions:
       contents: write
       id-token: write
