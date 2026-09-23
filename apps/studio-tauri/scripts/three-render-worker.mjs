@@ -127,14 +127,6 @@ rl.on('line', (line) => { queue = queue.then(async () => {
         if (!canvas || canvas.width <= 0 || canvas.height <= 0) return null;
         const width = canvas.width;
         const height = canvas.height;
-        const canvasRect = canvas.getBoundingClientRect();
-        const canvasMetrics = {
-          source_canvas_width: width,
-          source_canvas_height: height,
-          source_css_width: canvasRect.width,
-          source_css_height: canvasRect.height,
-          device_pixel_ratio: window.devicePixelRatio,
-        };
         if (typeof VideoFrame === 'function') {
           const frame = new VideoFrame(canvas, { timestamp: 0 });
           try {
@@ -155,7 +147,6 @@ rl.on('line', (line) => { queue = queue.then(async () => {
               height: displayHeight,
               rgba_base64: btoa(binary),
               transport: 'webcodecs',
-              ...canvasMetrics,
             };
           } finally {
             frame.close();
@@ -184,7 +175,7 @@ rl.on('line', (line) => { queue = queue.then(async () => {
         for (let offset = 0; offset < pixels.length; offset += chunkSize) {
           binary += String.fromCharCode(...pixels.subarray(offset, offset + chunkSize));
         }
-        return { width, height, rgba_base64: btoa(binary), ...canvasMetrics };
+        return { width, height, rgba_base64: btoa(binary) };
       });
       if (directRgba) {
         let videoFrame = directRgba;

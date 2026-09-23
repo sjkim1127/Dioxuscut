@@ -2643,7 +2643,7 @@ window.dioxuscut = {
 };
 
 function resize() {
-  if (!renderer || !camera) return;
+  if (!renderer || !camera || window.__DIOXUSCUT_HEADLESS_RENDER__ === true) return;
   const { width, height } = canvas.parentElement.getBoundingClientRect();
   renderer.setSize(width, height, false);
   camera.aspect = width / Math.max(height, 1);
