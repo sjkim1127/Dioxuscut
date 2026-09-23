@@ -1559,7 +1559,7 @@ fn build_volume_expression(base_volume: f64, keyframes: &[(f64, f64)]) -> String
         let v1 = v1_raw * base_volume;
         let dt = (t1 - t0).max(0.0001);
 
-        let interp = format!("({:.6}+({:.6})*(t-{:.6})/{:.6})", v0, v1 - v0, t0, dt);
+        let interp = format!("({:.6}+({:.6})*(t-({:.6}))/{:.6})", v0, v1 - v0, t0, dt);
         if i == 0 {
             expr = format!(
                 "if(lt(t,{:.6}),{:.6},if(lt(t,{:.6}),{},{}))",
@@ -1588,7 +1588,16 @@ fn build_audio_filter(config: &PipeConfig, tracks: &[&AudioTrack]) -> String {
         if track.volume_keyframes.is_empty() {
             chain.push_str(&format!(",volume={:.9}", track.volume));
         } else {
-            let expr = build_volume_expression(track.volume, &track.volume_keyframes);
+            // `asetpts=PTS-STARTPTS` resets the trimmed audio stream to t=0.
+            // Keyframes use absolute composition seconds, so shift them to the
+            // first composition time represented by this trimmed stream.
+            let keyframe_origin = range_start.max(track.timeline_start);
+            let local_keyframes = track
+                .volume_keyframes
+                .iter()
+                .map(|(time, volume)| (time - keyframe_origin, *volume))
+                .collect::<Vec<_>>();
+            let expr = build_volume_expression(track.volume, &local_keyframes);
             chain.push_str(&format!(",volume='{}':eval=frame", expr));
         }
         if let Some(duration) = track.duration {
@@ -2614,6 +2623,48 @@ mod tests {
         assert!(filter.contains("atrim=start=2.250000000"));
         assert!(filter.contains("atrim=duration=3.000000000"));
         assert!(filter.contains("atrim=duration=1.000000000"));
+        assert!(!filter.contains("adelay="));
+    }
+
+    #[test]
+    fn test_audio_volume_keyframes_use_trimmed_composition_timeline() {
+        let mut track = AudioTrack::new("track.wav");
+        track.timeline_start = 5.0;
+        track.volume = 0.5;
+        track.volume_keyframes = vec![(5.0, 0.0), (7.0, 1.0), (9.0, 0.4)];
+        let config = PipeConfig::new(64, 64, 30.0, 300, "out.mp4").with_audio_tracks([track]);
+        let args = build_pipe_ffmpeg_args(&config);
+        let filter_index = args
+            .iter()
+            .position(|arg| arg == "-filter_complex")
+            .unwrap();
+        let filter = &args[filter_index + 1];
+
+        assert!(filter.contains("volume='if(lt(t,0.000000),0.000000,if(lt(t,2.000000)"));
+        assert!(filter.contains("(t-(0.000000))/2.000000"));
+        assert!(filter.contains("lt(t,4.000000)"));
+        assert!(filter.contains("adelay=5000:all=1"));
+    }
+
+    #[test]
+    fn test_partial_audio_range_rebases_keyframes_and_keeps_prior_envelope() {
+        let mut track = AudioTrack::new("track.wav");
+        track.timeline_start = 5.0;
+        track.volume_keyframes = vec![(5.0, 0.0), (7.0, 1.0), (9.0, 0.4)];
+        let config = PipeConfig::new(64, 64, 30.0, 90, "out.mp4")
+            .with_frame_start(180)
+            .with_audio_tracks([track]);
+        let args = build_pipe_ffmpeg_args(&config);
+        let filter_index = args
+            .iter()
+            .position(|arg| arg == "-filter_complex")
+            .unwrap();
+        let filter = &args[filter_index + 1];
+
+        assert!(filter.contains("atrim=start=1.000000000"));
+        assert!(filter.contains("volume='if(lt(t,-1.000000),0.000000,if(lt(t,1.000000)"));
+        assert!(filter.contains("(t-(-1.000000))/2.000000"));
+        assert!(filter.contains("lt(t,3.000000)"));
         assert!(!filter.contains("adelay="));
     }
 
