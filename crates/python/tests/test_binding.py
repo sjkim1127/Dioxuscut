@@ -10,7 +10,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
-TARGET_DIR = ROOT / "target/python_test_output"
+TEST_OUTPUT_DIR = os.environ.get("DIOXUSCUT_TEST_OUTPUT_DIR")
+TARGET_DIR = Path(TEST_OUTPUT_DIR) if TEST_OUTPUT_DIR else ROOT / "target/python_test_output"
 TARGET_DIR.mkdir(parents=True, exist_ok=True)
 
 import dioxuscut
