@@ -521,7 +521,7 @@ impl Project {
                     .no_proxy()
                     .timeout(remaining);
                 if let Some(host) = current_url.host_str() {
-                    if host.parse::<IpAddr>().is_err() {
+                    if parse_url_ip_literal(host).is_none() {
                         builder = builder.resolve_to_addrs(host, &addresses);
                     }
                 }
@@ -743,6 +743,15 @@ trait RemoteAssetResolver {
 struct PublicRemoteAssetResolver;
 
 #[cfg(not(target_arch = "wasm32"))]
+fn parse_url_ip_literal(host: &str) -> Option<IpAddr> {
+    let host = host
+        .strip_prefix('[')
+        .and_then(|host| host.strip_suffix(']'))
+        .unwrap_or(host);
+    host.parse().ok()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 impl RemoteAssetResolver for PublicRemoteAssetResolver {
     fn resolve(&self, url: &reqwest::Url) -> Result<Vec<SocketAddr>, String> {
         let host = url
@@ -751,7 +760,7 @@ impl RemoteAssetResolver for PublicRemoteAssetResolver {
         let port = url
             .port_or_known_default()
             .ok_or_else(|| "remote asset URL has no valid port".to_string())?;
-        let addresses = if let Ok(ip) = host.parse::<IpAddr>() {
+        let addresses = if let Some(ip) = parse_url_ip_literal(host) {
             vec![SocketAddr::new(ip, port)]
         } else {
             (host, port)
@@ -1350,6 +1359,26 @@ mod tests {
         assert!(validate_public_addresses(&[])
             .unwrap_err()
             .contains("no addresses"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn remote_asset_resolver_accepts_public_and_rejects_private_ipv6_literals() {
+        let resolver = PublicRemoteAssetResolver;
+        let public = reqwest::Url::parse("https://[2606:4700:4700::1111]/asset").unwrap();
+        let globally_reachable_exception =
+            reqwest::Url::parse("https://[2001:1::1]/asset").unwrap();
+        let private = reqwest::Url::parse("https://[fd00::1]/asset").unwrap();
+
+        assert_eq!(
+            resolver.resolve(&public).unwrap(),
+            vec![SocketAddr::new(
+                "2606:4700:4700::1111".parse().unwrap(),
+                443
+            )]
+        );
+        assert!(resolver.resolve(&globally_reachable_exception).is_ok());
+        assert!(resolver.resolve(&private).is_err());
     }
 
     #[cfg(not(target_arch = "wasm32"))]
