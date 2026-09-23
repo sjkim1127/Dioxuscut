@@ -691,8 +691,30 @@ fn list_browser_compositions() -> Result<Vec<String>, String> {
     Ok(backend.compositions())
 }
 
+// Keep the privileged Studio webview on its packaged origin. The dev server is
+// accepted only by debug builds; the render worker uses a separate Chromium process.
+fn allow_studio_navigation(url: &tauri::Url, allow_dev_server: bool) -> bool {
+    if !url.username().is_empty() || url.password().is_some() {
+        return false;
+    }
+
+    match (url.scheme(), url.host_str(), url.port()) {
+        ("tauri", Some("localhost"), None) => true,
+        ("http" | "https", Some("tauri.localhost"), None) => true,
+        ("http", Some("localhost"), Some(1420)) => allow_dev_server,
+        _ => false,
+    }
+}
+
+fn local_navigation_guard() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri::plugin::Builder::<tauri::Wry>::new("local-navigation-guard")
+        .on_navigation(|_, url| allow_studio_navigation(url, cfg!(debug_assertions)))
+        .build()
+}
+
 fn main() {
     tauri::Builder::default()
+        .plugin(local_navigation_guard())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             jobs: Arc::new(Mutex::new(JobStore::default())),
@@ -724,8 +746,8 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        create_render_job_temp_dir, default_browser_concurrency, selected_output_frame_count,
-        use_file_transport,
+        allow_studio_navigation, create_render_job_temp_dir, default_browser_concurrency,
+        selected_output_frame_count, use_file_transport,
     };
 
     #[test]
@@ -752,5 +774,27 @@ mod tests {
         let first = create_render_job_temp_dir().unwrap();
         let second = create_render_job_temp_dir().unwrap();
         assert_ne!(first.path(), second.path());
+    }
+
+    #[test]
+    fn navigation_guard_allows_only_studio_origins_and_dev_server() {
+        let is_allowed = |raw_url: &str, allow_dev_server| {
+            let url = raw_url.parse().expect("URL should parse");
+            allow_studio_navigation(&url, allow_dev_server)
+        };
+
+        assert!(is_allowed("tauri://localhost/index.html", false));
+        assert!(is_allowed("http://tauri.localhost/", false));
+        assert!(is_allowed("https://tauri.localhost/", false));
+        assert!(is_allowed("http://localhost:1420/", true));
+        assert!(!is_allowed("http://localhost:1420/", false));
+
+        assert!(!is_allowed("http://tauri.attacker.com/", false));
+        assert!(!is_allowed("https://tauri.localhost.attacker.com/", false));
+        assert!(!is_allowed("http://tauri.localhost:8080/", false));
+        assert!(!is_allowed("http://tauri.localhost@attacker.com/", false));
+        assert!(!is_allowed("http://localhost:1421/", true));
+        assert!(!is_allowed("https://localhost:1420/", true));
+        assert!(!is_allowed("file:///etc/passwd", true));
     }
 }
