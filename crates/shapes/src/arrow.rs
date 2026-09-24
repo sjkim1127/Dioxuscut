@@ -1,9 +1,12 @@
 //! `<Arrow>` shape component.
 
+#[cfg(feature = "dioxus")]
 use crate::render_svg::RenderSvg;
+#[cfg(feature = "dioxus")]
 use dioxus::prelude::*;
 
 /// Props for the `<Arrow>` shape component.
+#[cfg(feature = "dioxus")]
 #[derive(Props, Clone, PartialEq)]
 pub struct ArrowProps {
     /// Total length of the arrow in pixels.
@@ -50,6 +53,7 @@ pub fn make_arrow(length: f64, thickness: f64) -> (String, f64, f64) {
 }
 
 /// Renders a procedural SVG Arrow.
+#[cfg(feature = "dioxus")]
 #[component]
 pub fn Arrow(props: ArrowProps) -> Element {
     let (path, width, height) = make_arrow(props.length, props.thickness);

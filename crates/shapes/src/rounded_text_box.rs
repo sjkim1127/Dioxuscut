@@ -1,7 +1,9 @@
 //! `<RoundedTextBox>` shape component and multi-corner parametric rounded text box helpers.
 
+#[cfg(feature = "dioxus")]
 use crate::render_svg::RenderSvg;
 use crate::shape_output::ShapeOutput;
+#[cfg(feature = "dioxus")]
 use dioxus::prelude::*;
 pub use dioxuscut_rasterizer::font::{
     create_rounded_text_box, create_rounded_text_box_from_measurements, RoundedTextBoxOptions,
@@ -9,6 +11,7 @@ pub use dioxuscut_rasterizer::font::{
 };
 
 /// Props for the `<RoundedTextBox>` shape component.
+#[cfg(feature = "dioxus")]
 #[derive(Props, Clone, PartialEq)]
 pub struct RoundedTextBoxProps {
     /// Line width and height measurements.
@@ -60,6 +63,7 @@ pub fn make_rounded_text_box(
 }
 
 /// Renders a procedural SVG multi-corner rounded text box.
+#[cfg(feature = "dioxus")]
 #[component]
 pub fn RoundedTextBox(props: RoundedTextBoxProps) -> Element {
     let options = RoundedTextBoxOptions {

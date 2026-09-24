@@ -1,7 +1,9 @@
 //! `<Callout>` speech bubble shape component and path generator.
 
+#[cfg(feature = "dioxus")]
 use crate::render_svg::RenderSvg;
 use crate::shape_output::ShapeOutput;
+#[cfg(feature = "dioxus")]
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +22,7 @@ pub enum CalloutDirection {
 }
 
 /// Props for the `<Callout>` shape component.
+#[cfg(feature = "dioxus")]
 #[derive(Props, Clone, PartialEq)]
 pub struct CalloutProps {
     /// Bounding width of the callout body rectangle in pixels.
@@ -146,6 +149,7 @@ pub fn make_callout(
 }
 
 /// Renders a procedural SVG Callout.
+#[cfg(feature = "dioxus")]
 #[component]
 pub fn Callout(props: CalloutProps) -> Element {
     let shape = make_callout(

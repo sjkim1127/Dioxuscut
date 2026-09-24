@@ -1,7 +1,9 @@
 //! SVG wrapper component for procedural shapes.
 
+#[cfg(feature = "dioxus")]
 use dioxus::prelude::*;
 
+#[cfg(feature = "dioxus")]
 #[derive(Props, Clone, PartialEq)]
 pub struct RenderSvgProps {
     /// SVG path `d` instruction string.
@@ -28,6 +30,7 @@ pub struct RenderSvgProps {
 }
 
 /// Generic SVG shape renderer.
+#[cfg(feature = "dioxus")]
 #[component]
 pub fn RenderSvg(props: RenderSvgProps) -> Element {
     let view_box = format!("0 0 {} {}", props.width, props.height);

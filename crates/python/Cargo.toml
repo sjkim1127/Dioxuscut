@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Python native bindings for Dioxuscut programmatic video engine"
-repository = "https://github.com/sjkim1127/Dioxuscut"
+repository = "https://github.com/sjkim1127/rust-motion"
 readme = "README.md"
 publish = false
 
@@ -21,14 +21,13 @@ tokio = { workspace = true }
 anyhow = { workspace = true }
 
 dioxuscut-animation = { workspace = true }
-dioxuscut-captions = { workspace = true }
+dioxuscut-captions = { workspace = true, default-features = false }
 dioxuscut-cli = { workspace = true, features = ["rhai"] }
 dioxuscut-composition = { workspace = true }
-dioxuscut-core = { workspace = true }
-dioxuscut-media = { workspace = true }
+dioxuscut-media = { workspace = true, default-features = false }
 dioxuscut-paths = { workspace = true }
 dioxuscut-rasterizer = { workspace = true }
-dioxuscut-shapes = { workspace = true }
+dioxuscut-shapes = { workspace = true, default-features = false }
 
 [features]
 default = ["extension-module"]

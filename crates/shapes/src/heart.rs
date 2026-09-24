@@ -1,10 +1,13 @@
 //! `<Heart>` shape component and path generator.
 
+#[cfg(feature = "dioxus")]
 use crate::render_svg::RenderSvg;
 use crate::shape_output::ShapeOutput;
+#[cfg(feature = "dioxus")]
 use dioxus::prelude::*;
 
 /// Props for the `<Heart>` shape component.
+#[cfg(feature = "dioxus")]
 #[derive(Props, Clone, PartialEq)]
 pub struct HeartProps {
     /// Bounding box width in pixels.
@@ -76,6 +79,7 @@ pub fn make_heart(width: f64, height: f64) -> ShapeOutput {
 }
 
 /// Renders a procedural SVG Heart.
+#[cfg(feature = "dioxus")]
 #[component]
 pub fn Heart(props: HeartProps) -> Element {
     let shape = make_heart(props.width, props.height);

@@ -1,12 +1,15 @@
 //! `<Spark>` 4-point star/spark shape component and path generator.
 
+#[cfg(feature = "dioxus")]
 use crate::render_svg::RenderSvg;
 use crate::shape_output::ShapeOutput;
+#[cfg(feature = "dioxus")]
 use dioxus::prelude::*;
 
 const KAPPA: f64 = 0.5522847498307936;
 
 /// Props for the `<Spark>` shape component.
+#[cfg(feature = "dioxus")]
 #[derive(Props, Clone, PartialEq)]
 pub struct SparkProps {
     /// Bounding box width in pixels.
@@ -162,6 +165,7 @@ pub fn make_spark(width: f64, height: f64, edge_roundness: f64, corner_radius: f
 }
 
 /// Renders a procedural SVG Spark.
+#[cfg(feature = "dioxus")]
 #[component]
 pub fn Spark(props: SparkProps) -> Element {
     let shape = make_spark(
