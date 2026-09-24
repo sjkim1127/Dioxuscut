@@ -31,10 +31,10 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/sjkim1127/Dioxuscut"
-Documentation = "https://github.com/sjkim1127/Dioxuscut#readme"
-Repository = "https://github.com/sjkim1127/Dioxuscut"
-Issues = "https://github.com/sjkim1127/Dioxuscut/issues"
+Homepage = "https://github.com/sjkim1127/rust-motion"
+Documentation = "https://github.com/sjkim1127/rust-motion#readme"
+Repository = "https://github.com/sjkim1127/rust-motion"
+Issues = "https://github.com/sjkim1127/rust-motion/issues"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]

@@ -1,10 +1,13 @@
 //! `<Ellipse>` shape component.
 
+#[cfg(feature = "dioxus")]
 use crate::render_svg::RenderSvg;
 use crate::shape_output::ShapeOutput;
+#[cfg(feature = "dioxus")]
 use dioxus::prelude::*;
 
 /// Props for the `<Ellipse>` shape component.
+#[cfg(feature = "dioxus")]
 #[derive(Props, Clone, PartialEq)]
 pub struct EllipseProps {
     /// Horizontal radius in pixels.
@@ -41,6 +44,7 @@ pub fn make_ellipse(rx: f64, ry: f64) -> ShapeOutput {
 }
 
 /// Renders a procedural SVG Ellipse.
+#[cfg(feature = "dioxus")]
 #[component]
 pub fn Ellipse(props: EllipseProps) -> Element {
     let shape = make_ellipse(props.rx, props.ry);

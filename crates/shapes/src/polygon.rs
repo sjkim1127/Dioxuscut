@@ -1,10 +1,13 @@
 //! `<Polygon>` shape component (regular N-sided polygons).
 
+#[cfg(feature = "dioxus")]
 use crate::render_svg::RenderSvg;
+#[cfg(feature = "dioxus")]
 use dioxus::prelude::*;
 use std::f64::consts::PI;
 
 /// Props for the `<Polygon>` shape component.
+#[cfg(feature = "dioxus")]
 #[derive(Props, Clone, PartialEq)]
 pub struct PolygonProps {
     /// Number of sides/vertices (e.g., 6 for hexagon, 8 for octagon).
@@ -58,6 +61,7 @@ pub fn make_polygon(points: usize, radius: f64) -> (String, f64, f64) {
 }
 
 /// Renders a procedural SVG Polygon.
+#[cfg(feature = "dioxus")]
 #[component]
 pub fn Polygon(props: PolygonProps) -> Element {
     let (path, width, height) = make_polygon(props.points, props.radius);

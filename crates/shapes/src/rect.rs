@@ -1,9 +1,12 @@
 //! `<Rect>` shape component.
 
+#[cfg(feature = "dioxus")]
 use crate::render_svg::RenderSvg;
+#[cfg(feature = "dioxus")]
 use dioxus::prelude::*;
 
 /// Props for the `<Rect>` shape component.
+#[cfg(feature = "dioxus")]
 #[derive(Props, Clone, PartialEq)]
 pub struct RectProps {
     /// Width of the rectangle in pixels.
@@ -55,6 +58,7 @@ pub fn make_rect(width: f64, height: f64, corner_radius: f64) -> (String, f64, f
 }
 
 /// Renders a procedural SVG Rectangle.
+#[cfg(feature = "dioxus")]
 #[component]
 pub fn Rect(props: RectProps) -> Element {
     let (path, width, height) = make_rect(props.width, props.height, props.corner_radius);

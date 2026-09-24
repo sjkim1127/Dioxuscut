@@ -1,10 +1,13 @@
 //! `<Star>` shape component.
 
+#[cfg(feature = "dioxus")]
 use crate::render_svg::RenderSvg;
+#[cfg(feature = "dioxus")]
 use dioxus::prelude::*;
 use std::f64::consts::PI;
 
 /// Props for the `<Star>` shape component.
+#[cfg(feature = "dioxus")]
 #[derive(Props, Clone, PartialEq)]
 pub struct StarProps {
     /// Number of star points (e.g., 5 for classic star).
@@ -65,6 +68,7 @@ pub fn make_star(points: usize, inner_radius: f64, outer_radius: f64) -> (String
 }
 
 /// Renders a procedural SVG Star.
+#[cfg(feature = "dioxus")]
 #[component]
 pub fn Star(props: StarProps) -> Element {
     let (path, width, height) = make_star(props.points, props.inner_radius, props.outer_radius);

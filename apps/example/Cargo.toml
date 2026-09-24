@@ -19,7 +19,7 @@ dioxuscut-core      = { workspace = true }
 dioxuscut-animation = { workspace = true }
 dioxuscut-player    = { workspace = true }
 dioxuscut-transitions = { workspace = true }
-dioxuscut-shapes      = { workspace = true }
+dioxuscut-shapes      = { workspace = true, features = ["dioxus"] }
 tracing-subscriber  = { workspace = true }
 serde               = { workspace = true }
 serde_json          = { workspace = true }

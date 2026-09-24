@@ -9,7 +9,7 @@ repository.workspace  = true
 readme.workspace      = true
 
 [dependencies]
-dioxus              = { workspace = true }
+dioxus              = { workspace = true, optional = true }
 dioxuscut-animation = { workspace = true }
 dioxuscut-composition = { workspace = true }
 dioxuscut-rasterizer  = { workspace = true }
@@ -19,3 +19,6 @@ serde_json          = { workspace = true }
 [dev-dependencies]
 dioxuscut-paths     = { workspace = true }
 
+[features]
+default = ["dioxus"]
+dioxus = ["dep:dioxus"]

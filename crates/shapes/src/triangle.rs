@@ -1,9 +1,12 @@
 //! `<Triangle>` shape component.
 
+#[cfg(feature = "dioxus")]
 use crate::render_svg::RenderSvg;
+#[cfg(feature = "dioxus")]
 use dioxus::prelude::*;
 
 /// Props for the `<Triangle>` shape component.
+#[cfg(feature = "dioxus")]
 #[derive(Props, Clone, PartialEq)]
 pub struct TriangleProps {
     /// Side length of the equilateral triangle in pixels.
@@ -37,6 +40,7 @@ pub fn make_triangle(length: f64) -> (String, f64, f64) {
 }
 
 /// Renders a procedural SVG Triangle.
+#[cfg(feature = "dioxus")]
 #[component]
 pub fn Triangle(props: TriangleProps) -> Element {
     let (path, width, height) = make_triangle(props.length);

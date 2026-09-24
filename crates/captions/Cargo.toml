@@ -9,10 +9,14 @@ repository.workspace  = true
 readme.workspace      = true
 
 [dependencies]
-dioxus              = { workspace = true }
-dioxuscut-core      = { workspace = true }
+dioxus              = { workspace = true, optional = true }
+dioxuscut-core      = { workspace = true, optional = true }
 dioxuscut-composition = { workspace = true }
 dioxuscut-rasterizer  = { workspace = true }
 serde               = { workspace = true }
 serde_json          = { workspace = true }
 thiserror           = { workspace = true }
+
+[features]
+default = ["dioxus"]
+dioxus = ["dep:dioxus", "dep:dioxuscut-core"]

@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/sjkim1127/Dioxuscut/actions/workflows/ci.yml"><img src="https://github.com/sjkim1127/Dioxuscut/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/sjkim1127/rust-motion/actions/workflows/ci.yml"><img src="https://github.com/sjkim1127/rust-motion/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-4ec9b0?style=flat-square" alt="License" /></a>
   <a href="https://dioxuslabs.com/"><img src="https://img.shields.io/badge/Dioxus-0.6-e05c4b?style=flat-square&logo=rust&logoColor=white" alt="Dioxus 0.6" /></a>
   <img src="https://img.shields.io/badge/status-early%20development-f59e0b?style=flat-square" alt="Early development" />
@@ -72,11 +72,11 @@ Native compositions share one `Scene` contract between preview and export. `Vdom
 | `dioxuscut-animation` | Interpolation, easing, springs, and color interpolation |
 | `dioxuscut-composition` | Shared native composition contract, registry, and built-in composition |
 | `dioxuscut-core` | Dioxus composition timeline, sequence, freeze, Lottie, and hooks |
-| `dioxuscut-media` | Dioxus image, video, and audio elements for preview |
+| `dioxuscut-media` | Native media helpers and scene emitters, with optional Dioxus image, video, and audio components |
 | `dioxuscut-player` | Interactive player, controls, and native Scene preview adapter |
-| `dioxuscut-shapes` | Procedural SVG shapes |
+| `dioxuscut-shapes` | Procedural SVG paths and optional Dioxus components |
 | `dioxuscut-paths` | SVG path parsing, metrics, and transforms |
-| `dioxuscut-captions` | SRT parsing and kinetic caption helpers |
+| `dioxuscut-captions` | Subtitle parsing, native scene captions, and optional Dioxus components |
 | `dioxuscut-noise` | Deterministic simplex noise helpers |
 | `dioxuscut-transitions` | Dioxus fade and slide transitions |
 | `dioxuscut-rasterizer` | Scene IR, CPU renderer, experimental GPU renderer, FFmpeg pipe |
@@ -103,11 +103,12 @@ encoding contract across hosts. Choose the backend according to the scene:
 | `gpu` | Native shapes, gradients, SVG paths, cached image/video/Lottie textures, and text atlas draws | Unsupported shaders and complex compositing combinations still fall back to CPU |
 | `browser` | Tauri/Chromium, Three.js, WebGL, Canvas, and Remotion-compatible web APIs | Requires a browser worker and has process/transport overhead |
 
-This split is intentional: Dioxus can remain the lightweight composition and
-short-form path, while Tauri/Chromium provides ecosystem compatibility for
-Three.js and browser-native media. Native GPU texture and text paths are being
-expanded only when their output can be checked against CPU and browser
-references.
+Media, shapes, and captions expose Dioxus components through an optional
+Cargo feature. Their component API remains enabled by default for compatibility,
+while the native CLI and Python binding disable those features so headless native
+renders do not depend on Dioxus. Dioxus app dependencies enable the component
+feature explicitly. Native GPU texture and text paths are being expanded only
+when their output can be checked against CPU and browser references.
 
 Install FFmpeg on common platforms:
 

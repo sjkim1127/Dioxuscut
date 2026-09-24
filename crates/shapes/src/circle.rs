@@ -1,9 +1,12 @@
 //! `<Circle>` shape component.
 
+#[cfg(feature = "dioxus")]
 use crate::render_svg::RenderSvg;
+#[cfg(feature = "dioxus")]
 use dioxus::prelude::*;
 
 /// Props for the `<Circle>` shape component.
+#[cfg(feature = "dioxus")]
 #[derive(Props, Clone, PartialEq)]
 pub struct CircleProps {
     /// Radius of the circle in pixels.
@@ -36,6 +39,7 @@ pub fn make_circle(radius: f64) -> (String, f64, f64) {
 }
 
 /// Renders a procedural SVG Circle.
+#[cfg(feature = "dioxus")]
 #[component]
 pub fn Circle(props: CircleProps) -> Element {
     let (path, width, height) = make_circle(props.radius);

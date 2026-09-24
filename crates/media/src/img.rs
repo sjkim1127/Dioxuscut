@@ -2,6 +2,7 @@
 //!
 //! Equivalent to Remotion's `<Img>`.
 
+#[cfg(feature = "dioxus")]
 use dioxus::prelude::*;
 
 /// How to fit the image within its container.
@@ -33,6 +34,7 @@ impl ImageFit {
 }
 
 /// Props for `<Img>`.
+#[cfg(feature = "dioxus")]
 #[derive(Props, Clone, PartialEq)]
 pub struct ImgProps {
     /// Image source URL or static file path.
@@ -54,6 +56,7 @@ pub struct ImgProps {
 /// An image element that participates in the composition.
 ///
 /// Equivalent to Remotion's `<Img>`.
+#[cfg(feature = "dioxus")]
 #[component]
 pub fn Img(props: ImgProps) -> Element {
     let base_style = format!(

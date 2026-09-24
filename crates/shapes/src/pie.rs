@@ -1,11 +1,14 @@
 //! `<Pie>` shape component (pie chart / arc slices).
 
+#[cfg(feature = "dioxus")]
 use crate::render_svg::RenderSvg;
 use crate::shape_output::ShapeOutput;
+#[cfg(feature = "dioxus")]
 use dioxus::prelude::*;
 use std::f64::consts::PI;
 
 /// Props for the `<Pie>` shape component.
+#[cfg(feature = "dioxus")]
 #[derive(Props, Clone, PartialEq)]
 pub struct PieProps {
     /// Radius of the pie chart in pixels.
@@ -100,6 +103,7 @@ pub fn make_pie(
 }
 
 /// Renders a procedural SVG Pie.
+#[cfg(feature = "dioxus")]
 #[component]
 pub fn Pie(props: PieProps) -> Element {
     let shape = make_pie(

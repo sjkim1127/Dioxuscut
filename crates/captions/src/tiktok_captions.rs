@@ -1,7 +1,9 @@
 //! TikTok / Short-form kinetic caption pagination and Dioxus component.
 
 use crate::types::{CaptionPage, CaptionToken};
+#[cfg(feature = "dioxus")]
 use dioxus::prelude::*;
+#[cfg(feature = "dioxus")]
 use dioxuscut_core::hooks::{use_current_frame, use_video_config};
 
 /// Groups a flat list of [`CaptionToken`]s into pages containing at most `max_words_per_page` tokens.
@@ -31,6 +33,7 @@ pub fn create_tiktok_style_captions(
 }
 
 /// Props for the `<TikTokCaptions>` component.
+#[cfg(feature = "dioxus")]
 #[derive(Props, Clone, PartialEq)]
 pub struct TikTokCaptionsProps {
     /// Subtitle tokens.
@@ -62,6 +65,7 @@ pub struct TikTokCaptionsProps {
 }
 
 /// Dioxus component for rendering kinetic TikTok-style animated subtitles.
+#[cfg(feature = "dioxus")]
 #[component]
 pub fn TikTokCaptions(props: TikTokCaptionsProps) -> Element {
     let frame = use_current_frame();

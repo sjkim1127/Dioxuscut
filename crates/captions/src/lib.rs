@@ -21,6 +21,8 @@ pub use layout::{wrap_caption_tokens_to_lines, CaptionLineLayout};
 pub use line_wrapper::ensure_max_characters_per_line;
 pub use scene::SceneCaptions;
 pub use srt_parser::{format_srt_timestamp, parse_srt, serialize_srt, CaptionParseError};
-pub use tiktok_captions::{create_tiktok_style_captions, TikTokCaptions, TikTokCaptionsProps};
+pub use tiktok_captions::create_tiktok_style_captions;
+#[cfg(feature = "dioxus")]
+pub use tiktok_captions::{TikTokCaptions, TikTokCaptionsProps};
 pub use types::{CaptionPage, CaptionToken};
 pub use whisper_parser::{parse_vtt, parse_whisper_json, SubtitleError};

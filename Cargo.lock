@@ -2041,7 +2041,6 @@ dependencies = [
  "dioxuscut-captions",
  "dioxuscut-cli",
  "dioxuscut-composition",
- "dioxuscut-core",
  "dioxuscut-media",
  "dioxuscut-paths",
  "dioxuscut-rasterizer",
