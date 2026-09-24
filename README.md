@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/sjkim1127/Dioxuscut/main/assets/logo.svg" alt="Dioxuscut" width="100%" />
+  <img src="https://raw.githubusercontent.com/sjkim1127/rust-motion/main/assets/logo.svg" alt="Rust Motion" width="100%" />
 </p>
 
 <p align="center">
-  <b>Browser-free, code-driven video rendering in Rust, with Dioxus preview components.</b>
+  <b>Browser-free, code-driven video rendering in Rust, with optional Dioxus authoring and preview.</b>
 </p>
 
 <p align="center">
@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/status-early%20development-f59e0b?style=flat-square" alt="Early development" />
 </p>
 
-Dioxuscut is an early-stage programmatic video toolkit written in Rust. Its native export path renders a registered `NativeComposition` into a small scene graph, rasterizes frames with `tiny-skia` or `wgpu`, and streams a bounded window of ordered RGBA frames to FFmpeg while rendering subsequent frames. Local video frames are decoded through FFmpeg, and declared audio tracks are mixed into the encoded output. The same native scene can be displayed in the Dioxus Player through `NativeCompositionPreview`.
+Rust Motion is an early-stage programmatic video toolkit written in Rust. Its current published Rust and Python packages retain the dioxuscut naming. Its native export path renders a registered `NativeComposition` into a small scene graph, rasterizes frames with `tiny-skia` or `wgpu`, and streams a bounded window of ordered RGBA frames to FFmpeg while rendering subsequent frames. Local video frames are decoded through FFmpeg, and declared audio tracks are mixed into the encoded output. The same native scene can be displayed in the Dioxus Player through `NativeCompositionPreview`.
 
 The repository also contains Dioxus timeline, media, shape, transition, player, and Studio-preview components. The opt-in `dioxuscut-vdom` adapter can translate ordinary Dioxus elements, a documented CSS subset, text, local media elements, and basic SVG shapes into the native scene graph. Existing explicit `Scene` and `SceneEmitter` APIs remain available for precise rendering control.
 
@@ -124,7 +124,7 @@ The standalone CLI ships with the `HelloWorld` native composition:
 
 ```bash
 printf '%s\n' '{
-  "title": "Hello Dioxuscut",
+  "title": "Hello Rust Motion",
   "subtitle": "Bounded native rendering",
   "background_start": "#0f172a",
   "background_end": "#1e1b4b",
